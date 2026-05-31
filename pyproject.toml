@@ -21,14 +21,14 @@ requires-python = ">=3.9"
 dependencies = [
     # Enter your plugin library dependencies here
 ]
-
-[project.optional-dependencies]
-test = ["pytest"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
     "Framework :: InvenTree",
 ]
+
+[project.optional-dependencies]
+test = ["pytest"]
 [project.urls]
 Homepage = "https://github.com/Kibouu945/inventree-location"
 
