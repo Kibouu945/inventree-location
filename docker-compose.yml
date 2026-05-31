@@ -1,0 +1,95 @@
+services:
+  db:
+    image: postgres:17
+    container_name: inventree-location-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${INVENTREE_DB_NAME:-inventree}
+      POSTGRES_USER: ${INVENTREE_DB_USER:-pguser}
+      POSTGRES_PASSWORD: ${INVENTREE_DB_PASSWORD:-pgpassword}
+    ports:
+      - "${INVENTREE_DB_PORT_HOST:-5432}:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${INVENTREE_DB_USER:-pguser} -d ${INVENTREE_DB_NAME:-inventree}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  inventree:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inventree-location-server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      INVENTREE_DB_ENGINE: postgresql
+      INVENTREE_DB_NAME: ${INVENTREE_DB_NAME:-inventree}
+      INVENTREE_DB_HOST: db
+      INVENTREE_DB_PORT: "5432"
+      INVENTREE_DB_USER: ${INVENTREE_DB_USER:-pguser}
+      INVENTREE_DB_PASSWORD: ${INVENTREE_DB_PASSWORD:-pgpassword}
+      INVENTREE_PLUGINS_ENABLED: "True"
+      INVENTREE_PLUGIN_FILE: /home/inventree/data/plugins.txt
+      INVENTREE_DEBUG: "True"
+      INVENTREE_LOG_LEVEL: INFO
+      INVENTREE_ADMIN_USER: ${INVENTREE_ADMIN_USER:-admin}
+      INVENTREE_ADMIN_PASSWORD: ${INVENTREE_ADMIN_PASSWORD:-admin123}
+      INVENTREE_ADMIN_EMAIL: ${INVENTREE_ADMIN_EMAIL:-admin@example.com}
+      INVENTREE_AUTO_UPDATE: "True"
+      INVENTREE_SITE_URL: "http://localhost:8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/home/inventree/plugin
+      - inventree_data:/home/inventree/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inventree-location-worker
+    restart: unless-stopped
+    command: ["invoke", "worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+      inventree:
+        condition: service_started
+    environment:
+      INVENTREE_DB_ENGINE: postgresql
+      INVENTREE_DB_NAME: ${INVENTREE_DB_NAME:-inventree}
+      INVENTREE_DB_HOST: db
+      INVENTREE_DB_PORT: "5432"
+      INVENTREE_DB_USER: ${INVENTREE_DB_USER:-pguser}
+      INVENTREE_DB_PASSWORD: ${INVENTREE_DB_PASSWORD:-pgpassword}
+      INVENTREE_PLUGINS_ENABLED: "True"
+      INVENTREE_PLUGIN_FILE: /home/inventree/data/plugins.txt
+      INVENTREE_AUTO_UPDATE: "True"
+      INVENTREE_DEBUG: "True"
+      INVENTREE_LOG_LEVEL: INFO
+    volumes:
+      - .:/home/inventree/plugin
+      - inventree_data:/home/inventree/data
+
+  frontend:
+    image: node:20-alpine
+    container_name: inventree-location-frontend
+    restart: unless-stopped
+    working_dir: /app/frontend
+    command: ["sh", "-c", "npm install && npm run dev"]
+    depends_on:
+      - inventree
+    ports:
+      - "5174:5174"
+    volumes:
+      - .:/app
+      - /app/frontend/node_modules
+
+volumes:
+  db_data:
+  inventree_data:
