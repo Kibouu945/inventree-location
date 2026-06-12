@@ -15,7 +15,7 @@ des locations evenementielles pour InvenTree :
 10. Mouvement — Audit log des sorties/retours physiques
 """
 
-from django.contrib.auth.models import User
+from django.conf import settings
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
@@ -97,7 +97,7 @@ class Profile(models.Model):
     """Extension OneToOne du User Django — attributs metier."""
 
     user = models.OneToOneField(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="location_profile",
         verbose_name=_("utilisateur"),
@@ -148,7 +148,7 @@ class Manifestation(TimestampedModel):
         verbose_name=_("statut"),
     )
     organisateur = models.ForeignKey(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="manifestations_organisees",
         verbose_name=_("organisateur"),
@@ -328,13 +328,13 @@ class Reservation(TimestampedModel):
         verbose_name=_("prestation"),
     )
     demandeur = models.ForeignKey(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="reservations_demandees",
         verbose_name=_("demandeur"),
     )
     validateur = models.ForeignKey(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         null=True,
         blank=True,
@@ -446,7 +446,7 @@ class Mouvement(TimestampedModel):
     quantite = models.IntegerField(verbose_name=_("quantité"))
     date = models.DateTimeField(verbose_name=_("date"))  # noqa: A003
     utilisateur = models.ForeignKey(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

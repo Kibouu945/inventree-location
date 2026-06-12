@@ -28,7 +28,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "pytest-django"]
 [project.urls]
 Homepage = "https://github.com/Kibouu945/inventree-location"
 
