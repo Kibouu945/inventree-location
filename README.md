@@ -15,11 +15,11 @@ make up
 
 Au premier lancement, les migrations Django s'exécutent automatiquement et un utilisateur admin est créé.
 
-| Service | URL | Description |
-|---------|-----|-------------|
-| InvenTree | http://localhost:8000 | Interface principale (admin / admin123) |
+| Service      | URL                   | Description                               |
+| ------------ | --------------------- | ----------------------------------------- |
+| InvenTree    | http://localhost:8000 | Interface principale (admin / admin123)   |
 | Frontend dev | http://localhost:5174 | Serveur Vite pour le hot-reload du plugin |
-| PostgreSQL | localhost:5432 | Base de données |
+| PostgreSQL   | localhost:5432        | Base de données                           |
 
 ## Commandes disponibles
 
@@ -46,6 +46,25 @@ docker-compose.yml
 Le code Python du plugin (`inventree_location/`) est monté en volume dans les conteneurs InvenTree. Les modifications sont prises en compte après un redémarrage (`docker compose restart inventree backend`).
 
 Le code React (`frontend/src/`) bénéficie du hot-reload via Vite. Les composants du plugin sont chargés par InvenTree depuis le serveur de dev.
+
+## Détection des conflits de réservation
+
+Ce plugin implémente un algorithme de détection des conflits de réservation sur une période donnée.
+
+Règles de conflit :
+
+- même `part_id` (même référence de pièce)
+- statut de réservation pris en compte : `confirmée`, `livrée`, `retournée`
+- période en conflit quand les intervalles se chevauchent ou se touchent aux bornes
+- possibilité d'exclure une réservation en cours d'édition via `exclude_resa_id`
+
+Service principal :
+
+```python
+compute_conflicts(part_id, qty, start, end, exclude_resa_id=None)
+```
+
+Il retourne la liste des réservations conflictuelles pour la période donnée. Le paramètre `qty` est conservé pour la logique de gestion des ressources multiples et des quantités, mais la détection actuelle se base sur le recouvrement temporel des réservations.
 
 ## Configuration
 
