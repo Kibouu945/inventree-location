@@ -19,7 +19,7 @@ license = "MIT"
 keywords = ["inventree", "plugin"]
 requires-python = ">=3.9"
 dependencies = [
-    # Enter your plugin library dependencies here
+    "requests>=2.28",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -28,7 +28,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-django"]
+test = ["pytest", "pytest-django", "responses>=0.23"]
 [project.urls]
 Homepage = "https://github.com/Kibouu945/inventree-location"
 
