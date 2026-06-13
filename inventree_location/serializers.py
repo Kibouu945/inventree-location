@@ -1,19 +1,10 @@
-"""API serializers for the InvenTreeLocation plugin.
-
-In practice, you would define your custom serializers here.
-
-Ref: https://www.django-rest-framework.org/api-guide/serializers/
-"""
+"""API serializers for the InvenTreeLocation plugin."""
 
 from rest_framework import serializers
 
 
 class ExampleSerializer(serializers.Serializer):
-    """Example serializer for the InvenTreeLocation plugin.
-
-    This simply demonstrates how to create a serializer,
-    with a few example fields of different types.
-    """
+    """Example serializer for the InvenTreeLocation plugin."""
 
     class Meta:
         """Meta options for this serializer."""
@@ -41,3 +32,24 @@ class ExampleSerializer(serializers.Serializer):
         label="Today",
         help_text="The current date.",
     )
+
+
+class CatalogPartSerializer(serializers.Serializer):
+    """Serializer used to expose InvenTree parts in the rental catalog."""
+
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    description = serializers.CharField(read_only=True, allow_blank=True)
+    IPN = serializers.CharField(read_only=True, allow_blank=True, allow_null=True)
+    active = serializers.BooleanField(read_only=True)
+    category = serializers.IntegerField(source="category_id", read_only=True)
+    category_name = serializers.CharField(source="category.name", read_only=True)
+    rentable = serializers.SerializerMethodField()
+
+    def get_rentable(self, obj):
+        """Temporary rentable flag.
+
+        SCRUM-43 will introduce a dedicated rentable/non-rentable flag.
+        Until then, active parts are considered rentable.
+        """
+        return bool(getattr(obj, "active", False))
