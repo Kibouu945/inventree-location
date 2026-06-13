@@ -95,4 +95,3 @@ class MouvementAdmin(admin.ModelAdmin):
     list_display = ("article", "type", "quantite", "date", "utilisateur")
     list_filter = ("type",)
     search_fields = ("article__nom",)
-

@@ -67,10 +67,12 @@ class InvenTreeClient:
         self.base_url = base_url.rstrip("/") + "/"
         self.timeout = timeout
         self._session = session or requests.Session()
-        self._session.headers.update({
-            "Authorization": f"Token {token}",
-            "Accept": "application/json",
-        })
+        self._session.headers.update(
+            {
+                "Authorization": f"Token {token}",
+                "Accept": "application/json",
+            }
+        )
 
     # ------------------------------------------------------------------
     # Parts

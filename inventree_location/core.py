@@ -85,20 +85,22 @@ class InvenTreeLocation(
 
         # Only display this panel for the 'part' target
         if context.get("target_model") == "part":
-            panels.append({
-                "key": "inventree-location-panel",
-                "title": "InvenTree Location",
-                "description": "Custom panel description",
-                "icon": "ti:mood-smile:outline",
-                "source": self.plugin_static_file(
-                    "Panel.js:renderInvenTreeLocationPanel"
-                ),
-                "context": {
-                    # Provide additional context data to the panel
-                    "settings": self.get_settings_dict(),
-                    "foo": "bar",
-                },
-            })
+            panels.append(
+                {
+                    "key": "inventree-location-panel",
+                    "title": "InvenTree Location",
+                    "description": "Custom panel description",
+                    "icon": "ti:mood-smile:outline",
+                    "source": self.plugin_static_file(
+                        "Panel.js:renderInvenTreeLocationPanel"
+                    ),
+                    "context": {
+                        # Provide additional context data to the panel
+                        "settings": self.get_settings_dict(),
+                        "foo": "bar",
+                    },
+                }
+            )
 
         return panels
 
@@ -112,20 +114,22 @@ class InvenTreeLocation(
 
         items = []
 
-        items.append({
-            "key": "inventree-location-dashboard",
-            "title": "InvenTree Location Dashboard Item",
-            "description": "Custom dashboard item",
-            "icon": "ti:dashboard:outline",
-            "source": self.plugin_static_file(
-                "Dashboard.js:renderInvenTreeLocationDashboardItem"
-            ),
-            "context": {
-                # Provide additional context data to the dashboard item
-                "settings": self.get_settings_dict(),
-                "bar": "foo",
-            },
-        })
+        items.append(
+            {
+                "key": "inventree-location-dashboard",
+                "title": "InvenTree Location Dashboard Item",
+                "description": "Custom dashboard item",
+                "icon": "ti:dashboard:outline",
+                "source": self.plugin_static_file(
+                    "Dashboard.js:renderInvenTreeLocationDashboardItem"
+                ),
+                "context": {
+                    # Provide additional context data to the dashboard item
+                    "settings": self.get_settings_dict(),
+                    "bar": "foo",
+                },
+            }
+        )
 
         return items
 
