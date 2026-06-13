@@ -55,6 +55,53 @@ Copier `.env.docker` vers `.env` pour personnaliser les variables d'environnemen
 cp .env.docker .env
 ```
 
+## Authentification
+
+Le plugin **réutilise l'authentification d'InvenTree** (DRF Token). Aucun
+endpoint `/api/auth/login` ou `/api/auth/logout` n'est exposé par le plugin
+lui-même.
+
+Pour obtenir un token, appeler l'endpoint standard d'InvenTree :
+
+```bash
+curl -u admin:admin123 http://localhost:8000/api/user/token/
+# → {"token": "abc123..."}
+```
+
+Tous les endpoints du plugin (`/plugin/inventree-location/...`) exigent le
+header `Authorization: Token <token>` :
+
+```bash
+curl -H "Authorization: Token abc123..." \
+     http://localhost:8000/plugin/inventree-location/example/
+```
+
+Une requête sans token reçoit `401 Unauthorized`. La déconnexion (révocation
+du token) se fait via l'UI ou l'API d'InvenTree.
+
+## Client Python `InvenTreeClient`
+
+Le plugin fournit une classe `InvenTreeClient` pour interroger l'API REST
+d'InvenTree depuis du code Python (vues, scripts, tâches, tests d'intégration) :
+
+```python
+from inventree_location.clients import InvenTreeClient
+
+with InvenTreeClient(base_url="http://localhost:8000", token="abc123...") as c:
+    categories = c.list_categories()
+    parts = c.list_parts(category=3, active=True)
+    part = c.get_part(42)
+```
+
+Pour récupérer un client préconfiguré à partir des variables `INVENTREE_API_URL`
+et `INVENTREE_API_TOKEN` (settings Django ou environnement) :
+
+```python
+from inventree_location.clients import get_default_client
+
+client = get_default_client()
+```
+
 ## Installation manuelle (sans Docker)
 
 ```bash
