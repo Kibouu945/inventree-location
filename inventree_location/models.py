@@ -1,18 +1,17 @@
-"""Modeles Django du plugin InvenTreeLocation.
+"""Modèles Django du plugin InvenTreeLocation (zone MVP, schéma DB-01 v2).
 
-Ce module definit les 10 modeles metier du plugin de gestion
-des locations evenementielles pour InvenTree :
+Le catalogue matériel (`Part`, `PartCategory`) et l'historique stock
+(`StockItemTracking`) sont fournis nativement par InvenTree — on ne les
+recrée pas ici. Le plugin se limite à 8 tables propres :
 
-1. Groupe — Organisation scoute proprietaire (mono-tenant MVP)
+1. Groupe — Organisation scoute propriétaire (mono-tenant MVP)
 2. Profile — Extension OneToOne du User Django
-3. Manifestation — Evenement (camp, formation, week-end)
-4. Prestation — Sous-evenement / besoin materiel d'une Manifestation
-5. Lieu — Localisation physique rattachee a une Prestation
-6. Categorie — Categorie d'article (hierarchique parent/enfant)
-7. Article — Reference catalogue louable
-8. Reservation — Demande de location liee a une Prestation
-9. LigneReservation — Detail (Article x quantite) d'une Reservation
-10. Mouvement — Audit log des sorties/retours physiques
+3. RentableItem — Extension OneToOne de `part.Part` (drapeau louable + champs location)
+4. Manifestation — Événement (camp, formation, week-end)
+5. Prestation — Sous-événement / besoin matériel d'une Manifestation
+6. Lieu — Localisation physique rattachée à une Prestation
+7. Reservation — Demande de location liée à une Prestation
+8. LigneReservation — Détail (Part native × quantité) d'une Reservation
 """
 
 from django.conf import settings
@@ -43,15 +42,6 @@ class StatutReservation(models.TextChoices):
     CLOTUREE = "cloturee", _("Clôturée")
 
 
-class TypeMouvement(models.TextChoices):
-    ENTREE = "entree", _("Entrée")
-    SORTIE = "sortie", _("Sortie")
-    RETOUR = "retour", _("Retour")
-    PERTE = "perte", _("Perte")
-    REPARATION = "reparation", _("Réparation")
-    AJUSTEMENT = "ajustement", _("Ajustement")
-
-
 # ---------------------------------------------------------------------------
 # Mixin abstrait
 # ---------------------------------------------------------------------------
@@ -77,7 +67,7 @@ class TimestampedModel(models.Model):
 
 
 class Groupe(TimestampedModel):
-    """Organisation scoute proprietaire (mono-tenant MVP)."""
+    """Organisation scoute propriétaire (mono-tenant MVP)."""
 
     nom = models.CharField(max_length=120, unique=True, verbose_name=_("nom"))
     code = models.CharField(max_length=20, unique=True, verbose_name=_("code"))
@@ -94,7 +84,7 @@ class Groupe(TimestampedModel):
 
 
 class Profile(models.Model):
-    """Extension OneToOne du User Django — attributs metier."""
+    """Extension OneToOne du User Django — attributs métier."""
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -128,12 +118,62 @@ class Profile(models.Model):
 
 
 # ---------------------------------------------------------------------------
-# 2. Evenements
+# 2. Catalogue louable (extension du Part natif)
+# ---------------------------------------------------------------------------
+
+
+class RentableItem(TimestampedModel):
+    """Extension OneToOne de `part.Part` — drapeau louable + champs location.
+
+    On n'ajoute pas un catalogue parallèle : la référence matérielle reste
+    `part.Part` (natif InvenTree). Cette table porte uniquement les
+    attributs propres au domaine location.
+    """
+
+    part = models.OneToOneField(
+        "part.Part",
+        on_delete=models.CASCADE,
+        related_name="rentable_info",
+        verbose_name=_("part"),
+    )
+    is_rentable = models.BooleanField(default=True, verbose_name=_("louable"))
+    consommable = models.BooleanField(default=False, verbose_name=_("consommable"))
+    caution = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name=_("caution"),
+    )
+    valeur_remplacement = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name=_("valeur de remplacement"),
+    )
+    seuil_alerte_bas = models.PositiveIntegerField(
+        null=True, blank=True, verbose_name=_("seuil d'alerte bas")
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["part_id"]
+        verbose_name = _("article louable")
+        verbose_name_plural = _("articles louables")
+        indexes = [models.Index(fields=["is_rentable"])]
+
+    def __str__(self):
+        return f"RentableItem(part_id={self.part_id})"
+
+
+# ---------------------------------------------------------------------------
+# 3. Événements
 # ---------------------------------------------------------------------------
 
 
 class Manifestation(TimestampedModel):
-    """Evenement scout (camp, formation, week-end)."""
+    """Événement scout (camp, formation, week-end)."""
 
     nom = models.CharField(max_length=200, verbose_name=_("nom"))
     description = models.TextField(
@@ -171,7 +211,7 @@ class Manifestation(TimestampedModel):
 
 
 class Prestation(TimestampedModel):
-    """Creneau / service interne a une manifestation."""
+    """Créneau / service interne à une manifestation."""
 
     manifestation = models.ForeignKey(
         Manifestation,
@@ -197,7 +237,7 @@ class Prestation(TimestampedModel):
 
 
 class Lieu(TimestampedModel):
-    """Site physique rattache a une prestation."""
+    """Site physique rattaché à une prestation."""
 
     prestation = models.ForeignKey(
         Prestation,
@@ -236,90 +276,12 @@ class Lieu(TimestampedModel):
 
 
 # ---------------------------------------------------------------------------
-# 3. Catalogue materiel
-# ---------------------------------------------------------------------------
-
-
-class Categorie(TimestampedModel):
-    """Arborescence des categories (materiel camping, cuisine, etc.)."""
-
-    nom = models.CharField(max_length=100, verbose_name=_("nom"))
-    parent = models.ForeignKey(
-        "self",
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="enfants",
-        verbose_name=_("catégorie parente"),
-    )
-    description = models.TextField(
-        blank=True, default="", verbose_name=_("description")
-    )
-
-    class Meta:
-        app_label = "inventree_location"
-        ordering = ["nom"]
-        verbose_name = _("catégorie")
-        verbose_name_plural = _("catégories")
-
-    def __str__(self):
-        return self.nom
-
-
-class Article(TimestampedModel):
-    """Reference materiel — sera mappe sur inventree.Part en V2."""
-
-    reference = models.CharField(
-        max_length=50, unique=True, verbose_name=_("référence")
-    )
-    nom = models.CharField(max_length=200, verbose_name=_("nom"))
-    description = models.TextField(
-        blank=True, default="", verbose_name=_("description")
-    )
-    categorie = models.ForeignKey(
-        Categorie,
-        on_delete=models.PROTECT,
-        related_name="articles",
-        verbose_name=_("catégorie"),
-    )
-    groupe = models.ForeignKey(
-        Groupe,
-        on_delete=models.PROTECT,
-        related_name="articles",
-        verbose_name=_("groupe"),
-    )
-    quantite_totale = models.PositiveIntegerField(
-        default=0, verbose_name=_("quantité totale")
-    )
-    unite = models.CharField(max_length=20, default="piece", verbose_name=_("unité"))
-    valeur_unitaire = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        null=True,
-        blank=True,
-        verbose_name=_("valeur unitaire"),
-    )
-    photo = models.CharField(
-        max_length=255, blank=True, default="", verbose_name=_("photo")
-    )
-
-    class Meta:
-        app_label = "inventree_location"
-        ordering = ["reference"]
-        verbose_name = _("article")
-        verbose_name_plural = _("articles")
-
-    def __str__(self):
-        return f"{self.reference} — {self.nom}"
-
-
-# ---------------------------------------------------------------------------
-# 4. Reservations
+# 4. Réservations
 # ---------------------------------------------------------------------------
 
 
 class Reservation(TimestampedModel):
-    """Demande de materiel liee a une prestation."""
+    """Demande de matériel liée à une prestation."""
 
     prestation = models.ForeignKey(
         Prestation,
@@ -347,6 +309,8 @@ class Reservation(TimestampedModel):
         default=StatutReservation.BROUILLON,
         verbose_name=_("statut"),
     )
+    # CON-01 : confirmée malgré conflit de dispo détecté à la création
+    forced = models.BooleanField(default=False, verbose_name=_("forcée"))
     date_demande = models.DateTimeField(verbose_name=_("date de demande"))
     date_retrait_prevue = models.DateTimeField(
         null=True, blank=True, verbose_name=_("date de retrait prévue")
@@ -375,7 +339,7 @@ class Reservation(TimestampedModel):
 
 
 class LigneReservation(TimestampedModel):
-    """Detail d'une reservation : un article et ses quantites."""
+    """Détail d'une réservation : un Part natif et ses quantités."""
 
     reservation = models.ForeignKey(
         Reservation,
@@ -383,11 +347,11 @@ class LigneReservation(TimestampedModel):
         related_name="lignes",
         verbose_name=_("réservation"),
     )
-    article = models.ForeignKey(
-        Article,
+    part = models.ForeignKey(
+        "part.Part",
         on_delete=models.PROTECT,
-        related_name="lignes_reservation",
-        verbose_name=_("article"),
+        related_name="ligne_reservations",
+        verbose_name=_("part"),
     )
     quantite_demandee = models.PositiveIntegerField(verbose_name=_("quantité demandée"))
     quantite_livree = models.PositiveIntegerField(
@@ -396,72 +360,25 @@ class LigneReservation(TimestampedModel):
     quantite_retournee = models.PositiveIntegerField(
         default=0, verbose_name=_("quantité retournée")
     )
+    # Valeurs applicatives MVP : "ok" | "manquant" | "casse" (pas de choices au modèle)
+    etat_retour = models.CharField(
+        max_length=20, blank=True, default="", verbose_name=_("état du retour")
+    )
     commentaire = models.TextField(
         blank=True, default="", verbose_name=_("commentaire")
     )
 
     class Meta:
         app_label = "inventree_location"
-        ordering = ["reservation", "article"]
+        ordering = ["reservation", "part"]
         verbose_name = _("ligne de réservation")
         verbose_name_plural = _("lignes de réservation")
         constraints = [
             models.UniqueConstraint(
-                fields=["reservation", "article"],
-                name="unique_reservation_article",
+                fields=["reservation", "part"],
+                name="unique_reservation_part",
             ),
         ]
 
     def __str__(self):
-        return f"{self.article} x{self.quantite_demandee}"
-
-
-# ---------------------------------------------------------------------------
-# 5. Audit stock
-# ---------------------------------------------------------------------------
-
-
-class Mouvement(TimestampedModel):
-    """Historique stock — quantite signee."""
-
-    article = models.ForeignKey(
-        Article,
-        on_delete=models.PROTECT,
-        related_name="mouvements",
-        verbose_name=_("article"),
-    )
-    ligne_reservation = models.ForeignKey(
-        LigneReservation,
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="mouvements",
-        verbose_name=_("ligne de réservation"),
-    )
-    type = models.CharField(  # noqa: A003
-        max_length=20,
-        choices=TypeMouvement.choices,
-        verbose_name=_("type"),
-    )
-    quantite = models.IntegerField(verbose_name=_("quantité"))
-    date = models.DateTimeField(verbose_name=_("date"))  # noqa: A003
-    utilisateur = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="mouvements",
-        verbose_name=_("utilisateur"),
-    )
-    commentaire = models.TextField(
-        blank=True, default="", verbose_name=_("commentaire")
-    )
-
-    class Meta:
-        app_label = "inventree_location"
-        ordering = ["-date"]
-        verbose_name = _("mouvement")
-        verbose_name_plural = _("mouvements")
-
-    def __str__(self):
-        return f"{self.get_type_display()} — {self.article} ({self.quantite})"
+        return f"part#{self.part_id} x{self.quantite_demandee}"
