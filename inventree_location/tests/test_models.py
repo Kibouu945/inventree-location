@@ -1,4 +1,4 @@
-"""Tests des modeles Django du plugin InvenTreeLocation."""
+"""Tests des modèles Django du plugin InvenTreeLocation (schéma DB-01 v2 MVP)."""
 
 from datetime import timedelta
 
@@ -7,23 +7,22 @@ from django.contrib.auth import get_user_model
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
-User = get_user_model()
+from part.models import Part
 
 from inventree_location.models import (
-    Article,
-    Categorie,
     Groupe,
     Lieu,
     LigneReservation,
     Manifestation,
-    Mouvement,
     Prestation,
     Profile,
+    RentableItem,
     Reservation,
     StatutManifestation,
     StatutReservation,
-    TypeMouvement,
 )
+
+User = get_user_model()
 
 
 # ---------------------------------------------------------------------------
@@ -42,19 +41,8 @@ def groupe(db):
 
 
 @pytest.fixture
-def categorie(db):
-    return Categorie.objects.create(nom="Camping")
-
-
-@pytest.fixture
-def article(groupe, categorie):
-    return Article.objects.create(
-        reference="ART-001",
-        nom="Tente 4 places",
-        categorie=categorie,
-        groupe=groupe,
-        quantite_totale=10,
-    )
+def part(db):
+    return Part.objects.create(name="Tente 4 places", IPN="ART-001")
 
 
 @pytest.fixture
@@ -89,16 +77,15 @@ def reservation(prestation, user):
 
 
 @pytest.fixture
-def ligne(reservation, article):
+def ligne(reservation, part):
     return LigneReservation.objects.create(
         reservation=reservation,
-        article=article,
+        part=part,
         quantite_demandee=5,
     )
 
 
 def _get_on_delete(model, field_name):
-    """Retourne la strategie on_delete d'un champ FK."""
     return model._meta.get_field(field_name).remote_field.on_delete
 
 
@@ -160,6 +147,35 @@ class TestProfile:
 
     def test_on_delete_groupe_protect(self):
         assert _get_on_delete(Profile, "groupe") == models.PROTECT
+
+
+# ---------------------------------------------------------------------------
+# RentableItem
+# ---------------------------------------------------------------------------
+
+
+class TestRentableItem:
+    @pytest.mark.django_db
+    def test_creation(self, part):
+        item = RentableItem.objects.create(
+            part=part,
+            caution="50.00",
+            valeur_remplacement="200.00",
+            seuil_alerte_bas=2,
+        )
+        assert item.pk is not None
+        assert item.is_rentable is True
+        assert item.consommable is False
+        assert part.rentable_info == item
+
+    @pytest.mark.django_db
+    def test_one_to_one_unique(self, part):
+        RentableItem.objects.create(part=part)
+        with pytest.raises(IntegrityError), transaction.atomic():
+            RentableItem.objects.create(part=part)
+
+    def test_on_delete_part_cascade(self):
+        assert _get_on_delete(RentableItem, "part") == models.CASCADE
 
 
 # ---------------------------------------------------------------------------
@@ -226,59 +242,6 @@ class TestLieu:
 
 
 # ---------------------------------------------------------------------------
-# Categorie
-# ---------------------------------------------------------------------------
-
-
-class TestCategorie:
-    def test_creation(self, categorie):
-        assert categorie.pk is not None
-
-    def test_str(self, categorie):
-        assert str(categorie) == "Camping"
-
-    @pytest.mark.django_db
-    def test_hierarchie(self, categorie):
-        enfant = Categorie.objects.create(nom="Tentes", parent=categorie)
-        assert enfant.parent == categorie
-        assert categorie.enfants.count() == 1
-
-    def test_on_delete_parent_protect(self):
-        assert _get_on_delete(Categorie, "parent") == models.PROTECT
-
-
-# ---------------------------------------------------------------------------
-# Article
-# ---------------------------------------------------------------------------
-
-
-class TestArticle:
-    def test_creation(self, article):
-        assert article.pk is not None
-        assert article.quantite_totale == 10
-        assert article.unite == "piece"
-
-    def test_str(self, article):
-        assert str(article) == "ART-001 — Tente 4 places"
-
-    @pytest.mark.django_db
-    def test_reference_unique(self, article, groupe, categorie):
-        with pytest.raises(IntegrityError), transaction.atomic():
-            Article.objects.create(
-                reference="ART-001",
-                nom="Doublon",
-                categorie=categorie,
-                groupe=groupe,
-            )
-
-    def test_on_delete_categorie_protect(self):
-        assert _get_on_delete(Article, "categorie") == models.PROTECT
-
-    def test_on_delete_groupe_protect(self):
-        assert _get_on_delete(Article, "groupe") == models.PROTECT
-
-
-# ---------------------------------------------------------------------------
 # Reservation
 # ---------------------------------------------------------------------------
 
@@ -287,9 +250,21 @@ class TestReservation:
     def test_creation(self, reservation):
         assert reservation.pk is not None
         assert reservation.statut == StatutReservation.BROUILLON
+        assert reservation.forced is False
 
     def test_str(self, reservation):
         assert str(reservation) == f"Réservation #{reservation.pk} — Brouillon"
+
+    @pytest.mark.django_db
+    def test_forced_persists(self, prestation, user):
+        res = Reservation.objects.create(
+            prestation=prestation,
+            demandeur=user,
+            date_demande=timezone.now(),
+            forced=True,
+        )
+        res.refresh_from_db()
+        assert res.forced is True
 
     def test_on_delete_prestation_protect(self):
         assert _get_on_delete(Reservation, "prestation") == models.PROTECT
@@ -312,76 +287,30 @@ class TestLigneReservation:
         assert ligne.quantite_demandee == 5
         assert ligne.quantite_livree == 0
         assert ligne.quantite_retournee == 0
+        assert ligne.etat_retour == ""
 
     def test_str(self, ligne):
-        assert str(ligne) == "ART-001 — Tente 4 places x5"
+        assert str(ligne) == f"part#{ligne.part_id} x5"
 
     def test_on_delete_reservation_cascade(self):
         assert _get_on_delete(LigneReservation, "reservation") == models.CASCADE
 
-    def test_on_delete_article_protect(self):
-        assert _get_on_delete(LigneReservation, "article") == models.PROTECT
+    def test_on_delete_part_protect(self):
+        assert _get_on_delete(LigneReservation, "part") == models.PROTECT
 
     @pytest.mark.django_db
-    def test_unique_constraint(self, reservation, article):
+    def test_unique_constraint(self, reservation, part):
         LigneReservation.objects.create(
             reservation=reservation,
-            article=article,
+            part=part,
             quantite_demandee=3,
         )
         with pytest.raises(IntegrityError), transaction.atomic():
             LigneReservation.objects.create(
                 reservation=reservation,
-                article=article,
+                part=part,
                 quantite_demandee=1,
             )
-
-
-# ---------------------------------------------------------------------------
-# Mouvement
-# ---------------------------------------------------------------------------
-
-
-class TestMouvement:
-    @pytest.fixture
-    def mouvement(self, article, ligne, user):
-        return Mouvement.objects.create(
-            article=article,
-            ligne_reservation=ligne,
-            type=TypeMouvement.SORTIE,
-            quantite=-5,
-            date=timezone.now(),
-            utilisateur=user,
-        )
-
-    def test_creation(self, mouvement):
-        assert mouvement.pk is not None
-        assert mouvement.type == TypeMouvement.SORTIE
-        assert mouvement.quantite == -5
-
-    def test_str(self, mouvement):
-        assert "Sortie" in str(mouvement)
-        assert "-5" in str(mouvement)
-
-    def test_on_delete_article_protect(self):
-        assert _get_on_delete(Mouvement, "article") == models.PROTECT
-
-    def test_on_delete_ligne_cascade(self):
-        assert _get_on_delete(Mouvement, "ligne_reservation") == models.CASCADE
-
-    def test_on_delete_utilisateur_set_null(self):
-        assert _get_on_delete(Mouvement, "utilisateur") == models.SET_NULL
-
-    @pytest.mark.django_db
-    def test_creation_sans_ligne(self, article, user):
-        mouvement = Mouvement.objects.create(
-            article=article,
-            type=TypeMouvement.AJUSTEMENT,
-            quantite=10,
-            date=timezone.now(),
-            utilisateur=user,
-        )
-        assert mouvement.ligne_reservation is None
 
 
 # ---------------------------------------------------------------------------

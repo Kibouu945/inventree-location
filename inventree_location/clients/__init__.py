@@ -28,12 +28,28 @@ def get_default_client() -> InvenTreeClient:
 
 
 def _read_config(name: str) -> str | None:
+    """Lit `name` depuis les settings Django, ou à défaut depuis l'environnement.
+
+    On n'attrape que les deux cas attendus :
+      - `ImportError` : Django n'est pas installé (ex. outil packaging hors runtime).
+      - `ImproperlyConfigured` : Django importé mais settings non configurés.
+
+    Toute autre exception (AttributeError, typo, etc.) remonte pour ne pas
+    masquer un bug.
+    """
+
+    value = None
     try:
         from django.conf import settings
-
-        value = getattr(settings, name, None)
-        if value:
-            return value
-    except Exception:
+        from django.core.exceptions import ImproperlyConfigured
+    except ImportError:
         pass
+    else:
+        try:
+            value = getattr(settings, name, None)
+        except ImproperlyConfigured:
+            value = None
+
+    if value:
+        return value
     return os.environ.get(name)

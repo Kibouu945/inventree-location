@@ -7,8 +7,6 @@ que toutes les vues exposées par le plugin restent verrouillées derrière
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
@@ -37,14 +35,12 @@ class TestExampleViewAuth:
         request = factory.get("/plugin/inventree-location/example/")
         force_authenticate(request, user=user)
 
-        # La vue importe `part.models.Part` à l'exécution — on le mocke pour
-        # ne pas dépendre des données InvenTree dans ce test ciblé sur l'auth.
-        with patch("part.models.Part") as part_mock:
-            part_mock.objects.count.return_value = 0
-            response = ExampleView.as_view()(request)
+        response = ExampleView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
         assert "random_text" in response.data
+        # Hors InvenTree : `part.Part` est l'app factice (cf. tests/part/),
+        # la table est vide → 0. En production, c'est le vrai Part natif.
         assert response.data["part_count"] == 0
 
 

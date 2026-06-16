@@ -3,15 +3,13 @@
 from django.contrib import admin
 
 from .models import (
-    Article,
-    Categorie,
     Groupe,
     Lieu,
     LigneReservation,
     Manifestation,
-    Mouvement,
     Prestation,
     Profile,
+    RentableItem,
     Reservation,
 )
 
@@ -27,6 +25,13 @@ class ProfileAdmin(admin.ModelAdmin):
     list_display = ("user", "groupe", "telephone")
     list_filter = ("groupe",)
     search_fields = ("user__username", "user__email", "telephone")
+
+
+@admin.register(RentableItem)
+class RentableItemAdmin(admin.ModelAdmin):
+    list_display = ("part", "is_rentable", "consommable", "caution", "seuil_alerte_bas")
+    list_filter = ("is_rentable", "consommable")
+    search_fields = ("part__name", "part__IPN")
 
 
 @admin.register(Manifestation)
@@ -50,31 +55,10 @@ class LieuAdmin(admin.ModelAdmin):
     search_fields = ("nom", "adresse")
 
 
-@admin.register(Categorie)
-class CategorieAdmin(admin.ModelAdmin):
-    list_display = ("nom", "parent")
-    list_filter = ("parent",)
-    search_fields = ("nom",)
-
-
-@admin.register(Article)
-class ArticleAdmin(admin.ModelAdmin):
-    list_display = (
-        "reference",
-        "nom",
-        "categorie",
-        "groupe",
-        "quantite_totale",
-        "unite",
-    )
-    list_filter = ("categorie", "groupe")
-    search_fields = ("reference", "nom")
-
-
 @admin.register(Reservation)
 class ReservationAdmin(admin.ModelAdmin):
-    list_display = ("pk", "prestation", "demandeur", "statut", "date_demande")
-    list_filter = ("statut",)
+    list_display = ("pk", "prestation", "demandeur", "statut", "forced", "date_demande")
+    list_filter = ("statut", "forced")
     search_fields = ("demandeur__username",)
 
 
@@ -82,16 +66,10 @@ class ReservationAdmin(admin.ModelAdmin):
 class LigneReservationAdmin(admin.ModelAdmin):
     list_display = (
         "reservation",
-        "article",
+        "part",
         "quantite_demandee",
         "quantite_livree",
         "quantite_retournee",
+        "etat_retour",
     )
-    search_fields = ("article__nom",)
-
-
-@admin.register(Mouvement)
-class MouvementAdmin(admin.ModelAdmin):
-    list_display = ("article", "type", "quantite", "date", "utilisateur")
-    list_filter = ("type",)
-    search_fields = ("article__nom",)
+    search_fields = ("part__name", "part__IPN")

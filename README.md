@@ -17,7 +17,7 @@ Au premier lancement, les migrations Django s'exécutent automatiquement et un u
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| InvenTree | http://localhost:8000 | Interface principale (admin / admin123) |
+| InvenTree | http://localhost:8000 | Interface principale (identifiants admin dans `.env`) |
 | Frontend dev | http://localhost:5174 | Serveur Vite pour le hot-reload du plugin |
 | PostgreSQL | localhost:5432 | Base de données |
 
@@ -61,18 +61,21 @@ Le plugin **réutilise l'authentification d'InvenTree** (DRF Token). Aucun
 endpoint `/api/auth/login` ou `/api/auth/logout` n'est exposé par le plugin
 lui-même.
 
-Pour obtenir un token, appeler l'endpoint standard d'InvenTree :
+Pour obtenir un token, appeler l'endpoint standard d'InvenTree. Les credentials
+ci-dessous sont des **placeholders** : remplace-les par tes propres identifiants
+et ne commit jamais de vrais secrets dans le repo.
 
 ```bash
-curl -u admin:admin123 http://localhost:8000/api/user/token/
-# → {"token": "abc123..."}
+# Dev local uniquement.
+curl -u <USERNAME>:<PASSWORD> http://localhost:8000/api/user/token/
+# → {"token": "<TOKEN>"}
 ```
 
 Tous les endpoints du plugin (`/plugin/inventree-location/...`) exigent le
 header `Authorization: Token <token>` :
 
 ```bash
-curl -H "Authorization: Token abc123..." \
+curl -H "Authorization: Token <TOKEN>" \
      http://localhost:8000/plugin/inventree-location/example/
 ```
 
@@ -87,7 +90,7 @@ d'InvenTree depuis du code Python (vues, scripts, tâches, tests d'intégration)
 ```python
 from inventree_location.clients import InvenTreeClient
 
-with InvenTreeClient(base_url="http://localhost:8000", token="abc123...") as c:
+with InvenTreeClient(base_url="http://localhost:8000", token="<TOKEN>") as c:
     categories = c.list_categories()
     parts = c.list_parts(category=3, active=True)
     part = c.get_part(42)
