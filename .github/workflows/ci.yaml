@@ -19,7 +19,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install dependencies
-        run: pip install ruff pytest -e .
+        run: pip install ruff -e ".[test]"
       - name: Ruff lint
         run: ruff check
       - name: Ruff format
