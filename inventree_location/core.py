@@ -40,7 +40,6 @@ class InvenTreeLocation(
     # Plugin settings (from SettingsMixin)
     # Ref: https://docs.inventree.org/en/latest/plugins/mixins/settings/
     SETTINGS = {
-        # Define your plugin settings here...
         "CUSTOM_VALUE": {
             "name": "Custom Value",
             "description": "A custom value",
@@ -53,7 +52,6 @@ class InvenTreeLocation(
     # Ref: https://docs.inventree.org/en/latest/plugins/mixins/event/
     def wants_process_event(self, event: str) -> bool:
         """Return True if the plugin wants to process the given event."""
-        # Example: only process the 'create part' event
         return event == "part_part.created"
 
     def process_event(self, event: str, *args, **kwargs) -> None:
@@ -67,11 +65,19 @@ class InvenTreeLocation(
     def setup_urls(self):
         """Configure custom URL endpoints for this plugin."""
         from django.urls import path
-        from .views import ExampleView
+
+        from .views import (
+            ExampleView,
+            GeocodeAddressView,
+            LieuDetailView,
+            LieuListCreateView,
+        )
 
         return [
-            # Provide path to a simple custom view - replace this with your own views
             path("example/", ExampleView.as_view(), name="example-view"),
+            path("lieux/", LieuListCreateView.as_view(), name="lieu-list-create"),
+            path("lieux/<int:pk>/", LieuDetailView.as_view(), name="lieu-detail"),
+            path("geocode/", GeocodeAddressView.as_view(), name="geocode-address"),
         ]
 
     # User interface elements (from UserInterfaceMixin)
@@ -85,20 +91,21 @@ class InvenTreeLocation(
 
         # Only display this panel for the 'part' target
         if context.get("target_model") == "part":
-            panels.append({
-                "key": "inventree-location-panel",
-                "title": "InvenTree Location",
-                "description": "Custom panel description",
-                "icon": "ti:mood-smile:outline",
-                "source": self.plugin_static_file(
-                    "Panel.js:renderInvenTreeLocationPanel"
-                ),
-                "context": {
-                    # Provide additional context data to the panel
-                    "settings": self.get_settings_dict(),
-                    "foo": "bar",
-                },
-            })
+            panels.append(
+                {
+                    "key": "inventree-location-panel",
+                    "title": "InvenTree Location",
+                    "description": "Custom panel description",
+                    "icon": "ti:mood-smile:outline",
+                    "source": self.plugin_static_file(
+                        "Panel.js:renderInvenTreeLocationPanel"
+                    ),
+                    "context": {
+                        "settings": self.get_settings_dict(),
+                        "foo": "bar",
+                    },
+                }
+            )
 
         return panels
 
@@ -112,20 +119,21 @@ class InvenTreeLocation(
 
         items = []
 
-        items.append({
-            "key": "inventree-location-dashboard",
-            "title": "InvenTree Location Dashboard Item",
-            "description": "Custom dashboard item",
-            "icon": "ti:dashboard:outline",
-            "source": self.plugin_static_file(
-                "Dashboard.js:renderInvenTreeLocationDashboardItem"
-            ),
-            "context": {
-                # Provide additional context data to the dashboard item
-                "settings": self.get_settings_dict(),
-                "bar": "foo",
-            },
-        })
+        items.append(
+            {
+                "key": "inventree-location-dashboard",
+                "title": "InvenTree Location Dashboard Item",
+                "description": "Custom dashboard item",
+                "icon": "ti:dashboard:outline",
+                "source": self.plugin_static_file(
+                    "Dashboard.js:renderInvenTreeLocationDashboardItem"
+                ),
+                "context": {
+                    "settings": self.get_settings_dict(),
+                    "bar": "foo",
+                },
+            }
+        )
 
         return items
 

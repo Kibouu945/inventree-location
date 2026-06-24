@@ -50,7 +50,7 @@ class PrestationAdmin(admin.ModelAdmin):
 
 @admin.register(Lieu)
 class LieuAdmin(admin.ModelAdmin):
-    list_display = ("nom", "prestation", "capacite")
+    list_display = ("nom", "prestation", "adresse", "latitude", "longitude", "capacite")
     list_filter = ("prestation",)
     search_fields = ("nom", "adresse")
 
