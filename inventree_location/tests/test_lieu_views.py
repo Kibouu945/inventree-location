@@ -127,8 +127,8 @@ class TestLieuListCreate:
         response = LieuListCreateView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        assert len(response.data) == 1
-        assert response.data[0]["nom"] == "Terrain central"
+        assert len(response.data["results"]) == 1
+        assert response.data["results"][0]["nom"] == "Terrain central"
 
     def test_filter_by_prestation(self, factory, user, lieu, prestation):
         request = factory.get(LIEUX_URL, {"prestation": prestation.pk})
@@ -136,23 +136,23 @@ class TestLieuListCreate:
         response = LieuListCreateView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        assert len(response.data) == 1
+        assert len(response.data["results"]) == 1
 
         request = factory.get(LIEUX_URL, {"prestation": prestation.pk + 999})
         force_authenticate(request, user=user)
         response = LieuListCreateView.as_view()(request)
-        assert len(response.data) == 0
+        assert len(response.data["results"]) == 0
 
     def test_search_by_name(self, factory, user, lieu):
         request = factory.get(LIEUX_URL, {"search": "central"})
         force_authenticate(request, user=user)
         response = LieuListCreateView.as_view()(request)
-        assert len(response.data) == 1
+        assert len(response.data["results"]) == 1
 
         request = factory.get(LIEUX_URL, {"search": "introuvable"})
         force_authenticate(request, user=user)
         response = LieuListCreateView.as_view()(request)
-        assert len(response.data) == 0
+        assert len(response.data["results"]) == 0
 
     def test_create_persists_lieu(self, factory, user, prestation):
         payload = {
@@ -253,7 +253,7 @@ class TestGeocodeAddressView:
     def test_success_returns_coordinates(self, factory, user, monkeypatch):
         body = b'[{"display_name": "Paris, France", "lat": "48.8566", "lon": "2.3522"}]'
         monkeypatch.setattr(
-            "inventree_location.views.urlopen",
+            "inventree_location.serializers.urlopen",
             lambda *a, **k: _FakeNominatimResponse(body),
         )
 
@@ -268,7 +268,7 @@ class TestGeocodeAddressView:
 
     def test_no_result_returns_404(self, factory, user, monkeypatch):
         monkeypatch.setattr(
-            "inventree_location.views.urlopen",
+            "inventree_location.serializers.urlopen",
             lambda *a, **k: _FakeNominatimResponse(b"[]"),
         )
         request = factory.get(GEOCODE_URL, {"address": "zzzznowhere"})
@@ -280,7 +280,7 @@ class TestGeocodeAddressView:
         def _boom(*a, **k):
             raise URLError("nominatim down")
 
-        monkeypatch.setattr("inventree_location.views.urlopen", _boom)
+        monkeypatch.setattr("inventree_location.serializers.urlopen", _boom)
         request = factory.get(GEOCODE_URL, {"address": "Paris"})
         force_authenticate(request, user=user)
         response = GeocodeAddressView.as_view()(request)

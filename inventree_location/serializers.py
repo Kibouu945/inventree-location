@@ -16,13 +16,11 @@ def geocode_address(address):
     if not address:
         return None
 
-    query = urlencode(
-        {
-            "q": address,
-            "format": "json",
-            "limit": 1,
-        }
-    )
+    query = urlencode({
+        "q": address,
+        "format": "json",
+        "limit": 1,
+    })
 
     url = f"https://nominatim.openstreetmap.org/search?{query}"
 
