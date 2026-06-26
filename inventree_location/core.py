@@ -67,6 +67,7 @@ class InvenTreeLocation(
         from django.urls import path
 
         from .views import (
+            CatalogPartListView,
             ExampleView,
             GeocodeAddressView,
             LieuDetailView,
@@ -80,6 +81,7 @@ class InvenTreeLocation(
             path("lieux/", LieuListCreateView.as_view(), name="lieu-list-create"),
             path("lieux/<int:pk>/", LieuDetailView.as_view(), name="lieu-detail"),
             path("geocode/", GeocodeAddressView.as_view(), name="geocode-address"),
+            path("catalog/", CatalogPartListView.as_view(), name="catalog-part-list"),
             path(
                 "reservations/",
                 ReservationListCreateView.as_view(),
@@ -95,13 +97,11 @@ class InvenTreeLocation(
     # User interface elements (from UserInterfaceMixin)
     # Ref: https://docs.inventree.org/en/latest/plugins/mixins/ui/
 
-    # Custom UI panels
     def get_ui_panels(self, request, context: dict, **kwargs):
         """Return a list of custom panels to be rendered in the InvenTree user interface."""
 
         panels = []
 
-        # Only display this panel for the 'part' target
         if context.get("target_model") == "part":
             panels.append({
                 "key": "inventree-location-panel",
@@ -119,11 +119,9 @@ class InvenTreeLocation(
 
         return panels
 
-    # Custom dashboard items
     def get_ui_dashboard_items(self, request, context: dict, **kwargs):
         """Return a list of custom dashboard items to be rendered in the InvenTree user interface."""
 
-        # Example: only display for 'staff' users
         if not request.user or not request.user.is_staff:
             return []
 

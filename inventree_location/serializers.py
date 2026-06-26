@@ -205,3 +205,24 @@ class LieuSerializer(serializers.ModelSerializer):
 
         validated_data["latitude"] = result.get("latitude")
         validated_data["longitude"] = result.get("longitude")
+
+
+class CatalogPartSerializer(serializers.Serializer):
+    """Serializer used to expose InvenTree parts in the rental catalog."""
+
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    description = serializers.CharField(read_only=True, allow_blank=True)
+    IPN = serializers.CharField(read_only=True, allow_blank=True, allow_null=True)
+    active = serializers.BooleanField(read_only=True)
+    category = serializers.IntegerField(source="category_id", read_only=True)
+    category_name = serializers.CharField(source="category.name", read_only=True)
+    rentable = serializers.SerializerMethodField()
+
+    def get_rentable(self, obj):
+        """Temporary rentable flag.
+
+        SCRUM-43 will introduce a dedicated rentable/non-rentable flag.
+        Until then, active parts are considered rentable.
+        """
+        return bool(getattr(obj, "active", False))
