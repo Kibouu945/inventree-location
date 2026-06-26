@@ -1,8 +1,79 @@
 """API serializers for the InvenTreeLocation plugin."""
 
+import json
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
 from rest_framework import serializers
 
-from .models import Lieu
+from .models import Lieu, Reservation
+
+
+def geocode_address(address):
+    """Return GPS coordinates for an address using OpenStreetMap Nominatim."""
+
+    if not address:
+        return None
+
+    query = urlencode(
+        {
+            "q": address,
+            "format": "json",
+            "limit": 1,
+        }
+    )
+
+    url = f"https://nominatim.openstreetmap.org/search?{query}"
+
+    request = Request(
+        url,
+        headers={
+            "User-Agent": "inventree-location-plugin/0.1",
+        },
+    )
+
+    with urlopen(request, timeout=10) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    if not payload:
+        return None
+
+    first_result = payload[0]
+
+    return {
+        "address": address,
+        "display_name": first_result.get("display_name"),
+        "latitude": first_result.get("lat"),
+        "longitude": first_result.get("lon"),
+        "source": "OpenStreetMap Nominatim",
+    }
+
+
+class ReservationSerializer(serializers.ModelSerializer):
+    """Sérialiseur DRF pour le modèle Reservation."""
+
+    class Meta:
+        """Configuration du serializer Reservation."""
+
+        model = Reservation
+        fields = [
+            "id",
+            "prestation",
+            "demandeur",
+            "validateur",
+            "statut",
+            "forced",
+            "date_demande",
+            "date_retrait_prevue",
+            "date_retour_prevue",
+            "date_retrait_reelle",
+            "date_retour_reelle",
+            "commentaire",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
 
 
 class ExampleSerializer(serializers.Serializer):
@@ -37,7 +108,19 @@ class ExampleSerializer(serializers.Serializer):
 
 
 class LieuSerializer(serializers.ModelSerializer):
-    """Serializer for location places with GPS coordinates."""
+    """Serializer for location places with GPS coordinates.
+
+    If auto_geocode is set to true and an address is provided without
+    latitude / longitude, the serializer tries to fill GPS coordinates
+    automatically using the geocoding service.
+    """
+
+    auto_geocode = serializers.BooleanField(
+        write_only=True,
+        required=False,
+        default=False,
+        help_text="Active le géocodage automatique à partir de l'adresse.",
+    )
 
     class Meta:
         """Meta options for LieuSerializer."""
@@ -51,6 +134,7 @@ class LieuSerializer(serializers.ModelSerializer):
             "latitude",
             "longitude",
             "capacite",
+            "auto_geocode",
             "created_at",
             "updated_at",
         ]
@@ -79,3 +163,47 @@ class LieuSerializer(serializers.ModelSerializer):
             )
 
         return value
+
+    def create(self, validated_data):
+        """Create a place and optionally geocode its address."""
+
+        auto_geocode = validated_data.pop("auto_geocode", False)
+        self._apply_auto_geocode(validated_data, auto_geocode)
+
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        """Update a place and optionally geocode its address."""
+
+        auto_geocode = validated_data.pop("auto_geocode", False)
+        self._apply_auto_geocode(validated_data, auto_geocode)
+
+        return super().update(instance, validated_data)
+
+    def _apply_auto_geocode(self, validated_data, auto_geocode):
+        """Fill latitude and longitude from address when requested."""
+
+        if not auto_geocode:
+            return
+
+        address = validated_data.get("adresse")
+
+        if not address:
+            return
+
+        if validated_data.get("latitude") is not None:
+            return
+
+        if validated_data.get("longitude") is not None:
+            return
+
+        try:
+            result = geocode_address(address)
+        except (HTTPError, URLError, TimeoutError):
+            return
+
+        if not result:
+            return
+
+        validated_data["latitude"] = result.get("latitude")
+        validated_data["longitude"] = result.get("longitude")

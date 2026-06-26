@@ -1,37 +1,28 @@
-"""API views for the InvenTreeLocation plugin.
-
-In practice, you would define your custom views here.
-
-Ref: https://www.django-rest-framework.org/api-guide/views/
-"""
+"""API views for the InvenTreeLocation plugin."""
 
 from datetime import date
-import json
 import random
 import string
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 from rest_framework import generics, permissions, status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Lieu
-from .serializers import ExampleSerializer, LieuSerializer
+from .models import Lieu, Reservation
+from .serializers import (
+    ExampleSerializer,
+    LieuSerializer,
+    ReservationSerializer,
+    geocode_address,
+)
 
 
 class ExampleView(APIView):
-    """Example API view for the InvenTreeLocation plugin.
+    """Example API view for the InvenTreeLocation plugin."""
 
-    This view returns some very simple example data,
-    but the concept can be extended to include more complex logic.
-    """
-
-    # You can control which users can access this view using DRF permissions
     permission_classes = [permissions.IsAuthenticated]
-
-    # Control how the response is formatted
     serializer_class = ExampleSerializer
 
     def get(self, request, *args, **kwargs):
@@ -47,10 +38,17 @@ class ExampleView(APIView):
             }
         )
 
-        # Serializer must be validated before it can be returned to the client
         response_serializer.is_valid(raise_exception=True)
 
         return Response(response_serializer.data, status=200)
+
+
+class LieuPagination(PageNumberPagination):
+    """Pagination for location places."""
+
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
 
 
 class LieuListCreateView(generics.ListCreateAPIView):
@@ -58,6 +56,7 @@ class LieuListCreateView(generics.ListCreateAPIView):
 
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = LieuSerializer
+    pagination_class = LieuPagination
 
     def get_queryset(self):
         """Return places, with optional filters."""
@@ -95,13 +94,7 @@ class LieuDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 class GeocodeAddressView(APIView):
-    """Geocode an address and return latitude / longitude.
-
-    This endpoint uses OpenStreetMap Nominatim.
-    It does not save data directly in the database.
-    The frontend or another backend workflow can use the response
-    to fill latitude and longitude on a Lieu.
-    """
+    """Geocode an address and return latitude / longitude."""
 
     permission_classes = [permissions.IsAuthenticated]
 
@@ -117,7 +110,7 @@ class GeocodeAddressView(APIView):
             )
 
         try:
-            result = self._geocode_address(address)
+            result = geocode_address(address)
         except (HTTPError, URLError, TimeoutError) as error:
             return Response(
                 {
@@ -135,36 +128,28 @@ class GeocodeAddressView(APIView):
 
         return Response(result, status=status.HTTP_200_OK)
 
-    def _geocode_address(self, address):
-        """Call Nominatim and return the first result."""
 
-        query = urlencode({
-            "q": address,
-            "format": "json",
-            "limit": 1,
-        })
+class ReservationListCreateView(generics.ListCreateAPIView):
+    """CRUD réservation — partie collection.
 
-        url = f"https://nominatim.openstreetmap.org/search?{query}"
+    - GET  : liste toutes les réservations.
+    - POST : crée une nouvelle réservation à partir des données envoyées.
+    """
 
-        request = Request(
-            url,
-            headers={
-                "User-Agent": "inventree-location-plugin/0.1",
-            },
-        )
+    queryset = Reservation.objects.all()
+    serializer_class = ReservationSerializer
+    permission_classes = [permissions.IsAuthenticated]
 
-        with urlopen(request, timeout=10) as response:
-            payload = json.loads(response.read().decode("utf-8"))
 
-        if not payload:
-            return None
+class ReservationDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """CRUD réservation — partie instance unique.
 
-        first_result = payload[0]
+    - GET    : lit une réservation.
+    - PUT    : remplace l'intégralité de ses champs.
+    - PATCH  : modifie partiellement ses champs.
+    - DELETE : la supprime.
+    """
 
-        return {
-            "address": address,
-            "display_name": first_result.get("display_name"),
-            "latitude": first_result.get("lat"),
-            "longitude": first_result.get("lon"),
-            "source": "OpenStreetMap Nominatim",
-        }
+    queryset = Reservation.objects.all()
+    serializer_class = ReservationSerializer
+    permission_classes = [permissions.IsAuthenticated]

@@ -71,6 +71,8 @@ class InvenTreeLocation(
             GeocodeAddressView,
             LieuDetailView,
             LieuListCreateView,
+            ReservationDetailView,
+            ReservationListCreateView,
         )
 
         return [
@@ -78,6 +80,16 @@ class InvenTreeLocation(
             path("lieux/", LieuListCreateView.as_view(), name="lieu-list-create"),
             path("lieux/<int:pk>/", LieuDetailView.as_view(), name="lieu-detail"),
             path("geocode/", GeocodeAddressView.as_view(), name="geocode-address"),
+            path(
+                "reservations/",
+                ReservationListCreateView.as_view(),
+                name="reservation-list",
+            ),
+            path(
+                "reservations/<int:pk>/",
+                ReservationDetailView.as_view(),
+                name="reservation-detail",
+            ),
         ]
 
     # User interface elements (from UserInterfaceMixin)
@@ -91,19 +103,21 @@ class InvenTreeLocation(
 
         # Only display this panel for the 'part' target
         if context.get("target_model") == "part":
-            panels.append({
-                "key": "inventree-location-panel",
-                "title": "InvenTree Location",
-                "description": "Custom panel description",
-                "icon": "ti:mood-smile:outline",
-                "source": self.plugin_static_file(
-                    "Panel.js:renderInvenTreeLocationPanel"
-                ),
-                "context": {
-                    "settings": self.get_settings_dict(),
-                    "foo": "bar",
-                },
-            })
+            panels.append(
+                {
+                    "key": "inventree-location-panel",
+                    "title": "InvenTree Location",
+                    "description": "Custom panel description",
+                    "icon": "ti:mood-smile:outline",
+                    "source": self.plugin_static_file(
+                        "Panel.js:renderInvenTreeLocationPanel"
+                    ),
+                    "context": {
+                        "settings": self.get_settings_dict(),
+                        "foo": "bar",
+                    },
+                }
+            )
 
         return panels
 
@@ -117,19 +131,21 @@ class InvenTreeLocation(
 
         items = []
 
-        items.append({
-            "key": "inventree-location-dashboard",
-            "title": "InvenTree Location Dashboard Item",
-            "description": "Custom dashboard item",
-            "icon": "ti:dashboard:outline",
-            "source": self.plugin_static_file(
-                "Dashboard.js:renderInvenTreeLocationDashboardItem"
-            ),
-            "context": {
-                "settings": self.get_settings_dict(),
-                "bar": "foo",
-            },
-        })
+        items.append(
+            {
+                "key": "inventree-location-dashboard",
+                "title": "InvenTree Location Dashboard Item",
+                "description": "Custom dashboard item",
+                "icon": "ti:dashboard:outline",
+                "source": self.plugin_static_file(
+                    "Dashboard.js:renderInvenTreeLocationDashboardItem"
+                ),
+                "context": {
+                    "settings": self.get_settings_dict(),
+                    "bar": "foo",
+                },
+            }
+        )
 
         return items
 
