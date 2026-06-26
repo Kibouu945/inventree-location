@@ -1,33 +1,28 @@
-"""API views for the InvenTreeLocation plugin.
-
-In practice, you would define your custom views here.
-
-Ref: https://www.django-rest-framework.org/api-guide/views/
-"""
+"""API views for the InvenTreeLocation plugin."""
 
 from datetime import date
 import random
 import string
+from urllib.error import HTTPError, URLError
 
-from rest_framework import generics, permissions
+from rest_framework import generics, permissions, status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Reservation
-from .serializers import ExampleSerializer, ReservationSerializer
+from .models import Lieu, Reservation
+from .serializers import (
+    ExampleSerializer,
+    LieuSerializer,
+    ReservationSerializer,
+    geocode_address,
+)
 
 
 class ExampleView(APIView):
-    """Example API view for the InvenTreeLocation plugin.
+    """Example API view for the InvenTreeLocation plugin."""
 
-    This view returns some very simple example data,
-    but the concept can be extended to include more complex logic.
-    """
-
-    # You can control which users can access this view using DRF permissions
     permission_classes = [permissions.IsAuthenticated]
-
-    # Control how the response is formatted
     serializer_class = ExampleSerializer
 
     def get(self, request, *args, **kwargs):
@@ -43,18 +38,102 @@ class ExampleView(APIView):
             }
         )
 
-        # Serializer must be validated before it can be returned to the client
         response_serializer.is_valid(raise_exception=True)
 
         return Response(response_serializer.data, status=200)
 
 
+class LieuPagination(PageNumberPagination):
+    """Pagination for location places."""
+
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class LieuListCreateView(generics.ListCreateAPIView):
+    """List and create places with GPS coordinates."""
+
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LieuSerializer
+    pagination_class = LieuPagination
+
+    def get_queryset(self):
+        """Return places, with optional filters."""
+
+        queryset = (
+            Lieu.objects.select_related("prestation", "prestation__manifestation")
+            .all()
+            .order_by("nom")
+        )
+
+        prestation_id = self.request.query_params.get("prestation")
+        search = self.request.query_params.get("search")
+
+        if prestation_id:
+            queryset = queryset.filter(prestation_id=prestation_id)
+
+        if search:
+            queryset = queryset.filter(nom__icontains=search)
+
+        return queryset
+
+
+class LieuDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Retrieve, update or delete a place.
+
+    This endpoint allows manual update of GPS coordinates:
+    - adresse
+    - latitude
+    - longitude
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LieuSerializer
+    queryset = Lieu.objects.select_related("prestation", "prestation__manifestation")
+
+
+class GeocodeAddressView(APIView):
+    """Geocode an address and return latitude / longitude."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        """Return GPS coordinates for a given address."""
+
+        address = request.query_params.get("address", "").strip()
+
+        if not address:
+            return Response(
+                {"detail": "Le paramètre address est obligatoire."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            result = geocode_address(address)
+        except (HTTPError, URLError, TimeoutError) as error:
+            return Response(
+                {
+                    "detail": "Le service de géocodage est temporairement indisponible.",
+                    "error": str(error),
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        if result is None:
+            return Response(
+                {"detail": "Aucune coordonnée trouvée pour cette adresse."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(result, status=status.HTTP_200_OK)
+
+
 class ReservationListCreateView(generics.ListCreateAPIView):
-    """CRUD réservation — partie "collection".
+    """CRUD réservation — partie collection.
 
     - GET  : liste toutes les réservations.
-    - POST : crée une nouvelle réservation à partir des données envoyées
-      (validées par `ReservationSerializer`).
+    - POST : crée une nouvelle réservation à partir des données envoyées.
     """
 
     queryset = Reservation.objects.all()
@@ -63,7 +142,7 @@ class ReservationListCreateView(generics.ListCreateAPIView):
 
 
 class ReservationDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """CRUD réservation — partie "instance unique" (identifiée par `pk`).
+    """CRUD réservation — partie instance unique.
 
     - GET    : lit une réservation.
     - PUT    : remplace l'intégralité de ses champs.
