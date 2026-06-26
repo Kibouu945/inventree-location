@@ -9,11 +9,12 @@ from datetime import date
 import random
 import string
 
-from rest_framework import permissions
+from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .serializers import ExampleSerializer
+from .models import Reservation
+from .serializers import ExampleSerializer, ReservationSerializer
 
 
 class ExampleView(APIView):
@@ -46,3 +47,30 @@ class ExampleView(APIView):
         response_serializer.is_valid(raise_exception=True)
 
         return Response(response_serializer.data, status=200)
+
+
+class ReservationListCreateView(generics.ListCreateAPIView):
+    """CRUD réservation — partie "collection".
+
+    - GET  : liste toutes les réservations.
+    - POST : crée une nouvelle réservation à partir des données envoyées
+      (validées par `ReservationSerializer`).
+    """
+
+    queryset = Reservation.objects.all()
+    serializer_class = ReservationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+
+class ReservationDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """CRUD réservation — partie "instance unique" (identifiée par `pk`).
+
+    - GET    : lit une réservation.
+    - PUT    : remplace l'intégralité de ses champs.
+    - PATCH  : modifie partiellement ses champs.
+    - DELETE : la supprime.
+    """
+
+    queryset = Reservation.objects.all()
+    serializer_class = ReservationSerializer
+    permission_classes = [permissions.IsAuthenticated]
