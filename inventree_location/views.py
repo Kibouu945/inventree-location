@@ -12,6 +12,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Lieu, RentableItem, Reservation
+from .permissions import (
+    CatalogPermission,
+    LieuPermission,
+    ReservationPermission,
+)
 from .serializers import (
     CatalogPartSerializer,
     ExampleSerializer,
@@ -64,7 +69,7 @@ class CatalogPagination(PageNumberPagination):
 class LieuListCreateView(generics.ListCreateAPIView):
     """List and create places with GPS coordinates."""
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [LieuPermission]
     serializer_class = LieuSerializer
     pagination_class = LieuPagination
 
@@ -98,7 +103,7 @@ class LieuDetailView(generics.RetrieveUpdateDestroyAPIView):
     - longitude
     """
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [LieuPermission]
     serializer_class = LieuSerializer
     queryset = Lieu.objects.select_related("prestation", "prestation__manifestation")
 
@@ -106,7 +111,7 @@ class LieuDetailView(generics.RetrieveUpdateDestroyAPIView):
 class GeocodeAddressView(APIView):
     """Geocode an address and return latitude / longitude."""
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [LieuPermission]
 
     def get(self, request, *args, **kwargs):
         """Return GPS coordinates for a given address."""
@@ -152,7 +157,7 @@ class ReservationListCreateView(generics.ListCreateAPIView):
     """
 
     serializer_class = ReservationSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [ReservationPermission]
 
     def get_queryset(self):
         """Retourne les réservations, filtrées par statut et période."""
@@ -187,7 +192,7 @@ class ReservationDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     queryset = Reservation.objects.all()
     serializer_class = ReservationSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [ReservationPermission]
 
 
 class CatalogPartListView(APIView):
@@ -204,7 +209,7 @@ class CatalogPartListView(APIView):
     associé est considéré louable par défaut.
     """
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [CatalogPermission]
     serializer_class = CatalogPartSerializer
     pagination_class = CatalogPagination
 
@@ -328,7 +333,7 @@ class RentableFlagBulkUpdateView(APIView):
     Crée le RentableItem associé s'il n'existe pas encore.
     """
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [CatalogPermission]
 
     def patch(self, request, *args, **kwargs):
         """Applique les drapeaux fournis à la liste de parts."""

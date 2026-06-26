@@ -33,7 +33,13 @@ def factory():
 
 @pytest.fixture
 def user(db):
-    return User.objects.create_user(username="alice", password="pwd12345")
+    from django.contrib.auth.models import Group
+
+    from inventree_location import roles
+
+    account = User.objects.create_user(username="alice", password="pwd12345")
+    account.groups.add(Group.objects.get(name=roles.GESTIONNAIRE))
+    return account
 
 
 @pytest.fixture
@@ -99,15 +105,15 @@ class TestPermissionClassesAreSet:
 
         assert IsAuthenticated in ExampleView.permission_classes
 
-    def test_reservation_list_create_view_requires_authentication(self):
-        from rest_framework.permissions import IsAuthenticated
+    def test_reservation_list_create_view_uses_role_permission(self):
+        from inventree_location.permissions import ReservationPermission
 
-        assert IsAuthenticated in ReservationListCreateView.permission_classes
+        assert ReservationPermission in ReservationListCreateView.permission_classes
 
-    def test_reservation_detail_view_requires_authentication(self):
-        from rest_framework.permissions import IsAuthenticated
+    def test_reservation_detail_view_uses_role_permission(self):
+        from inventree_location.permissions import ReservationPermission
 
-        assert IsAuthenticated in ReservationDetailView.permission_classes
+        assert ReservationPermission in ReservationDetailView.permission_classes
 
 
 # ---------------------------------------------------------------------------
