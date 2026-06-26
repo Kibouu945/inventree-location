@@ -1,9 +1,20 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from inventree_location.conflicts import (
     ReservationRecord,
     compute_conflicts,
     find_conflicting_reservations,
+)
+from inventree_location.models import (
+    Groupe,
+    LigneReservation,
+    Manifestation,
+    Prestation,
+    Reservation,
 )
 
 
@@ -175,3 +186,111 @@ def test_compute_conflicts_requires_valid_period():
         assert str(exc) == "start must be before or equal to end"
     else:
         assert False, "ValueError not raised"
+
+
+# ---------------------------------------------------------------------------
+# Tests DB de compute_conflicts (CON-01)
+#
+# compute_conflicts interroge la base réelle ; ces tests garantissent que la
+# requête ORM cible le bon champ (lignes__part) et détecte les chevauchements.
+# ---------------------------------------------------------------------------
+
+
+def _make_reservation(prestation, user, part, *, statut, start, end):
+    reservation = Reservation.objects.create(
+        prestation=prestation,
+        demandeur=user,
+        date_demande=timezone.now(),
+        statut=statut,
+        date_retrait_prevue=start,
+        date_retour_prevue=end,
+    )
+    LigneReservation.objects.create(
+        reservation=reservation, part=part, quantite_demandee=1
+    )
+    return reservation
+
+
+@pytest.fixture
+def conflict_setup(db):
+    from part.models import Part
+
+    user = get_user_model().objects.create_user(username="bob", password="pwd12345")
+    groupe = Groupe.objects.create(nom="Jambville", code="JAM")
+    now = timezone.now().replace(microsecond=0)
+    manifestation = Manifestation.objects.create(
+        nom="Camp",
+        date_debut=now,
+        date_fin=now,
+        organisateur=user,
+        groupe=groupe,
+    )
+    prestation = Prestation.objects.create(
+        manifestation=manifestation, nom="P", date_debut=now, date_fin=now
+    )
+    part = Part.objects.create(name="Tente")
+    other_part = Part.objects.create(name="Réchaud")
+    return {
+        "user": user,
+        "prestation": prestation,
+        "part": part,
+        "other_part": other_part,
+        "now": now,
+    }
+
+
+@pytest.mark.django_db
+def test_compute_conflicts_detects_overlap(conflict_setup):
+    now = conflict_setup["now"]
+    resa = _make_reservation(
+        conflict_setup["prestation"],
+        conflict_setup["user"],
+        conflict_setup["part"],
+        statut="validee",
+        start=now,
+        end=now + timedelta(days=2),
+    )
+
+    conflicts = compute_conflicts(
+        conflict_setup["part"].pk,
+        1,
+        now + timedelta(days=1),
+        now + timedelta(days=3),
+    )
+
+    assert [r.pk for r in conflicts] == [resa.pk]
+
+
+@pytest.mark.django_db
+def test_compute_conflicts_ignores_other_part_and_excluded(conflict_setup):
+    now = conflict_setup["now"]
+    resa = _make_reservation(
+        conflict_setup["prestation"],
+        conflict_setup["user"],
+        conflict_setup["part"],
+        statut="validee",
+        start=now,
+        end=now + timedelta(days=2),
+    )
+    # Autre part : ne doit pas remonter.
+    _make_reservation(
+        conflict_setup["prestation"],
+        conflict_setup["user"],
+        conflict_setup["other_part"],
+        statut="validee",
+        start=now,
+        end=now + timedelta(days=2),
+    )
+
+    # Sans exclusion : la résa du bon part remonte.
+    assert [
+        r.pk for r in compute_conflicts(conflict_setup["part"].pk, 1, now, now)
+    ] == [resa.pk]
+
+    # En excluant la résa, plus aucun conflit.
+    assert (
+        compute_conflicts(
+            conflict_setup["part"].pk, 1, now, now, exclude_resa_id=resa.pk
+        )
+        == []
+    )

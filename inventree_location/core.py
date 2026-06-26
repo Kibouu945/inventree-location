@@ -72,6 +72,7 @@ class InvenTreeLocation(
             GeocodeAddressView,
             LieuDetailView,
             LieuListCreateView,
+            RentableFlagBulkUpdateView,
             ReservationDetailView,
             ReservationListCreateView,
         )
@@ -82,6 +83,11 @@ class InvenTreeLocation(
             path("lieux/<int:pk>/", LieuDetailView.as_view(), name="lieu-detail"),
             path("geocode/", GeocodeAddressView.as_view(), name="geocode-address"),
             path("catalog/", CatalogPartListView.as_view(), name="catalog-part-list"),
+            path(
+                "catalog/rentable/",
+                RentableFlagBulkUpdateView.as_view(),
+                name="catalog-rentable-bulk-update",
+            ),
             path(
                 "reservations/",
                 ReservationListCreateView.as_view(),

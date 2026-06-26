@@ -83,16 +83,15 @@ def compute_conflicts(
 
     from .models import Reservation
 
-    reservations = (
-        Reservation.objects.filter(
-            lignes__article_id=part_id,
-            statut__in=CONFLICT_STATUSES,
-            date_retrait_prevue__isnull=False,
-            date_retour_prevue__isnull=False,
-        )
-        .exclude(pk=exclude_resa_id)
-        .distinct()
-    )
+    reservations = Reservation.objects.filter(
+        lignes__part_id=part_id,
+        statut__in=CONFLICT_STATUSES,
+        date_retrait_prevue__isnull=False,
+        date_retour_prevue__isnull=False,
+    ).distinct()
+
+    if exclude_resa_id is not None:
+        reservations = reservations.exclude(pk=exclude_resa_id)
 
     return [
         reservation
