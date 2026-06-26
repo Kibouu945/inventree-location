@@ -18,6 +18,7 @@ from inventree_location.views import (
     CatalogPagination,
     CatalogPartListView,
     RentableFlagBulkUpdateView,
+    RentablePartDetailView,
 )
 
 from part.models import Part, PartCategory
@@ -174,3 +175,50 @@ class TestRentableFlagBulkUpdate:
 
         response = RentableFlagBulkUpdateView.as_view()(request)
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+class TestRentablePartDetail:
+    def _url(self, pk):
+        return f"/plugin/inventree-location/catalog/{pk}/rentable/"
+
+    @pytest.mark.django_db
+    def test_get_defaults_when_no_rentable_item(self, factory, user, parts):
+        request = factory.get(self._url(parts["tente"].pk))
+        force_authenticate(request, user=user)
+
+        response = RentablePartDetailView.as_view()(request, pk=parts["tente"].pk)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["is_rentable"] is True
+        assert response.data["consommable"] is False
+
+    @pytest.mark.django_db
+    def test_get_reflects_stored_flags(self, factory, user, parts):
+        request = factory.get(self._url(parts["gobelet"].pk))
+        force_authenticate(request, user=user)
+
+        response = RentablePartDetailView.as_view()(request, pk=parts["gobelet"].pk)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["consommable"] is True
+
+    @pytest.mark.django_db
+    def test_get_missing_part_returns_404(self, factory, user):
+        request = factory.get(self._url(99999))
+        force_authenticate(request, user=user)
+
+        response = RentablePartDetailView.as_view()(request, pk=99999)
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    @pytest.mark.django_db
+    def test_patch_creates_and_updates(self, factory, user, parts):
+        request = factory.patch(
+            self._url(parts["tente"].pk), {"is_rentable": False}, format="json"
+        )
+        force_authenticate(request, user=user)
+
+        response = RentablePartDetailView.as_view()(request, pk=parts["tente"].pk)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["is_rentable"] is False
+        assert RentableItem.objects.get(part=parts["tente"]).is_rentable is False

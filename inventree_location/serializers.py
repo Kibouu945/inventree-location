@@ -7,7 +7,7 @@ from urllib.request import Request, urlopen
 
 from rest_framework import serializers
 
-from .models import LigneReservation, Lieu, Reservation
+from .models import LigneReservation, Lieu, RentableItem, Reservation
 
 
 def geocode_address(address):
@@ -126,6 +126,24 @@ class ReservationSerializer(serializers.ModelSerializer):
             LigneReservation(reservation=reservation, **ligne_data)
             for ligne_data in lignes_data
         ])
+
+
+class RentableItemSerializer(serializers.ModelSerializer):
+    """Drapeaux location (louable / consommable + champs financiers) d'un Part."""
+
+    class Meta:
+        """Configuration du serializer RentableItem."""
+
+        model = RentableItem
+        fields = [
+            "part",
+            "is_rentable",
+            "consommable",
+            "caution",
+            "valeur_remplacement",
+            "seuil_alerte_bas",
+        ]
+        read_only_fields = ["part"]
 
 
 class ExampleSerializer(serializers.Serializer):

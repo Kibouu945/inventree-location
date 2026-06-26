@@ -21,6 +21,7 @@ from .serializers import (
     CatalogPartSerializer,
     ExampleSerializer,
     LieuSerializer,
+    RentableItemSerializer,
     ReservationSerializer,
     geocode_address,
 )
@@ -376,3 +377,66 @@ class RentableFlagBulkUpdateView(APIView):
             {"updated": valid_ids, "applied": defaults},
             status=status.HTTP_200_OK,
         )
+
+
+class RentablePartDetailView(APIView):
+    """Drapeaux location d'un Part unique (CAT-04 / CAT-05).
+
+    - GET   : retourne les drapeaux du Part (valeurs par défaut si aucun
+      RentableItem n'existe encore : louable=true, consommable=false).
+    - PATCH : crée ou met à jour le RentableItem (admin / gestionnaire).
+    """
+
+    permission_classes = [CatalogPermission]
+    serializer_class = RentableItemSerializer
+
+    def get(self, request, pk, *args, **kwargs):
+        """Retourne les drapeaux location du Part."""
+
+        from part.models import Part
+
+        if not Part.objects.filter(pk=pk).exists():
+            return Response(
+                {"detail": "Part introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        rentable_item = RentableItem.objects.filter(part_id=pk).first()
+
+        if rentable_item is None:
+            return Response(
+                {
+                    "part": pk,
+                    "is_rentable": True,
+                    "consommable": False,
+                    "caution": None,
+                    "valeur_remplacement": None,
+                    "seuil_alerte_bas": None,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response(
+            self.serializer_class(rentable_item).data,
+            status=status.HTTP_200_OK,
+        )
+
+    def patch(self, request, pk, *args, **kwargs):
+        """Crée ou met à jour les drapeaux location du Part."""
+
+        from part.models import Part
+
+        if not Part.objects.filter(pk=pk).exists():
+            return Response(
+                {"detail": "Part introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        rentable_item, _created = RentableItem.objects.get_or_create(part_id=pk)
+        serializer = self.serializer_class(
+            rentable_item, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(serializer.data, status=status.HTTP_200_OK)

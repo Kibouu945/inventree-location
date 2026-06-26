@@ -1,263 +1,168 @@
-// Import for type checking
-// Import table display function
+// Panel affiché sur la page d'un Part InvenTree (CAT-04 / CAT-05).
 import {
-  ApiEndpoints,
-  apiUrl,
   checkPluginVersion,
-  INVENTREE_PLUGIN_VERSION,
-  type InvenTreePluginContext,
-  InvenTreeTable,
-  ModelType,
-  RowEditAction,
-  useTable
+  type InvenTreePluginContext
 } from '@inventreedb/ui';
 import {
-  Accordion,
   Alert,
+  Badge,
   Button,
   Group,
-  SimpleGrid,
+  Loader,
   Stack,
+  Switch,
   Text,
   Title
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconInfoCircle } from '@tabler/icons-react';
-import { useQuery } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
+
+interface RentableFlags {
+  part: number;
+  is_rentable: boolean;
+  consommable: boolean;
+}
+
+const MANAGER_ROLES = ['admin', 'gestionnaire'];
+
+function userRoles(context: InvenTreePluginContext): string[] {
+  const groups = (context.user as { groups?: unknown })?.groups;
+  return Array.isArray(groups) ? groups.map((group) => String(group)) : [];
+}
 
 /**
- * Render a custom panel with the provided context.
- * Refer to the InvenTree documentation for the context interface
- * https://docs.inventree.org/en/latest/plugins/mixins/ui/#plugin-context
+ * Fiche location du Part courant : drapeaux louable / consommable, toggles
+ * (réservés aux gestionnaires) et accès aux réservations en cours.
  */
 function InvenTreeLocationPanel({
   context
 }: {
   context: InvenTreePluginContext;
 }) {
-  // React hooks can be used within plugin components
-  useEffect(() => {
-    console.log('useEffect in plugin component:');
-    console.log('- Model:', context.model);
-    console.log('- ID:', context.id);
-  }, [context.model, context.id]);
+  const partId = useMemo(() => context.id ?? null, [context.id]);
 
-  // Memoize the part ID as passed via the context object
-  const partId = useMemo(() => {
-    return context.model == ModelType.part ? context.id || null : null;
-  }, [context.model, context.id]);
+  const canManage = useMemo(() => {
+    const roles = userRoles(context);
+    return (
+      Boolean((context.user as { is_superuser?: boolean })?.is_superuser) ||
+      roles.some((role) => MANAGER_ROLES.includes(role))
+    );
+  }, [context]);
 
-  // Does this InvenTree version support tables in plugins?
-  const supportsTables = useMemo(() => !!context.tables, [context.tables]);
+  const rentableUrl = `/plugin/inventree-location/catalog/${partId}/rentable/`;
 
-  // State management for the API driven table
-  const tableState = useTable('my-custom-table');
-
-  // Custom table properties for the loaded table
-  const tableProps = {
-    enableSelection: true,
-    enablePagination: true,
-    enableRefresh: true,
-    modelType: ModelType.part,
-    params: {
-      active: true
-    },
-    tableFilters: [
-      {
-        name: 'assembly',
-        label: 'Assembly',
-        description: 'Show assembly parts'
-      }
-    ],
-    rowActions: (record: any) => [
-      RowEditAction({
-        onClick: () => {
-          notifications.show({
-            title: 'Row Action Clicked',
-            message: `You clicked the edit action for ${record.name}`,
-            color: 'blue'
-          });
-        }
-      })
-    ]
-  };
-
-  // Hello world - counter example
-  const [counter, setCounter] = useState<number>(0);
-
-  // Extract context information
-  const instance: string = useMemo(() => {
-    const data = context?.instance ?? {};
-    return JSON.stringify(data, null, 2);
-  }, [context.instance]);
-
-  // Fetch API data from the example API endpoint
-  // It will re-fetch when the partId changes
-  const apiQuery = useQuery(
+  const query = useQuery<RentableFlags>(
     {
-      queryKey: ['apiData', partId],
+      queryKey: ['rentable', partId],
+      enabled: partId != null,
       queryFn: async () => {
-        const url = `/plugin/inventree-location/example/`;
-
-        return context.api
-          .get(url)
-          .then((response) => response.data)
-          .catch(() => {});
+        const response = await context.api.get(rentableUrl);
+        return response.data as RentableFlags;
       }
     },
     context.queryClient
   );
 
-  // Custom form to edit the selected part
-  const editPartForm = context.forms.edit({
-    url: apiUrl(ApiEndpoints.part_list, partId),
-    title: 'Edit Part',
-    preFormContent: (
-      <Alert title='Custom Plugin Form' color='blue'>
-        This is a custom form launched from within a plugin!
-      </Alert>
-    ),
-    fields: {
-      name: {},
-      description: {},
-      category: {}
+  const mutation = useMutation(
+    {
+      mutationFn: async (patch: Partial<RentableFlags>) => {
+        const response = await context.api.patch(rentableUrl, patch);
+        return response.data as RentableFlags;
+      },
+      onSuccess: (data) => {
+        context.queryClient.setQueryData(['rentable', partId], data);
+        notifications.show({
+          title: 'Enregistré',
+          message: 'Drapeaux de location mis à jour.',
+          color: 'green'
+        });
+      },
+      onError: () => {
+        notifications.show({
+          title: 'Erreur',
+          message: 'Mise à jour impossible.',
+          color: 'red'
+        });
+      }
     },
-    successMessage: null,
-    onFormSuccess: () => {
-      notifications.show({
-        title: 'Success',
-        message: 'Part updated successfully!',
-        color: 'green'
-      });
-    }
-  });
+    context.queryClient
+  );
 
-  // Custom callback function example
-  const openForm = useCallback(() => {
-    editPartForm?.open();
-  }, [editPartForm]);
+  if (partId == null) {
+    return (
+      <Alert color='yellow' title='Aucun article'>
+        Ce panneau s'affiche sur la fiche d'un article.
+      </Alert>
+    );
+  }
 
-  // Navigation functionality example
-  const gotoDashboard = useCallback(() => {
-    context.navigate('/home');
-  }, [context]);
+  if (query.isLoading) {
+    return (
+      <Group justify='center' p='xl'>
+        <Loader />
+      </Group>
+    );
+  }
+
+  const flags = query.data;
 
   return (
-    <>
-      {editPartForm.modal}
-      <Accordion defaultValue='main'>
-        <Accordion.Item value='main'>
-          <Accordion.Control>
-            <Title c={context.theme.primaryColor} order={4}>
-              Custom Data Examples
-            </Title>
-          </Accordion.Control>
-          <Accordion.Panel>
-            <SimpleGrid cols={2}>
-              <Alert
-                icon={<IconInfoCircle />}
-                title={'Version Information'}
-                color='blue'
-              >
-                <Stack gap='xs'>
-                  <Text>
-                    Frontend Version: {context?.version?.inventree || 'unknown'}
-                  </Text>
-                  <Text>Plugin Version: {INVENTREE_PLUGIN_VERSION}</Text>
-                </Stack>
-              </Alert>
+    <Stack gap='md'>
+      <Title order={4} c={context.theme.primaryColor}>
+        Location
+      </Title>
 
-              <Group justify='apart' wrap='nowrap' gap='sm'>
-                <Button color='blue' onClick={gotoDashboard}>
-                  Go to Dashboard
-                </Button>
-                {partId && (
-                  <Button color='green' onClick={openForm}>
-                    Edit Part
-                  </Button>
-                )}
-                <Button onClick={() => setCounter(counter + 1)}>
-                  Increment Counter
-                </Button>
-                <Text size='xl'>Counter: {counter}</Text>
-              </Group>
-              {instance ? (
-                <Alert title='Instance Data' color='blue'>
-                  {instance}
-                </Alert>
-              ) : (
-                <Alert title='No Instance' color='yellow'>
-                  No instance data available
-                </Alert>
-              )}
-              {apiQuery.isFetched && apiQuery.data && (
-                <Alert color='green' title='API Query Data'>
-                  {apiQuery.isFetching || apiQuery.isLoading ? (
-                    <Text>Loading...</Text>
-                  ) : (
-                    <Stack gap='xs'>
-                      <Text>Part Count: {apiQuery.data.part_count}</Text>
-                      <Text>Today: {apiQuery.data.today}</Text>
-                      <Text>Random Text: {apiQuery.data.random_text}</Text>
-                      <Button
-                        disabled={apiQuery.isFetching || apiQuery.isLoading}
-                        onClick={() => apiQuery.refetch()}
-                      >
-                        Reload Data
-                      </Button>
-                    </Stack>
-                  )}
-                </Alert>
-              )}
-            </SimpleGrid>
-          </Accordion.Panel>
-        </Accordion.Item>
-        <Accordion.Item value='table'>
-          <Accordion.Control>
-            <Title c={context.theme.primaryColor} order={4}>
-              Custom Table Example
-            </Title>
-          </Accordion.Control>
-          <Accordion.Panel>
-            {supportsTables ? (
-              <InvenTreeTable
-                url={apiUrl(ApiEndpoints.part_list)}
-                tableState={tableState}
-                context={context}
-                props={tableProps}
-                columns={[
-                  {
-                    accessor: 'name',
-                    switchable: false
-                  },
-                  {
-                    accessor: 'IPN'
-                  },
-                  {
-                    accessor: 'description'
-                  }
-                ]}
-              />
-            ) : (
-              <Alert title='Table Not Supported' color='red'>
-                {
-                  'This version of InvenTree does not support tables within plugins.'
-                }
-                <br />
-                {
-                  'Please upgrade to a more recent version of InvenTree to use this feature.'
-                }
-              </Alert>
-            )}
-          </Accordion.Panel>
-        </Accordion.Item>
-      </Accordion>
-    </>
+      <Group gap='sm'>
+        {flags?.consommable ? (
+          <Badge color='orange'>Consommable</Badge>
+        ) : flags?.is_rentable ? (
+          <Badge color='green'>Louable</Badge>
+        ) : (
+          <Badge color='gray'>Non-louable</Badge>
+        )}
+      </Group>
+
+      <Switch
+        label='Louable'
+        checked={Boolean(flags?.is_rentable)}
+        disabled={!canManage || mutation.isPending}
+        onChange={(event) =>
+          mutation.mutate({ is_rentable: event.currentTarget.checked })
+        }
+      />
+      <Switch
+        label='Consommable'
+        checked={Boolean(flags?.consommable)}
+        disabled={!canManage || mutation.isPending}
+        onChange={(event) =>
+          mutation.mutate({ consommable: event.currentTarget.checked })
+        }
+      />
+
+      {!canManage && (
+        <Text size='xs' c='dimmed'>
+          Seuls les gestionnaires peuvent modifier ces drapeaux.
+        </Text>
+      )}
+
+      <Group>
+        <Button
+          variant='light'
+          onClick={() =>
+            context.navigate(
+              `/plugin/inventree-location/reservations/?part=${partId}`
+            )
+          }
+        >
+          Voir les réservations en cours
+        </Button>
+      </Group>
+    </Stack>
   );
 }
 
-// This is the function which is called by InvenTree to render the actual panel component
+// Fonction appelée par InvenTree pour rendre le panneau.
 export function renderInvenTreeLocationPanel(context: InvenTreePluginContext) {
   checkPluginVersion(context);
 
