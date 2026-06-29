@@ -40,7 +40,6 @@ class InvenTreeLocation(
     # Plugin settings (from SettingsMixin)
     # Ref: https://docs.inventree.org/en/latest/plugins/mixins/settings/
     SETTINGS = {
-        # Define your plugin settings here...
         "CUSTOM_VALUE": {
             "name": "Custom Value",
             "description": "A custom value",
@@ -53,7 +52,6 @@ class InvenTreeLocation(
     # Ref: https://docs.inventree.org/en/latest/plugins/mixins/event/
     def wants_process_event(self, event: str) -> bool:
         """Return True if the plugin wants to process the given event."""
-        # Example: only process the 'create part' event
         return event == "part_part.created"
 
     def process_event(self, event: str, *args, **kwargs) -> None:
@@ -67,23 +65,55 @@ class InvenTreeLocation(
     def setup_urls(self):
         """Configure custom URL endpoints for this plugin."""
         from django.urls import path
-        from .views import ExampleView
+
+        from .views import (
+            CatalogPartListView,
+            ExampleView,
+            GeocodeAddressView,
+            LieuDetailView,
+            LieuListCreateView,
+            RentableFlagBulkUpdateView,
+            RentablePartDetailView,
+            ReservationDetailView,
+            ReservationListCreateView,
+        )
 
         return [
-            # Provide path to a simple custom view - replace this with your own views
             path("example/", ExampleView.as_view(), name="example-view"),
+            path("lieux/", LieuListCreateView.as_view(), name="lieu-list-create"),
+            path("lieux/<int:pk>/", LieuDetailView.as_view(), name="lieu-detail"),
+            path("geocode/", GeocodeAddressView.as_view(), name="geocode-address"),
+            path("catalog/", CatalogPartListView.as_view(), name="catalog-part-list"),
+            path(
+                "catalog/rentable/",
+                RentableFlagBulkUpdateView.as_view(),
+                name="catalog-rentable-bulk-update",
+            ),
+            path(
+                "catalog/<int:pk>/rentable/",
+                RentablePartDetailView.as_view(),
+                name="catalog-part-rentable-detail",
+            ),
+            path(
+                "reservations/",
+                ReservationListCreateView.as_view(),
+                name="reservation-list",
+            ),
+            path(
+                "reservations/<int:pk>/",
+                ReservationDetailView.as_view(),
+                name="reservation-detail",
+            ),
         ]
 
     # User interface elements (from UserInterfaceMixin)
     # Ref: https://docs.inventree.org/en/latest/plugins/mixins/ui/
 
-    # Custom UI panels
     def get_ui_panels(self, request, context: dict, **kwargs):
         """Return a list of custom panels to be rendered in the InvenTree user interface."""
 
         panels = []
 
-        # Only display this panel for the 'part' target
         if context.get("target_model") == "part":
             panels.append({
                 "key": "inventree-location-panel",
@@ -94,7 +124,6 @@ class InvenTreeLocation(
                     "Panel.js:renderInvenTreeLocationPanel"
                 ),
                 "context": {
-                    # Provide additional context data to the panel
                     "settings": self.get_settings_dict(),
                     "foo": "bar",
                 },
@@ -102,11 +131,9 @@ class InvenTreeLocation(
 
         return panels
 
-    # Custom dashboard items
     def get_ui_dashboard_items(self, request, context: dict, **kwargs):
         """Return a list of custom dashboard items to be rendered in the InvenTree user interface."""
 
-        # Example: only display for 'staff' users
         if not request.user or not request.user.is_staff:
             return []
 
@@ -121,9 +148,21 @@ class InvenTreeLocation(
                 "Dashboard.js:renderInvenTreeLocationDashboardItem"
             ),
             "context": {
-                # Provide additional context data to the dashboard item
                 "settings": self.get_settings_dict(),
                 "bar": "foo",
+            },
+        })
+
+        items.append({
+            "key": "inventree-location-catalog",
+            "title": "Catalogue du matériel",
+            "description": "Liste filtrable du matériel louable",
+            "icon": "ti:list-search:outline",
+            "source": self.plugin_static_file(
+                "Catalog.js:renderInvenTreeLocationCatalog"
+            ),
+            "context": {
+                "settings": self.get_settings_dict(),
             },
         })
 

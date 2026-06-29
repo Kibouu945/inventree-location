@@ -333,6 +333,12 @@ class Reservation(TimestampedModel):
         ordering = ["-date_demande"]
         verbose_name = _("réservation")
         verbose_name_plural = _("réservations")
+        indexes = [
+            models.Index(
+                fields=["date_retrait_prevue", "date_retour_prevue", "statut"],
+                name="resa_periode_statut_idx",
+            ),
+        ]
 
     def __str__(self):
         return f"Réservation #{self.pk} — {self.get_statut_display()}"
