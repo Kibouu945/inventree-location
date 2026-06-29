@@ -72,6 +72,8 @@ class InvenTreeLocation(
             GeocodeAddressView,
             LieuDetailView,
             LieuListCreateView,
+            RentableFlagBulkUpdateView,
+            RentablePartDetailView,
             ReservationDetailView,
             ReservationListCreateView,
         )
@@ -82,6 +84,16 @@ class InvenTreeLocation(
             path("lieux/<int:pk>/", LieuDetailView.as_view(), name="lieu-detail"),
             path("geocode/", GeocodeAddressView.as_view(), name="geocode-address"),
             path("catalog/", CatalogPartListView.as_view(), name="catalog-part-list"),
+            path(
+                "catalog/rentable/",
+                RentableFlagBulkUpdateView.as_view(),
+                name="catalog-rentable-bulk-update",
+            ),
+            path(
+                "catalog/<int:pk>/rentable/",
+                RentablePartDetailView.as_view(),
+                name="catalog-part-rentable-detail",
+            ),
             path(
                 "reservations/",
                 ReservationListCreateView.as_view(),
@@ -138,6 +150,19 @@ class InvenTreeLocation(
             "context": {
                 "settings": self.get_settings_dict(),
                 "bar": "foo",
+            },
+        })
+
+        items.append({
+            "key": "inventree-location-catalog",
+            "title": "Catalogue du matériel",
+            "description": "Liste filtrable du matériel louable",
+            "icon": "ti:list-search:outline",
+            "source": self.plugin_static_file(
+                "Catalog.js:renderInvenTreeLocationCatalog"
+            ),
+            "context": {
+                "settings": self.get_settings_dict(),
             },
         })
 

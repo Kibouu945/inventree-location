@@ -47,7 +47,13 @@ def factory():
 
 @pytest.fixture
 def user(db):
-    return User.objects.create_user(username="alice", password="pwd12345")
+    from django.contrib.auth.models import Group
+
+    from inventree_location import roles
+
+    account = User.objects.create_user(username="alice", password="pwd12345")
+    account.groups.add(Group.objects.get(name=roles.GESTIONNAIRE))
+    return account
 
 
 @pytest.fixture

@@ -7,7 +7,7 @@ from urllib.request import Request, urlopen
 
 from rest_framework import serializers
 
-from .models import Lieu, Reservation
+from .models import LigneReservation, Lieu, RentableItem, Reservation
 
 
 def geocode_address(address):
@@ -48,8 +48,29 @@ def geocode_address(address):
     }
 
 
+class LigneReservationSerializer(serializers.ModelSerializer):
+    """Sérialiseur d'une ligne de réservation (Part natif + quantités)."""
+
+    class Meta:
+        """Configuration du serializer LigneReservation."""
+
+        model = LigneReservation
+        fields = [
+            "id",
+            "part",
+            "quantite_demandee",
+            "quantite_livree",
+            "quantite_retournee",
+            "etat_retour",
+            "commentaire",
+        ]
+        read_only_fields = ["id"]
+
+
 class ReservationSerializer(serializers.ModelSerializer):
-    """Sérialiseur DRF pour le modèle Reservation."""
+    """Sérialiseur DRF pour le modèle Reservation, avec lignes imbriquées."""
+
+    lignes = LigneReservationSerializer(many=True, required=False)
 
     class Meta:
         """Configuration du serializer Reservation."""
@@ -68,10 +89,61 @@ class ReservationSerializer(serializers.ModelSerializer):
             "date_retrait_reelle",
             "date_retour_reelle",
             "commentaire",
+            "lignes",
             "created_at",
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+    def create(self, validated_data):
+        """Crée une réservation et ses lignes imbriquées."""
+
+        lignes_data = validated_data.pop("lignes", None)
+        reservation = super().create(validated_data)
+
+        if lignes_data:
+            self._replace_lignes(reservation, lignes_data)
+
+        return reservation
+
+    def update(self, instance, validated_data):
+        """Met à jour une réservation et, si fournies, remplace ses lignes."""
+
+        lignes_data = validated_data.pop("lignes", None)
+        reservation = super().update(instance, validated_data)
+
+        if lignes_data is not None:
+            self._replace_lignes(reservation, lignes_data)
+
+        return reservation
+
+    def _replace_lignes(self, reservation, lignes_data):
+        """Remplace l'intégralité des lignes de la réservation."""
+
+        reservation.lignes.all().delete()
+
+        LigneReservation.objects.bulk_create([
+            LigneReservation(reservation=reservation, **ligne_data)
+            for ligne_data in lignes_data
+        ])
+
+
+class RentableItemSerializer(serializers.ModelSerializer):
+    """Drapeaux location (louable / consommable + champs financiers) d'un Part."""
+
+    class Meta:
+        """Configuration du serializer RentableItem."""
+
+        model = RentableItem
+        fields = [
+            "part",
+            "is_rentable",
+            "consommable",
+            "caution",
+            "valeur_remplacement",
+            "seuil_alerte_bas",
+        ]
+        read_only_fields = ["part"]
 
 
 class ExampleSerializer(serializers.Serializer):
@@ -218,11 +290,25 @@ class CatalogPartSerializer(serializers.Serializer):
     category = serializers.IntegerField(source="category_id", read_only=True)
     category_name = serializers.CharField(source="category.name", read_only=True)
     rentable = serializers.SerializerMethodField()
+    consommable = serializers.SerializerMethodField()
 
     def get_rentable(self, obj):
-        """Temporary rentable flag.
+        """Drapeau louable issu de RentableItem.
 
-        SCRUM-43 will introduce a dedicated rentable/non-rentable flag.
-        Until then, active parts are considered rentable.
+        Un Part sans RentableItem associé est considéré louable par défaut.
         """
-        return bool(getattr(obj, "active", False))
+        rentable_info = getattr(obj, "rentable_info", None)
+
+        if rentable_info is None:
+            return True
+
+        return bool(rentable_info.is_rentable)
+
+    def get_consommable(self, obj):
+        """Drapeau consommable issu de RentableItem (False par défaut)."""
+        rentable_info = getattr(obj, "rentable_info", None)
+
+        if rentable_info is None:
+            return False
+
+        return bool(rentable_info.consommable)
