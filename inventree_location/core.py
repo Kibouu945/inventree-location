@@ -76,6 +76,7 @@ class InvenTreeLocation(
             RentablePartDetailView,
             ReservationDetailView,
             ReservationListCreateView,
+            ReservationTransitionView,
         )
 
         return [
@@ -104,6 +105,11 @@ class InvenTreeLocation(
                 ReservationDetailView.as_view(),
                 name="reservation-detail",
             ),
+            path(
+                "reservations/<int:pk>/transition/",
+                ReservationTransitionView.as_view(),
+                name="reservation-transition",
+            ),
         ]
 
     # User interface elements (from UserInterfaceMixin)
@@ -115,19 +121,21 @@ class InvenTreeLocation(
         panels = []
 
         if context.get("target_model") == "part":
-            panels.append({
-                "key": "inventree-location-panel",
-                "title": "InvenTree Location",
-                "description": "Custom panel description",
-                "icon": "ti:mood-smile:outline",
-                "source": self.plugin_static_file(
-                    "Panel.js:renderInvenTreeLocationPanel"
-                ),
-                "context": {
-                    "settings": self.get_settings_dict(),
-                    "foo": "bar",
-                },
-            })
+            panels.append(
+                {
+                    "key": "inventree-location-panel",
+                    "title": "InvenTree Location",
+                    "description": "Custom panel description",
+                    "icon": "ti:mood-smile:outline",
+                    "source": self.plugin_static_file(
+                        "Panel.js:renderInvenTreeLocationPanel"
+                    ),
+                    "context": {
+                        "settings": self.get_settings_dict(),
+                        "foo": "bar",
+                    },
+                }
+            )
 
         return panels
 
@@ -139,32 +147,36 @@ class InvenTreeLocation(
 
         items = []
 
-        items.append({
-            "key": "inventree-location-dashboard",
-            "title": "InvenTree Location Dashboard Item",
-            "description": "Custom dashboard item",
-            "icon": "ti:dashboard:outline",
-            "source": self.plugin_static_file(
-                "Dashboard.js:renderInvenTreeLocationDashboardItem"
-            ),
-            "context": {
-                "settings": self.get_settings_dict(),
-                "bar": "foo",
-            },
-        })
+        items.append(
+            {
+                "key": "inventree-location-dashboard",
+                "title": "InvenTree Location Dashboard Item",
+                "description": "Custom dashboard item",
+                "icon": "ti:dashboard:outline",
+                "source": self.plugin_static_file(
+                    "Dashboard.js:renderInvenTreeLocationDashboardItem"
+                ),
+                "context": {
+                    "settings": self.get_settings_dict(),
+                    "bar": "foo",
+                },
+            }
+        )
 
-        items.append({
-            "key": "inventree-location-catalog",
-            "title": "Catalogue du matériel",
-            "description": "Liste filtrable du matériel louable",
-            "icon": "ti:list-search:outline",
-            "source": self.plugin_static_file(
-                "Catalog.js:renderInvenTreeLocationCatalog"
-            ),
-            "context": {
-                "settings": self.get_settings_dict(),
-            },
-        })
+        items.append(
+            {
+                "key": "inventree-location-catalog",
+                "title": "Catalogue du matériel",
+                "description": "Liste filtrable du matériel louable",
+                "icon": "ti:list-search:outline",
+                "source": self.plugin_static_file(
+                    "Catalog.js:renderInvenTreeLocationCatalog"
+                ),
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            }
+        )
 
         return items
 

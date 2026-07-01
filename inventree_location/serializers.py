@@ -7,7 +7,14 @@ from urllib.request import Request, urlopen
 
 from rest_framework import serializers
 
-from .models import LigneReservation, Lieu, RentableItem, Reservation
+from .models import (
+    LigneReservation,
+    Lieu,
+    RentableItem,
+    Reservation,
+    ReservationStatusLog,
+    StatutReservation,
+)
 
 
 def geocode_address(address):
@@ -16,11 +23,13 @@ def geocode_address(address):
     if not address:
         return None
 
-    query = urlencode({
-        "q": address,
-        "format": "json",
-        "limit": 1,
-    })
+    query = urlencode(
+        {
+            "q": address,
+            "format": "json",
+            "limit": 1,
+        }
+    )
 
     url = f"https://nominatim.openstreetmap.org/search?{query}"
 
@@ -49,7 +58,7 @@ def geocode_address(address):
 
 
 class LigneReservationSerializer(serializers.ModelSerializer):
-    """Sérialiseur d'une ligne de réservation (Part natif + quantités)."""
+    """Sérialiseur d'une ligne de réservation."""
 
     class Meta:
         """Configuration du serializer LigneReservation."""
@@ -67,10 +76,62 @@ class LigneReservationSerializer(serializers.ModelSerializer):
         read_only_fields = ["id"]
 
 
+class ReservationStatusLogSerializer(serializers.ModelSerializer):
+    """Sérialiseur du journal de transition de statut."""
+
+    changed_by_username = serializers.CharField(
+        source="changed_by.username",
+        read_only=True,
+        allow_null=True,
+    )
+
+    class Meta:
+        """Configuration du serializer ReservationStatusLog."""
+
+        model = ReservationStatusLog
+        fields = [
+            "id",
+            "reservation",
+            "changed_by",
+            "changed_by_username",
+            "from_status",
+            "to_status",
+            "comment",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "reservation",
+            "changed_by",
+            "changed_by_username",
+            "from_status",
+            "to_status",
+            "comment",
+            "created_at",
+        ]
+
+
+class ReservationTransitionSerializer(serializers.Serializer):
+    """Serializer utilisé pour demander une transition de statut."""
+
+    statut = serializers.ChoiceField(
+        choices=StatutReservation.choices,
+        required=True,
+        help_text="Nouveau statut demandé pour la réservation.",
+    )
+    comment = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Commentaire facultatif lié à la transition.",
+    )
+
+
 class ReservationSerializer(serializers.ModelSerializer):
     """Sérialiseur DRF pour le modèle Reservation, avec lignes imbriquées."""
 
     lignes = LigneReservationSerializer(many=True, required=False)
+    status_logs = ReservationStatusLogSerializer(many=True, read_only=True)
 
     class Meta:
         """Configuration du serializer Reservation."""
@@ -90,10 +151,11 @@ class ReservationSerializer(serializers.ModelSerializer):
             "date_retour_reelle",
             "commentaire",
             "lignes",
+            "status_logs",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at", "status_logs"]
 
     def create(self, validated_data):
         """Crée une réservation et ses lignes imbriquées."""
@@ -122,14 +184,16 @@ class ReservationSerializer(serializers.ModelSerializer):
 
         reservation.lignes.all().delete()
 
-        LigneReservation.objects.bulk_create([
-            LigneReservation(reservation=reservation, **ligne_data)
-            for ligne_data in lignes_data
-        ])
+        LigneReservation.objects.bulk_create(
+            [
+                LigneReservation(reservation=reservation, **ligne_data)
+                for ligne_data in lignes_data
+            ]
+        )
 
 
 class RentableItemSerializer(serializers.ModelSerializer):
-    """Drapeaux location (louable / consommable + champs financiers) d'un Part."""
+    """Drapeaux location d'un Part."""
 
     class Meta:
         """Configuration du serializer RentableItem."""
@@ -178,12 +242,7 @@ class ExampleSerializer(serializers.Serializer):
 
 
 class LieuSerializer(serializers.ModelSerializer):
-    """Serializer for location places with GPS coordinates.
-
-    If auto_geocode is set to true and an address is provided without
-    latitude / longitude, the serializer tries to fill GPS coordinates
-    automatically using the geocoding service.
-    """
+    """Serializer for location places with GPS coordinates."""
 
     auto_geocode = serializers.BooleanField(
         write_only=True,
@@ -293,10 +352,8 @@ class CatalogPartSerializer(serializers.Serializer):
     consommable = serializers.SerializerMethodField()
 
     def get_rentable(self, obj):
-        """Drapeau louable issu de RentableItem.
+        """Drapeau louable issu de RentableItem."""
 
-        Un Part sans RentableItem associé est considéré louable par défaut.
-        """
         rentable_info = getattr(obj, "rentable_info", None)
 
         if rentable_info is None:
@@ -305,7 +362,8 @@ class CatalogPartSerializer(serializers.Serializer):
         return bool(rentable_info.is_rentable)
 
     def get_consommable(self, obj):
-        """Drapeau consommable issu de RentableItem (False par défaut)."""
+        """Drapeau consommable issu de RentableItem."""
+
         rentable_info = getattr(obj, "rentable_info", None)
 
         if rentable_info is None:
