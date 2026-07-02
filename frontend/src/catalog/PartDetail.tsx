@@ -100,17 +100,26 @@ function PartDetailPanel({ context }: { context: InvenTreePluginContext }) {
           <Text>{part.IPN || '—'}</Text>
         </Stack>
       </Group>
-
-      <Button
-        variant='light'
-        onClick={() =>
-          context.navigate(
-            `/plugin/inventree-location/reservations/?part=${partId}`
-          )
-        }
-      >
-        Voir les réservations
-      </Button>
+      <Group grow>
+        <Button
+          variant='light'
+          onClick={() =>
+            context.navigate('/plugin/inventree-location/catalog/')
+          }
+        >
+          Retour à la liste
+        </Button>
+        <Button
+          variant='light'
+          onClick={() =>
+            context.navigate(
+              `/plugin/inventree-location/reservations/?part=${partId}`
+            )
+          }
+        >
+          Voir les réservations en cours
+        </Button>
+      </Group>
     </Stack>
   );
 }
