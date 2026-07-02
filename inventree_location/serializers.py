@@ -289,34 +289,8 @@ class CatalogPartSerializer(serializers.Serializer):
     active = serializers.BooleanField(read_only=True)
     category = serializers.IntegerField(source="category_id", read_only=True)
     category_name = serializers.CharField(source="category.name", read_only=True)
-    stock_available = serializers.SerializerMethodField()
-    image_url = serializers.SerializerMethodField()
     rentable = serializers.SerializerMethodField()
     consommable = serializers.SerializerMethodField()
-
-    def get_stock_available(self, obj):
-        """Stock disponible (non alloué) remonté d'InvenTree, 0 par défaut."""
-        for attr in ("available_stock", "total_stock"):
-            value = getattr(obj, attr, None)
-            if value is not None:
-                try:
-                    return float(value)
-                except (TypeError, ValueError):
-                    return 0
-
-        return 0
-
-    def get_image_url(self, obj):
-        """URL de la photo principale du Part, ou None si absente."""
-        image = getattr(obj, "image", None)
-
-        if not image:
-            return None
-
-        try:
-            return image.url
-        except (ValueError, AttributeError):
-            return None
 
     def get_rentable(self, obj):
         """Drapeau louable issu de RentableItem.
