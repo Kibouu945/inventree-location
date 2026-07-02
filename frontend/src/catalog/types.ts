@@ -8,6 +8,8 @@ export interface CatalogPart {
   active: boolean;
   category: number | null;
   category_name: string | null;
+  stock_available: number;
+  image_url: string | null;
   rentable: boolean;
   consommable: boolean;
 }
