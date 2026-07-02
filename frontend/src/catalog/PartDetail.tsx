@@ -106,7 +106,8 @@ export function renderInvenTreeLocationPartDetail(context: InvenTreePluginContex
           Retour à la liste
         </Button>
         <Button
-          variant='light'
+          variant='outline'
+          color='blue'
           onClick={() => context.navigate(`/plugin/inventree-location/reservations/?part=${partId}`)}
         >
           Voir les réservations en cours
