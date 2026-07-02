@@ -296,8 +296,13 @@ class CatalogPartSerializer(serializers.Serializer):
 
     def get_stock_available(self, obj):
         """Stock disponible de la part, exposé à 0 si non renseigné."""
-        if hasattr(obj, "stock_available"):
-            return getattr(obj, "stock_available")
+        for attr in ["stock_available", "available_stock"]:
+            value = getattr(obj, attr, None)
+            if value is not None:
+                try:
+                    return float(value)
+                except (ValueError, TypeError):
+                    return 0
 
         return 0
 
