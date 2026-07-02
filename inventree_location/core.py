@@ -72,10 +72,12 @@ class InvenTreeLocation(
             GeocodeAddressView,
             LieuDetailView,
             LieuListCreateView,
+            PrestationListView,
             RentableFlagBulkUpdateView,
             RentablePartDetailView,
             ReservationDetailView,
             ReservationListCreateView,
+            UserListView,
         )
 
         return [
@@ -103,6 +105,16 @@ class InvenTreeLocation(
                 "reservations/<int:pk>/",
                 ReservationDetailView.as_view(),
                 name="reservation-detail",
+            ),
+            path(
+                "prestations/",
+                PrestationListView.as_view(),
+                name="prestation-list",
+            ),
+            path(
+                "users/",
+                UserListView.as_view(),
+                name="user-list",
             ),
         ]
 
@@ -160,6 +172,19 @@ class InvenTreeLocation(
             "icon": "ti:list-search:outline",
             "source": self.plugin_static_file(
                 "Catalog.js:renderInvenTreeLocationCatalog"
+            ),
+            "context": {
+                "settings": self.get_settings_dict(),
+            },
+        })
+
+        items.append({
+            "key": "inventree-location-reservations",
+            "title": "Réservations",
+            "description": "Création et suivi des réservations de matériel",
+            "icon": "ti:calendar-event:outline",
+            "source": self.plugin_static_file(
+                "Reservations.js:renderInvenTreeLocationReservations"
             ),
             "context": {
                 "settings": self.get_settings_dict(),

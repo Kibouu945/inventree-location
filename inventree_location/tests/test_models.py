@@ -166,7 +166,14 @@ class TestRentableItem:
         assert item.pk is not None
         assert item.is_rentable is True
         assert item.consommable is False
+        assert item.is_virtual is False
         assert part.rentable_info == item
+
+    @pytest.mark.django_db
+    def test_is_virtual_persists(self, part):
+        item = RentableItem.objects.create(part=part, is_virtual=True)
+        item.refresh_from_db()
+        assert item.is_virtual is True
 
     @pytest.mark.django_db
     def test_one_to_one_unique(self, part):
@@ -274,6 +281,30 @@ class TestReservation:
 
     def test_on_delete_validateur_protect(self):
         assert _get_on_delete(Reservation, "validateur") == models.PROTECT
+
+    def test_numero_auto_generated(self, reservation):
+        year = reservation.date_demande.year
+        assert reservation.numero == f"RES-{year}-0001"
+
+    @pytest.mark.django_db
+    def test_numero_increments_within_year(self, prestation, user):
+        now = timezone.now()
+        first = Reservation.objects.create(
+            prestation=prestation, demandeur=user, date_demande=now
+        )
+        second = Reservation.objects.create(
+            prestation=prestation, demandeur=user, date_demande=now
+        )
+        assert first.numero == f"RES-{now.year}-0001"
+        assert second.numero == f"RES-{now.year}-0002"
+
+    @pytest.mark.django_db
+    def test_numero_not_regenerated_on_update(self, reservation):
+        original_numero = reservation.numero
+        reservation.commentaire = "mise à jour"
+        reservation.save()
+        reservation.refresh_from_db()
+        assert reservation.numero == original_numero
 
 
 # ---------------------------------------------------------------------------

@@ -15,12 +15,21 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from inventree_location.models import Groupe, Manifestation, Prestation, Reservation
+from inventree_location.models import (
+    Groupe,
+    LigneReservation,
+    Manifestation,
+    Prestation,
+    RentableItem,
+    Reservation,
+)
 from inventree_location.views import (
     ExampleView,
     ReservationDetailView,
     ReservationListCreateView,
 )
+
+from part.models import Part
 
 
 User = get_user_model()
@@ -209,7 +218,19 @@ class TestReservationDetailView:
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
     @pytest.mark.django_db
-    def test_patch_updates_statut(self, factory, user, reservation):
+    def test_patch_updates_statut(self, factory, user, reservation, prestation):
+        # La soumission (RES-03) exige dates + au moins une ligne virtuelle :
+        # on complète la réservation brouillon avant de la soumettre.
+        reservation.date_retrait_prevue = prestation.date_debut
+        reservation.date_retour_prevue = prestation.date_fin
+        reservation.save()
+
+        article_virtuel = Part.objects.create(name="Prestation nettoyage")
+        RentableItem.objects.create(part=article_virtuel, is_virtual=True)
+        LigneReservation.objects.create(
+            reservation=reservation, part=article_virtuel, quantite_demandee=1
+        )
+
         request = factory.patch(
             f"/plugin/inventree-location/reservations/{reservation.pk}/",
             {"statut": "soumise"},

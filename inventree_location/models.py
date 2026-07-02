@@ -15,7 +15,8 @@ recrée pas ici. Le plugin se limite à 8 tables propres :
 """
 
 from django.conf import settings
-from django.db import models
+from django.db import IntegrityError, models, transaction
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 
@@ -138,6 +139,7 @@ class RentableItem(TimestampedModel):
     )
     is_rentable = models.BooleanField(default=True, verbose_name=_("louable"))
     consommable = models.BooleanField(default=False, verbose_name=_("consommable"))
+    is_virtual = models.BooleanField(default=False, verbose_name=_("article virtuel"))
     caution = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -280,9 +282,39 @@ class Lieu(TimestampedModel):
 # ---------------------------------------------------------------------------
 
 
+def _generate_reservation_numero(year: int) -> str:
+    """Calcule le prochain numéro `RES-{année}-{NNNN}` pour l'année donnée."""
+
+    prefix = f"RES-{year}-"
+    last_numero = (
+        Reservation.objects.filter(numero__startswith=prefix)
+        .order_by("-numero")
+        .values_list("numero", flat=True)
+        .first()
+    )
+
+    next_seq = 1
+
+    if last_numero:
+        try:
+            next_seq = int(last_numero.rsplit("-", 1)[-1]) + 1
+        except ValueError:
+            next_seq = 1
+
+    return f"{prefix}{next_seq:04d}"
+
+
 class Reservation(TimestampedModel):
     """Demande de matériel liée à une prestation."""
 
+    numero = models.CharField(
+        max_length=20,
+        unique=True,
+        editable=False,
+        blank=True,
+        default="",
+        verbose_name=_("numéro"),
+    )
     prestation = models.ForeignKey(
         Prestation,
         on_delete=models.PROTECT,
@@ -342,6 +374,31 @@ class Reservation(TimestampedModel):
 
     def __str__(self):
         return f"Réservation #{self.pk} — {self.get_statut_display()}"
+
+    def save(self, *args, **kwargs):
+        """Génère le numéro `RES-AAAA-NNNN` à la première sauvegarde."""
+
+        if self.numero:
+            super().save(*args, **kwargs)
+            return
+
+        year = (self.date_demande or timezone.now()).year
+        attempts = 5
+
+        for _attempt in range(attempts):
+            self.numero = _generate_reservation_numero(year)
+
+            try:
+                with transaction.atomic():
+                    super().save(*args, **kwargs)
+                return
+            except IntegrityError:
+                self.numero = ""
+                continue
+
+        raise IntegrityError(
+            "Impossible de générer un numéro de réservation unique."
+        )
 
 
 class LigneReservation(TimestampedModel):
