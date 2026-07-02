@@ -193,6 +193,9 @@ class TestCatalogPartDetail:
         assert response.status_code == status.HTTP_200_OK
         assert response.data["id"] == parts["tente"].pk
         assert response.data["name"] == "Tente 4 places"
+        assert response.data["category_name"] == "Tentes"
+        assert response.data["stock_available"] == 0
+        assert response.data["image_url"] is None
         assert response.data["rentable"] is True
         assert response.data["consommable"] is False
 
