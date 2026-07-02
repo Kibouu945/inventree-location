@@ -1,4 +1,7 @@
-import type { InvenTreePluginContext } from '@inventreedb/ui';
+import {
+  checkPluginVersion,
+  type InvenTreePluginContext
+} from '@inventreedb/ui';
 import {
   Alert,
   Badge,
@@ -17,7 +20,7 @@ import type { CatalogPart } from './types';
 
 const DETAIL_URL = '/plugin/inventree-location/catalog/';
 
-export function renderInvenTreeLocationPartDetail(context: InvenTreePluginContext) {
+function PartDetailPanel({ context }: { context: InvenTreePluginContext }) {
   const partId = useMemo(() => context.id ?? null, [context.id]);
 
   const query = useQuery<CatalogPart>(
@@ -63,9 +66,7 @@ export function renderInvenTreeLocationPartDetail(context: InvenTreePluginContex
       <Group justify='space-between' align='flex-start'>
         <Stack gap={4}>
           <Title order={4}>{part.name}</Title>
-          <Text c='dimmed'>
-            {part.category_name || 'Sans catégorie'}
-          </Text>
+          <Text c='dimmed'>{part.category_name || 'Sans catégorie'}</Text>
         </Stack>
         {part.consommable ? (
           <Badge color='orange'>Consommable</Badge>
@@ -79,7 +80,9 @@ export function renderInvenTreeLocationPartDetail(context: InvenTreePluginContex
       {part.image_url ? (
         <Image src={part.image_url} alt={part.name} fit='contain' h={220} />
       ) : (
-        <Alert color='gray' title='Aucune photo'>Aucune photo disponible.</Alert>
+        <Alert color='gray' title='Aucune photo'>
+          Aucune photo disponible.
+        </Alert>
       )}
 
       <Stack gap={4}>
@@ -98,20 +101,23 @@ export function renderInvenTreeLocationPartDetail(context: InvenTreePluginContex
         </Stack>
       </Group>
 
-      <Group grow>
-        <Button
-          variant='light'
-          onClick={() => context.navigate('/plugin/inventree-location/catalog/')}
-        >
-          Retour à la liste
-        </Button>
-        <Button
-          variant='light'
-          onClick={() => context.navigate(`/plugin/inventree-location/reservations/?part=${partId}`)}
-        >
-          Voir les réservations en cours
-        </Button>
-      </Group>
+      <Button
+        variant='light'
+        onClick={() =>
+          context.navigate(
+            `/plugin/inventree-location/reservations/?part=${partId}`
+          )
+        }
+      >
+        Voir les réservations
+      </Button>
     </Stack>
   );
+}
+
+export function renderInvenTreeLocationPartDetail(
+  context: InvenTreePluginContext
+) {
+  checkPluginVersion(context);
+  return <PartDetailPanel context={context} />;
 }

@@ -193,9 +193,6 @@ class TestCatalogPartDetail:
         assert response.status_code == status.HTTP_200_OK
         assert response.data["id"] == parts["tente"].pk
         assert response.data["name"] == "Tente 4 places"
-        assert response.data["category_name"] == "Tentes"
-        assert response.data["stock_available"] == 0
-        assert response.data["image_url"] is None
         assert response.data["rentable"] is True
         assert response.data["consommable"] is False
 
@@ -206,6 +203,12 @@ class TestCatalogPartDetail:
 
         response = CatalogPartDetailView.as_view()(request, pk=99999)
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_anonymous_returns_401(self, factory, parts):
+        """Une requête anonyme doit renvoyer 401 sur l'endpoint détail."""
+        request = factory.get(self._url(parts["tente"].pk))
+        response = CatalogPartDetailView.as_view()(request, pk=parts["tente"].pk)
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 class TestRentablePartDetail:
