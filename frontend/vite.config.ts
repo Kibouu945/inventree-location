@@ -50,6 +50,7 @@ export default defineConfig({
         './src/Dashboard.tsx',
         './src/Settings.tsx',
         './src/Catalog.tsx',
+        './src/PartDetail.tsx',
       ],
       output: [
         // Generate two sets of output files:
