@@ -67,6 +67,7 @@ class InvenTreeLocation(
         from django.urls import path
 
         from .views import (
+            CatalogPartDetailView,
             CatalogPartListView,
             ExampleView,
             GeocodeAddressView,
@@ -84,6 +85,7 @@ class InvenTreeLocation(
             path("lieux/<int:pk>/", LieuDetailView.as_view(), name="lieu-detail"),
             path("geocode/", GeocodeAddressView.as_view(), name="geocode-address"),
             path("catalog/", CatalogPartListView.as_view(), name="catalog-part-list"),
+            path("catalog/<int:pk>/", CatalogPartDetailView.as_view(), name="catalog-part-detail"),
             path(
                 "catalog/rentable/",
                 RentableFlagBulkUpdateView.as_view(),
