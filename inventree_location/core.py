@@ -87,7 +87,11 @@ class InvenTreeLocation(
             path("lieux/<int:pk>/", LieuDetailView.as_view(), name="lieu-detail"),
             path("geocode/", GeocodeAddressView.as_view(), name="geocode-address"),
             path("catalog/", CatalogPartListView.as_view(), name="catalog-part-list"),
-            path("catalog/<int:pk>/", CatalogPartDetailView.as_view(), name="catalog-part-detail"),
+            path(
+                "catalog/<int:pk>/",
+                CatalogPartDetailView.as_view(),
+                name="catalog-part-detail",
+            ),
             path(
                 "catalog/rentable/",
                 RentableFlagBulkUpdateView.as_view(),
@@ -140,6 +144,19 @@ class InvenTreeLocation(
                 "context": {
                     "settings": self.get_settings_dict(),
                     "foo": "bar",
+                },
+            })
+
+            panels.append({
+                "key": "inventree-location-part-detail",
+                "title": "Fiche location",
+                "description": "Fiche détail location de l'article",
+                "icon": "ti:file-description:outline",
+                "source": self.plugin_static_file(
+                    "PartDetail.js:renderInvenTreeLocationPartDetail"
+                ),
+                "context": {
+                    "settings": self.get_settings_dict(),
                 },
             })
 
