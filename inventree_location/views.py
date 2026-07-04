@@ -360,6 +360,31 @@ class CatalogPartListView(APIView):
         )
 
 
+class CatalogPartDetailView(APIView):
+    """Fiche détail d'un Part du catalogue."""
+
+    permission_classes = [CatalogPermission]
+    serializer_class = CatalogPartSerializer
+
+    def get(self, request, pk, *args, **kwargs):
+        from part.models import Part
+
+        part = (
+            Part.objects.select_related("category", "rentable_info")
+            .filter(pk=pk)
+            .first()
+        )
+
+        if part is None:
+            return Response(
+                {"detail": "Part introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = self.serializer_class(part)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
 class RentableFlagBulkUpdateView(APIView):
     """Met à jour en masse le drapeau louable / consommable de Part.
 
