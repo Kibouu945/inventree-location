@@ -343,7 +343,9 @@ class Reservation(TimestampedModel):
     )
     # CON-01 : confirmée malgré conflit de dispo détecté à la création
     forced = models.BooleanField(default=False, verbose_name=_("forcée"))
-    date_demande = models.DateTimeField(verbose_name=_("date de demande"))
+    date_demande = models.DateTimeField(
+        default=timezone.now, verbose_name=_("date de demande")
+    )
     date_retrait_prevue = models.DateTimeField(
         null=True, blank=True, verbose_name=_("date de retrait prévue")
     )
@@ -396,9 +398,7 @@ class Reservation(TimestampedModel):
                 self.numero = ""
                 continue
 
-        raise IntegrityError(
-            "Impossible de générer un numéro de réservation unique."
-        )
+        raise IntegrityError("Impossible de générer un numéro de réservation unique.")
 
 
 class LigneReservation(TimestampedModel):
