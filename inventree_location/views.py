@@ -159,15 +159,23 @@ class ReservationListCreateView(generics.ListCreateAPIView):
     - statut    : filtre exact sur le statut (répétable)
     - date_from : réservations dont le retour prévu est >= à cette date
     - date_to   : réservations dont le retrait prévu est <= à cette date
+    - search    : recherche sur le numéro, l'événement ou le demandeur
+
+    Tri par date de demande décroissante par défaut.
     """
 
     serializer_class = ReservationSerializer
     permission_classes = [ReservationPermission]
 
     def get_queryset(self):
-        """Retourne les réservations, filtrées par statut et période."""
+        """Retourne les réservations, filtrées par statut, période et recherche."""
 
-        queryset = Reservation.objects.prefetch_related("lignes").all()
+        queryset = (
+            Reservation.objects.select_related("prestation", "demandeur")
+            .prefetch_related("lignes")
+            .all()
+            .order_by("-date_demande")
+        )
 
         statuts = self.request.query_params.getlist("statut")
 
@@ -182,6 +190,17 @@ class ReservationListCreateView(generics.ListCreateAPIView):
 
         if date_to:
             queryset = queryset.filter(date_retrait_prevue__lte=date_to)
+
+        search = self.request.query_params.get("search")
+
+        if search:
+            queryset = queryset.filter(
+                Q(numero__icontains=search)
+                | Q(prestation__nom__icontains=search)
+                | Q(demandeur__username__icontains=search)
+                | Q(demandeur__first_name__icontains=search)
+                | Q(demandeur__last_name__icontains=search)
+            )
 
         return queryset
 
@@ -270,11 +289,7 @@ class CatalogPartListView(APIView):
     def _parse_ids(self, ids):
         """Parse une liste d'identifiants de Part séparés par des virgules."""
 
-        return [
-            int(value)
-            for value in str(ids).split(",")
-            if value.strip().isdigit()
-        ]
+        return [int(value) for value in str(ids).split(",") if value.strip().isdigit()]
 
     def _parse_category_ids(self, category, categories):
         """Parse category filters from query parameters."""

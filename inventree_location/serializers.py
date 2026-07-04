@@ -79,6 +79,8 @@ class ReservationSerializer(serializers.ModelSerializer):
     """Sérialiseur DRF pour le modèle Reservation, avec lignes imbriquées."""
 
     lignes = LigneReservationSerializer(many=True, required=False)
+    prestation_nom = serializers.CharField(source="prestation.nom", read_only=True)
+    demandeur_nom = serializers.SerializerMethodField()
 
     class Meta:
         """Configuration du serializer Reservation."""
@@ -88,7 +90,9 @@ class ReservationSerializer(serializers.ModelSerializer):
             "id",
             "numero",
             "prestation",
+            "prestation_nom",
             "demandeur",
+            "demandeur_nom",
             "validateur",
             "statut",
             "forced",
@@ -103,6 +107,20 @@ class ReservationSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "numero", "created_at", "updated_at"]
+
+    def get_demandeur_nom(self, obj):
+        """Nom lisible du demandeur : « Prénom Nom (username) », sinon username."""
+
+        demandeur = obj.demandeur
+
+        if demandeur is None:
+            return ""
+
+        full_name = f"{demandeur.first_name} {demandeur.last_name}".strip()
+
+        return (
+            f"{full_name} ({demandeur.username})" if full_name else demandeur.username
+        )
 
     def validate(self, attrs):
         """Règles métier : permissives en brouillon, strictes au-delà.

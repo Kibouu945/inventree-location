@@ -64,7 +64,9 @@ export interface Reservation {
   id: number;
   numero: string;
   prestation: number;
+  prestation_nom: string;
   demandeur: number;
+  demandeur_nom: string;
   validateur: number | null;
   statut: ReservationStatut | string;
   forced: boolean;

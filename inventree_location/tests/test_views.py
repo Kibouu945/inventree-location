@@ -148,6 +148,77 @@ class TestReservationListCreateView:
         assert response.data[0]["id"] == reservation.pk
 
     @pytest.mark.django_db
+    def test_list_exposes_prestation_and_demandeur_names(
+        self, factory, user, reservation
+    ):
+        request = factory.get("/plugin/inventree-location/reservations/")
+        force_authenticate(request, user=user)
+
+        response = ReservationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        row = response.data[0]
+        assert row["prestation_nom"] == reservation.prestation.nom
+        assert row["demandeur_nom"] == user.username
+
+    @pytest.mark.django_db
+    def test_list_ordered_by_date_demande_desc(self, factory, user, prestation):
+        now = timezone.now()
+        ancienne = Reservation.objects.create(
+            prestation=prestation, demandeur=user, date_demande=now - timedelta(days=2)
+        )
+        recente = Reservation.objects.create(
+            prestation=prestation, demandeur=user, date_demande=now
+        )
+
+        request = factory.get("/plugin/inventree-location/reservations/")
+        force_authenticate(request, user=user)
+
+        response = ReservationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        ids = [row["id"] for row in response.data]
+        assert ids == [recente.pk, ancienne.pk]
+
+    @pytest.mark.django_db
+    def test_list_search_filters_by_numero(self, factory, user, reservation):
+        autre_prestation = Prestation.objects.create(
+            manifestation=reservation.prestation.manifestation,
+            nom="Démontage",
+            date_debut=reservation.prestation.date_debut,
+            date_fin=reservation.prestation.date_fin,
+        )
+        autre = Reservation.objects.create(
+            prestation=autre_prestation, demandeur=user, date_demande=timezone.now()
+        )
+
+        request = factory.get(
+            "/plugin/inventree-location/reservations/",
+            {"search": reservation.numero},
+        )
+        force_authenticate(request, user=user)
+
+        response = ReservationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        ids = [row["id"] for row in response.data]
+        assert reservation.pk in ids
+        assert autre.pk not in ids
+
+    @pytest.mark.django_db
+    def test_list_search_filters_by_prestation_nom(self, factory, user, reservation):
+        request = factory.get(
+            "/plugin/inventree-location/reservations/",
+            {"search": reservation.prestation.nom},
+        )
+        force_authenticate(request, user=user)
+
+        response = ReservationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [row["id"] for row in response.data] == [reservation.pk]
+
+    @pytest.mark.django_db
     def test_create_reservation(self, factory, user, prestation):
         payload = {
             "prestation": prestation.pk,

@@ -1,16 +1,21 @@
 // Liste des réservations + modal de création/édition (RES-03).
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
+  Alert,
   Badge,
   Button,
   Group,
   Loader,
   Modal,
+  MultiSelect,
   Stack,
   Table,
   Text,
+  TextInput,
   Title
 } from '@mantine/core';
+import { DatePickerInput } from '@mantine/dates';
+import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
@@ -29,11 +34,53 @@ const STATUT_COLORS: Record<string, string> = {
   cloturee: 'dark'
 };
 
+// Statuts affichables dans le filtre (StatutReservation côté serveur).
+const STATUT_OPTIONS = [
+  { value: 'brouillon', label: 'Brouillon' },
+  { value: 'soumise', label: 'Soumise' },
+  { value: 'validee', label: 'Validée' },
+  { value: 'refusee', label: 'Refusée' },
+  { value: 'livree', label: 'Livrée' },
+  { value: 'retournee', label: 'Retournée' },
+  { value: 'cloturee', label: 'Clôturée' }
+];
+
 interface ModalState {
   open: boolean;
   reservationId?: number;
 }
 
+/** Construit les query params de la liste à partir de l'état des filtres. */
+function buildQuery(
+  search: string,
+  statuts: string[],
+  dateRange: [string | null, string | null]
+): Record<string, string | string[]> {
+  const params: Record<string, string | string[]> = {};
+
+  if (search.trim()) {
+    params.search = search.trim();
+  }
+  if (statuts.length > 0) {
+    params.statut = statuts;
+  }
+  if (dateRange[0]) {
+    params.date_from = dateRange[0];
+  }
+  if (dateRange[1]) {
+    params.date_to = dateRange[1];
+  }
+
+  return params;
+}
+
+/**
+ * Écran liste des réservations (RES-03).
+ *
+ * Tableau (numéro, demandeur, événement, dates, statut, nb objets) filtrable
+ * par recherche, statut et période. Le tri par date décroissante est assuré
+ * côté serveur. Ouvre le formulaire de création/édition dans une modale.
+ */
 export function ReservationsList({
   context
 }: {
@@ -41,11 +88,21 @@ export function ReservationsList({
 }) {
   const [modalState, setModalState] = useState<ModalState>({ open: false });
 
+  const [search, setSearch] = useState('');
+  const [debouncedSearch] = useDebouncedValue(search, 300);
+  const [statuts, setStatuts] = useState<string[]>([]);
+  const [dateRange, setDateRange] = useState<[string | null, string | null]>([
+    null,
+    null
+  ]);
+
+  const params = buildQuery(debouncedSearch, statuts, dateRange);
+
   const query = useQuery<Reservation[] | Page<Reservation>>(
     {
-      queryKey: ['reservations'],
+      queryKey: ['reservations', params],
       queryFn: async () => {
-        const response = await context.api.get(RESERVATIONS_URL);
+        const response = await context.api.get(RESERVATIONS_URL, { params });
         return response.data;
       }
     },
@@ -75,6 +132,40 @@ export function ReservationsList({
         </Button>
       </Group>
 
+      <Group align='flex-end' gap='md' wrap='wrap'>
+        <TextInput
+          label='Recherche'
+          placeholder='Numéro, événement, demandeur…'
+          value={search}
+          onChange={(event) => setSearch(event.currentTarget.value)}
+          w={260}
+        />
+        <MultiSelect
+          label='Statut'
+          placeholder='Tous'
+          data={STATUT_OPTIONS}
+          value={statuts}
+          onChange={setStatuts}
+          clearable
+          w={240}
+        />
+        <DatePickerInput
+          type='range'
+          label='Période'
+          placeholder='Retrait — Retour'
+          value={dateRange}
+          onChange={setDateRange}
+          clearable
+          w={260}
+        />
+      </Group>
+
+      {query.isError && (
+        <Alert color='red' title='Erreur'>
+          Impossible de charger les réservations.
+        </Alert>
+      )}
+
       {query.isLoading ? (
         <Group justify='center' p='xl'>
           <Loader />
@@ -86,9 +177,12 @@ export function ReservationsList({
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Numéro</Table.Th>
-              <Table.Th>Statut</Table.Th>
+              <Table.Th>Demandeur</Table.Th>
+              <Table.Th>Événement</Table.Th>
               <Table.Th>Retrait prévu</Table.Th>
               <Table.Th>Retour prévu</Table.Th>
+              <Table.Th>Statut</Table.Th>
+              <Table.Th>Nb objets</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -101,11 +195,8 @@ export function ReservationsList({
                 }
               >
                 <Table.Td>{reservation.numero}</Table.Td>
-                <Table.Td>
-                  <Badge color={STATUT_COLORS[reservation.statut] ?? 'gray'}>
-                    {reservation.statut}
-                  </Badge>
-                </Table.Td>
+                <Table.Td>{reservation.demandeur_nom || '—'}</Table.Td>
+                <Table.Td>{reservation.prestation_nom || '—'}</Table.Td>
                 <Table.Td>
                   {reservation.date_retrait_prevue
                     ? new Date(reservation.date_retrait_prevue).toLocaleString()
@@ -116,6 +207,12 @@ export function ReservationsList({
                     ? new Date(reservation.date_retour_prevue).toLocaleString()
                     : '—'}
                 </Table.Td>
+                <Table.Td>
+                  <Badge color={STATUT_COLORS[reservation.statut] ?? 'gray'}>
+                    {reservation.statut}
+                  </Badge>
+                </Table.Td>
+                <Table.Td>{reservation.lignes.length}</Table.Td>
               </Table.Tr>
             ))}
           </Table.Tbody>
