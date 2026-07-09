@@ -38,6 +38,7 @@ class StatutReservation(models.TextChoices):
     SOUMISE = "soumise", _("Soumise")
     VALIDEE = "validee", _("Validée")
     REFUSEE = "refusee", _("Refusée")
+    ANNULEE = "annulee", _("Annulée")
     LIVREE = "livree", _("Livrée")
     RETOURNEE = "retournee", _("Retournée")
     CLOTUREE = "cloturee", _("Clôturée")
@@ -494,6 +495,5 @@ class ReservationStatusLog(TimestampedModel):
 
     def __str__(self):
         return (
-            f"Réservation #{self.reservation_id}: "
-            f"{self.from_status} → {self.to_status}"
+            f"Réservation #{self.reservation_id}: {self.from_status} → {self.to_status}"
         )

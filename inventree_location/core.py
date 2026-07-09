@@ -67,16 +67,19 @@ class InvenTreeLocation(
         from django.urls import path
 
         from .views import (
+            CatalogPartDetailView,
             CatalogPartListView,
             ExampleView,
             GeocodeAddressView,
             LieuDetailView,
             LieuListCreateView,
+            PrestationListView,
             RentableFlagBulkUpdateView,
             RentablePartDetailView,
             ReservationDetailView,
             ReservationListCreateView,
             ReservationTransitionView,
+            UserListView,
         )
 
         return [
@@ -89,6 +92,11 @@ class InvenTreeLocation(
                 "catalog/rentable/",
                 RentableFlagBulkUpdateView.as_view(),
                 name="catalog-rentable-bulk-update",
+            ),
+            path(
+                "catalog/<int:pk>/",
+                CatalogPartDetailView.as_view(),
+                name="catalog-part-detail",
             ),
             path(
                 "catalog/<int:pk>/rentable/",
@@ -110,6 +118,16 @@ class InvenTreeLocation(
                 ReservationTransitionView.as_view(),
                 name="reservation-transition",
             ),
+            path(
+                "prestations/",
+                PrestationListView.as_view(),
+                name="prestation-list",
+            ),
+            path(
+                "users/",
+                UserListView.as_view(),
+                name="user-list",
+            ),
         ]
 
     # User interface elements (from UserInterfaceMixin)
@@ -121,21 +139,32 @@ class InvenTreeLocation(
         panels = []
 
         if context.get("target_model") == "part":
-            panels.append(
-                {
-                    "key": "inventree-location-panel",
-                    "title": "InvenTree Location",
-                    "description": "Custom panel description",
-                    "icon": "ti:mood-smile:outline",
-                    "source": self.plugin_static_file(
-                        "Panel.js:renderInvenTreeLocationPanel"
-                    ),
-                    "context": {
-                        "settings": self.get_settings_dict(),
-                        "foo": "bar",
-                    },
-                }
-            )
+            panels.append({
+                "key": "inventree-location-panel",
+                "title": "InvenTree Location",
+                "description": "Custom panel description",
+                "icon": "ti:mood-smile:outline",
+                "source": self.plugin_static_file(
+                    "Panel.js:renderInvenTreeLocationPanel"
+                ),
+                "context": {
+                    "settings": self.get_settings_dict(),
+                    "foo": "bar",
+                },
+            })
+
+            panels.append({
+                "key": "inventree-location-part-detail",
+                "title": "Fiche location",
+                "description": "Fiche détail location de l'article",
+                "icon": "ti:file-description:outline",
+                "source": self.plugin_static_file(
+                    "PartDetail.js:renderInvenTreeLocationPartDetail"
+                ),
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
 
         return panels
 
@@ -147,36 +176,50 @@ class InvenTreeLocation(
 
         items = []
 
-        items.append(
-            {
-                "key": "inventree-location-dashboard",
-                "title": "InvenTree Location Dashboard Item",
-                "description": "Custom dashboard item",
-                "icon": "ti:dashboard:outline",
-                "source": self.plugin_static_file(
-                    "Dashboard.js:renderInvenTreeLocationDashboardItem"
-                ),
-                "context": {
-                    "settings": self.get_settings_dict(),
-                    "bar": "foo",
-                },
-            }
-        )
+        items.append({
+            "key": "inventree-location-dashboard",
+            "title": "InvenTree Location Dashboard Item",
+            "description": "Custom dashboard item",
+            "icon": "ti:dashboard:outline",
+            "source": self.plugin_static_file(
+                "Dashboard.js:renderInvenTreeLocationDashboardItem"
+            ),
+            "context": {
+                "settings": self.get_settings_dict(),
+                "bar": "foo",
+            },
+        })
 
-        items.append(
-            {
-                "key": "inventree-location-catalog",
-                "title": "Catalogue du matériel",
-                "description": "Liste filtrable du matériel louable",
-                "icon": "ti:list-search:outline",
-                "source": self.plugin_static_file(
-                    "Catalog.js:renderInvenTreeLocationCatalog"
-                ),
-                "context": {
-                    "settings": self.get_settings_dict(),
-                },
-            }
-        )
+        items.append({
+            "key": "inventree-location-catalog",
+            "title": "Catalogue du matériel",
+            "description": "Liste filtrable du matériel louable",
+            "icon": "ti:list-search:outline",
+            "source": self.plugin_static_file(
+                "Catalog.js:renderInvenTreeLocationCatalog"
+            ),
+            "context": {
+                "settings": self.get_settings_dict(),
+            },
+        })
+
+        items.append({
+            "key": "inventree-location-reservations",
+            "title": "Réservations",
+            "description": "Création et suivi des réservations de matériel",
+            "icon": "ti:calendar-event:outline",
+            "source": self.plugin_static_file(
+                "Reservations.js:renderInvenTreeLocationReservations"
+            ),
+            # Liste dense (filtres + tableau + modale)
+            "options": {
+                "width": 12,
+                "height": 8,
+            },
+            "context": {
+                "settings": self.get_settings_dict(),
+            },
+        })
 
         return items
 

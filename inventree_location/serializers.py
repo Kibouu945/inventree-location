@@ -25,13 +25,11 @@ def geocode_address(address):
     if not address:
         return None
 
-    query = urlencode(
-        {
-            "q": address,
-            "format": "json",
-            "limit": 1,
-        }
-    )
+    query = urlencode({
+        "q": address,
+        "format": "json",
+        "limit": 1,
+    })
 
     url = f"https://nominatim.openstreetmap.org/search?{query}"
 
@@ -290,12 +288,10 @@ class ReservationSerializer(serializers.ModelSerializer):
 
         reservation.lignes.all().delete()
 
-        LigneReservation.objects.bulk_create(
-            [
-                LigneReservation(reservation=reservation, **ligne_data)
-                for ligne_data in lignes_data
-            ]
-        )
+        LigneReservation.objects.bulk_create([
+            LigneReservation(reservation=reservation, **ligne_data)
+            for ligne_data in lignes_data
+        ])
 
 
 class RentableItemSerializer(serializers.ModelSerializer):

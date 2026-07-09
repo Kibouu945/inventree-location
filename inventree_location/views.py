@@ -236,9 +236,7 @@ class ReservationTransitionView(APIView):
             {
                 "reservation": reservation.pk,
                 "current_status": reservation.statut,
-                "available_transitions": get_available_transitions(
-                    reservation.statut
-                ),
+                "available_transitions": get_available_transitions(reservation.statut),
             },
             status=status.HTTP_200_OK,
         )

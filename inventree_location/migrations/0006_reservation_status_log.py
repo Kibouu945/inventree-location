@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
-        ("inventree_location", "0003_create_role_groups"),
+        ("inventree_location", "0005_alter_reservation_date_demande"),
     ]
 
     operations = [
@@ -39,7 +39,7 @@ class Migration(migrations.Migration):
             fields=[
                 (
                     "id",
-                    models.BigAutoField(
+                    models.AutoField(
                         auto_created=True,
                         primary_key=True,
                         serialize=False,
@@ -50,14 +50,14 @@ class Migration(migrations.Migration):
                     "created_at",
                     models.DateTimeField(
                         auto_now_add=True,
-                        verbose_name=_("créé le"),
+                        verbose_name=_("date de création"),
                     ),
                 ),
                 (
                     "updated_at",
                     models.DateTimeField(
                         auto_now=True,
-                        verbose_name=_("mis à jour le"),
+                        verbose_name=_("date de modification"),
                     ),
                 ),
                 (

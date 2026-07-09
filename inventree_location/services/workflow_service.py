@@ -49,22 +49,18 @@ def transition_reservation_status(reservation, new_status, user=None, comment=""
     available_transitions = get_available_transitions(old_status)
 
     if new_status == old_status:
-        raise serializers.ValidationError(
-            {
-                "detail": "La réservation possède déjà ce statut.",
-                "current_status": old_status,
-            }
-        )
+        raise serializers.ValidationError({
+            "detail": "La réservation possède déjà ce statut.",
+            "current_status": old_status,
+        })
 
     if new_status not in available_transitions:
-        raise serializers.ValidationError(
-            {
-                "detail": "Transition de statut invalide.",
-                "current_status": old_status,
-                "requested_status": new_status,
-                "available_transitions": available_transitions,
-            }
-        )
+        raise serializers.ValidationError({
+            "detail": "Transition de statut invalide.",
+            "current_status": old_status,
+            "requested_status": new_status,
+            "available_transitions": available_transitions,
+        })
 
     reservation.statut = new_status
 
