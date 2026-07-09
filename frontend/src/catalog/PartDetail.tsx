@@ -112,11 +112,7 @@ function PartDetailPanel({ context }: { context: InvenTreePluginContext }) {
         <Button
           variant='outline'
           color='blue'
-          onClick={() =>
-            context.navigate(
-              `/plugin/inventree-location/reservations/?part=${partId}`
-            )
-          }
+          onClick={() => context.navigate('/home/')}
         >
           Voir les réservations en cours
         </Button>

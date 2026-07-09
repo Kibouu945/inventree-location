@@ -73,10 +73,12 @@ class InvenTreeLocation(
             GeocodeAddressView,
             LieuDetailView,
             LieuListCreateView,
+            PrestationListView,
             RentableFlagBulkUpdateView,
             RentablePartDetailView,
             ReservationDetailView,
             ReservationListCreateView,
+            UserListView,
         )
 
         return [
@@ -85,7 +87,11 @@ class InvenTreeLocation(
             path("lieux/<int:pk>/", LieuDetailView.as_view(), name="lieu-detail"),
             path("geocode/", GeocodeAddressView.as_view(), name="geocode-address"),
             path("catalog/", CatalogPartListView.as_view(), name="catalog-part-list"),
-            path("catalog/<int:pk>/", CatalogPartDetailView.as_view(), name="catalog-part-detail"),
+            path(
+                "catalog/<int:pk>/",
+                CatalogPartDetailView.as_view(),
+                name="catalog-part-detail",
+            ),
             path(
                 "catalog/rentable/",
                 RentableFlagBulkUpdateView.as_view(),
@@ -105,6 +111,16 @@ class InvenTreeLocation(
                 "reservations/<int:pk>/",
                 ReservationDetailView.as_view(),
                 name="reservation-detail",
+            ),
+            path(
+                "prestations/",
+                PrestationListView.as_view(),
+                name="prestation-list",
+            ),
+            path(
+                "users/",
+                UserListView.as_view(),
+                name="user-list",
             ),
         ]
 
@@ -128,6 +144,19 @@ class InvenTreeLocation(
                 "context": {
                     "settings": self.get_settings_dict(),
                     "foo": "bar",
+                },
+            })
+
+            panels.append({
+                "key": "inventree-location-part-detail",
+                "title": "Fiche location",
+                "description": "Fiche détail location de l'article",
+                "icon": "ti:file-description:outline",
+                "source": self.plugin_static_file(
+                    "PartDetail.js:renderInvenTreeLocationPartDetail"
+                ),
+                "context": {
+                    "settings": self.get_settings_dict(),
                 },
             })
 
@@ -163,6 +192,24 @@ class InvenTreeLocation(
             "source": self.plugin_static_file(
                 "Catalog.js:renderInvenTreeLocationCatalog"
             ),
+            "context": {
+                "settings": self.get_settings_dict(),
+            },
+        })
+
+        items.append({
+            "key": "inventree-location-reservations",
+            "title": "Réservations",
+            "description": "Création et suivi des réservations de matériel",
+            "icon": "ti:calendar-event:outline",
+            "source": self.plugin_static_file(
+                "Reservations.js:renderInvenTreeLocationReservations"
+            ),
+            # Liste dense (filtres + tableau + modale)
+            "options": {
+                "width": 12,
+                "height": 8,
+            },
             "context": {
                 "settings": self.get_settings_dict(),
             },

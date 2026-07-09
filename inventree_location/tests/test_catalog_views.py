@@ -136,6 +136,42 @@ class TestCatalogRentableFiltering:
         # CAT-02 : la spec demande 50 éléments par page.
         assert CatalogPagination.page_size == 50
 
+    @pytest.mark.django_db
+    def test_virtual_flag_is_exposed_and_filtered(self, factory, user, categorie):
+        materiel = Part.objects.create(name="Tente 6 places", category=categorie)
+        service = Part.objects.create(name="Prestation nettoyage", category=categorie)
+        RentableItem.objects.create(part=service, is_virtual=True)
+
+        request = factory.get(CATALOG_URL, {"rentable": "all"})
+        force_authenticate(request, user=user)
+        response = CatalogPartListView.as_view()(request)
+        by_name = {row["name"]: row for row in response.data["results"]}
+        assert by_name["Tente 6 places"]["is_virtual"] is False
+        assert by_name["Prestation nettoyage"]["is_virtual"] is True
+
+        request = factory.get(CATALOG_URL, {"virtual": "true", "rentable": "all"})
+        force_authenticate(request, user=user)
+        response = CatalogPartListView.as_view()(request)
+        assert _names(response) == {"Prestation nettoyage"}
+
+        request = factory.get(CATALOG_URL, {"virtual": "false", "rentable": "all"})
+        force_authenticate(request, user=user)
+        response = CatalogPartListView.as_view()(request)
+        assert "Prestation nettoyage" not in _names(response)
+        assert materiel.name in _names(response)
+
+    @pytest.mark.django_db
+    def test_ids_filter_returns_exact_matches(self, factory, user, parts):
+        request = factory.get(
+            CATALOG_URL,
+            {"ids": f"{parts['tente'].pk},{parts['gobelet'].pk}", "rentable": "all"},
+        )
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        assert _names(response) == {"Tente 4 places", "Gobelet carton"}
+
 
 class TestRentableFlagBulkUpdate:
     def test_anonymous_returns_401(self, factory):

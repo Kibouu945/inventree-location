@@ -50,6 +50,7 @@ export default defineConfig({
         './src/Dashboard.tsx',
         './src/Settings.tsx',
         './src/Catalog.tsx',
+        './src/Reservations.tsx',
         './src/PartDetail.tsx',
       ],
       output: [

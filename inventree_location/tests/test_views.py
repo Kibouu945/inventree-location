@@ -15,12 +15,21 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from inventree_location.models import Groupe, Manifestation, Prestation, Reservation
+from inventree_location.models import (
+    Groupe,
+    LigneReservation,
+    Manifestation,
+    Prestation,
+    RentableItem,
+    Reservation,
+)
 from inventree_location.views import (
     ExampleView,
     ReservationDetailView,
     ReservationListCreateView,
 )
+
+from part.models import Part
 
 
 User = get_user_model()
@@ -139,6 +148,77 @@ class TestReservationListCreateView:
         assert response.data[0]["id"] == reservation.pk
 
     @pytest.mark.django_db
+    def test_list_exposes_prestation_and_demandeur_names(
+        self, factory, user, reservation
+    ):
+        request = factory.get("/plugin/inventree-location/reservations/")
+        force_authenticate(request, user=user)
+
+        response = ReservationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        row = response.data[0]
+        assert row["prestation_nom"] == reservation.prestation.nom
+        assert row["demandeur_nom"] == user.username
+
+    @pytest.mark.django_db
+    def test_list_ordered_by_date_demande_desc(self, factory, user, prestation):
+        now = timezone.now()
+        ancienne = Reservation.objects.create(
+            prestation=prestation, demandeur=user, date_demande=now - timedelta(days=2)
+        )
+        recente = Reservation.objects.create(
+            prestation=prestation, demandeur=user, date_demande=now
+        )
+
+        request = factory.get("/plugin/inventree-location/reservations/")
+        force_authenticate(request, user=user)
+
+        response = ReservationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        ids = [row["id"] for row in response.data]
+        assert ids == [recente.pk, ancienne.pk]
+
+    @pytest.mark.django_db
+    def test_list_search_filters_by_numero(self, factory, user, reservation):
+        autre_prestation = Prestation.objects.create(
+            manifestation=reservation.prestation.manifestation,
+            nom="Démontage",
+            date_debut=reservation.prestation.date_debut,
+            date_fin=reservation.prestation.date_fin,
+        )
+        autre = Reservation.objects.create(
+            prestation=autre_prestation, demandeur=user, date_demande=timezone.now()
+        )
+
+        request = factory.get(
+            "/plugin/inventree-location/reservations/",
+            {"search": reservation.numero},
+        )
+        force_authenticate(request, user=user)
+
+        response = ReservationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        ids = [row["id"] for row in response.data]
+        assert reservation.pk in ids
+        assert autre.pk not in ids
+
+    @pytest.mark.django_db
+    def test_list_search_filters_by_prestation_nom(self, factory, user, reservation):
+        request = factory.get(
+            "/plugin/inventree-location/reservations/",
+            {"search": reservation.prestation.nom},
+        )
+        force_authenticate(request, user=user)
+
+        response = ReservationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [row["id"] for row in response.data] == [reservation.pk]
+
+    @pytest.mark.django_db
     def test_create_reservation(self, factory, user, prestation):
         payload = {
             "prestation": prestation.pk,
@@ -209,7 +289,19 @@ class TestReservationDetailView:
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
     @pytest.mark.django_db
-    def test_patch_updates_statut(self, factory, user, reservation):
+    def test_patch_updates_statut(self, factory, user, reservation, prestation):
+        # La soumission (RES-03) exige dates + au moins une ligne virtuelle :
+        # on complète la réservation brouillon avant de la soumettre.
+        reservation.date_retrait_prevue = prestation.date_debut
+        reservation.date_retour_prevue = prestation.date_fin
+        reservation.save()
+
+        article_virtuel = Part.objects.create(name="Prestation nettoyage")
+        RentableItem.objects.create(part=article_virtuel, is_virtual=True)
+        LigneReservation.objects.create(
+            reservation=reservation, part=article_virtuel, quantite_demandee=1
+        )
+
         request = factory.patch(
             f"/plugin/inventree-location/reservations/{reservation.pk}/",
             {"statut": "soumise"},
