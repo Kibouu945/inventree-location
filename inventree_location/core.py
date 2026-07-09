@@ -205,6 +205,11 @@ class InvenTreeLocation(
             "source": self.plugin_static_file(
                 "Reservations.js:renderInvenTreeLocationReservations"
             ),
+            # Liste dense (filtres + tableau + modale)
+            "options": {
+                "width": 12,
+                "height": 8,
+            },
             "context": {
                 "settings": self.get_settings_dict(),
             },
