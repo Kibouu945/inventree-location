@@ -5,14 +5,16 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 from .models import (
     LigneReservation,
     Lieu,
-    RentableItem,
     Reservation,
     ReservationStatusLog,
+    Prestation,
+    RentableItem,
     StatutReservation,
 )
 
@@ -132,6 +134,8 @@ class ReservationSerializer(serializers.ModelSerializer):
 
     lignes = LigneReservationSerializer(many=True, required=False)
     status_logs = ReservationStatusLogSerializer(many=True, read_only=True)
+    prestation_nom = serializers.CharField(source="prestation.nom", read_only=True)
+    demandeur_nom = serializers.SerializerMethodField()
 
     class Meta:
         """Configuration du serializer Reservation."""
@@ -139,8 +143,11 @@ class ReservationSerializer(serializers.ModelSerializer):
         model = Reservation
         fields = [
             "id",
+            "numero",
             "prestation",
+            "prestation_nom",
             "demandeur",
+            "demandeur_nom",
             "validateur",
             "statut",
             "forced",
@@ -155,7 +162,106 @@ class ReservationSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at", "status_logs"]
+        read_only_fields = ["id", "numero", "created_at", "updated_at", "status_logs"]
+
+    def get_demandeur_nom(self, obj):
+        """Nom lisible du demandeur : « Prénom Nom (username) », sinon username."""
+
+        demandeur = obj.demandeur
+
+        if demandeur is None:
+            return ""
+
+        full_name = f"{demandeur.first_name} {demandeur.last_name}".strip()
+
+        return (
+            f"{full_name} ({demandeur.username})" if full_name else demandeur.username
+        )
+
+    def validate(self, attrs):
+        """Règles métier : permissives en brouillon, strictes au-delà.
+
+        Une réservation en statut `brouillon` peut être sauvegardée
+        incomplète. Dès qu'elle est soumise (ou plus), le demandeur, la
+        prestation, la période, au moins une ligne et au moins un article
+        virtuel (ex: prestation de nettoyage) deviennent obligatoires, et la
+        période doit couvrir au minimum les dates de la prestation.
+        """
+
+        statut = attrs.get(
+            "statut", getattr(self.instance, "statut", StatutReservation.BROUILLON)
+        )
+
+        if statut == StatutReservation.BROUILLON:
+            return attrs
+
+        def effective(field):
+            if field in attrs:
+                return attrs[field]
+            return getattr(self.instance, field, None) if self.instance else None
+
+        # `demandeur` et `prestation` sont des FK non-nullables : leur
+        # présence est déjà garantie par la validation de champ de DRF avant
+        # que `validate()` ne soit appelée.
+        prestation = effective("prestation")
+        date_retrait = effective("date_retrait_prevue")
+        date_retour = effective("date_retour_prevue")
+
+        errors = {}
+
+        if not date_retrait:
+            errors["date_retrait_prevue"] = (
+                "La date de retrait est obligatoire pour soumettre la réservation."
+            )
+        if not date_retour:
+            errors["date_retour_prevue"] = (
+                "La date de retour est obligatoire pour soumettre la réservation."
+            )
+
+        if date_retrait and date_retour:
+            if date_retrait > date_retour:
+                errors["date_retour_prevue"] = (
+                    "La date de retour doit être postérieure ou égale à la date de retrait."
+                )
+            elif prestation:
+                if date_retrait > prestation.date_debut:
+                    errors["date_retrait_prevue"] = (
+                        "La période doit couvrir au moins les dates de la prestation."
+                    )
+                if date_retour < prestation.date_fin:
+                    errors["date_retour_prevue"] = (
+                        "La période doit couvrir au moins les dates de la prestation."
+                    )
+
+        lignes = attrs.get("lignes")
+
+        if lignes is None and self.instance is not None:
+            lignes = list(self.instance.lignes.all())
+
+        lignes = lignes or []
+
+        if not lignes:
+            errors["lignes"] = (
+                "Au moins une ligne de matériel est obligatoire pour soumettre la réservation."
+            )
+        else:
+            part_ids = [
+                ligne.part_id if hasattr(ligne, "part_id") else ligne["part"].pk
+                for ligne in lignes
+            ]
+
+            if not RentableItem.objects.filter(
+                part_id__in=part_ids, is_virtual=True
+            ).exists():
+                errors["lignes"] = (
+                    "Au moins un article virtuel (ex: prestation de nettoyage) "
+                    "est obligatoire pour soumettre la réservation."
+                )
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        return attrs
 
     def create(self, validated_data):
         """Crée une réservation et ses lignes imbriquées."""
@@ -203,6 +309,7 @@ class RentableItemSerializer(serializers.ModelSerializer):
             "part",
             "is_rentable",
             "consommable",
+            "is_virtual",
             "caution",
             "valeur_remplacement",
             "seuil_alerte_bas",
@@ -348,8 +455,32 @@ class CatalogPartSerializer(serializers.Serializer):
     active = serializers.BooleanField(read_only=True)
     category = serializers.IntegerField(source="category_id", read_only=True)
     category_name = serializers.CharField(source="category.name", read_only=True)
+    stock_available = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
     rentable = serializers.SerializerMethodField()
     consommable = serializers.SerializerMethodField()
+    is_virtual = serializers.SerializerMethodField()
+
+    def get_stock_available(self, obj):
+        """Stock disponible de la part, exposé à 0 si non renseigné."""
+        for attr in ["stock_available", "available_stock"]:
+            value = getattr(obj, attr, None)
+            if value is not None:
+                try:
+                    return float(value)
+                except (ValueError, TypeError):
+                    return 0
+
+        return 0
+
+    def get_image_url(self, obj):
+        """URL de l'image principale si le modèle en expose une."""
+        for attr in ["image", "image_url", "thumbnail", "thumbnail_url"]:
+            value = getattr(obj, attr, None)
+            if value:
+                return str(value)
+
+        return None
 
     def get_rentable(self, obj):
         """Drapeau louable issu de RentableItem."""
@@ -370,3 +501,48 @@ class CatalogPartSerializer(serializers.Serializer):
             return False
 
         return bool(rentable_info.consommable)
+
+    def get_is_virtual(self, obj):
+        """Drapeau article virtuel issu de RentableItem (False par défaut)."""
+        rentable_info = getattr(obj, "rentable_info", None)
+
+        if rentable_info is None:
+            return False
+
+        return bool(rentable_info.is_virtual)
+
+
+class UserSerializer(serializers.ModelSerializer):
+    """Sérialiseur léger d'un utilisateur InvenTree (sélecteur demandeur)."""
+
+    class Meta:
+        """Configuration du serializer User."""
+
+        model = get_user_model()
+        fields = ["id", "username", "first_name", "last_name", "email"]
+        read_only_fields = fields
+
+
+class PrestationSerializer(serializers.ModelSerializer):
+    """Sérialiseur de lecture d'une prestation, avec manifestation et lieux."""
+
+    manifestation_nom = serializers.CharField(
+        source="manifestation.nom", read_only=True
+    )
+    lieux = LieuSerializer(many=True, read_only=True)
+
+    class Meta:
+        """Configuration du serializer Prestation."""
+
+        model = Prestation
+        fields = [
+            "id",
+            "nom",
+            "date_debut",
+            "date_fin",
+            "description",
+            "manifestation",
+            "manifestation_nom",
+            "lieux",
+        ]
+        read_only_fields = fields

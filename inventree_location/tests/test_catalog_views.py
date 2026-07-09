@@ -16,6 +16,7 @@ from django.contrib.auth import get_user_model
 from inventree_location.models import RentableItem
 from inventree_location.views import (
     CatalogPagination,
+    CatalogPartDetailView,
     CatalogPartListView,
     RentableFlagBulkUpdateView,
     RentablePartDetailView,
@@ -40,8 +41,9 @@ def user(db):
 
     from inventree_location import roles
 
+    group, _created = Group.objects.get_or_create(name=roles.GESTIONNAIRE)
     account = User.objects.create_user(username="alice", password="pwd12345")
-    account.groups.add(Group.objects.get(name=roles.GESTIONNAIRE))
+    account.groups.add(group)
     return account
 
 
@@ -134,6 +136,42 @@ class TestCatalogRentableFiltering:
         # CAT-02 : la spec demande 50 éléments par page.
         assert CatalogPagination.page_size == 50
 
+    @pytest.mark.django_db
+    def test_virtual_flag_is_exposed_and_filtered(self, factory, user, categorie):
+        materiel = Part.objects.create(name="Tente 6 places", category=categorie)
+        service = Part.objects.create(name="Prestation nettoyage", category=categorie)
+        RentableItem.objects.create(part=service, is_virtual=True)
+
+        request = factory.get(CATALOG_URL, {"rentable": "all"})
+        force_authenticate(request, user=user)
+        response = CatalogPartListView.as_view()(request)
+        by_name = {row["name"]: row for row in response.data["results"]}
+        assert by_name["Tente 6 places"]["is_virtual"] is False
+        assert by_name["Prestation nettoyage"]["is_virtual"] is True
+
+        request = factory.get(CATALOG_URL, {"virtual": "true", "rentable": "all"})
+        force_authenticate(request, user=user)
+        response = CatalogPartListView.as_view()(request)
+        assert _names(response) == {"Prestation nettoyage"}
+
+        request = factory.get(CATALOG_URL, {"virtual": "false", "rentable": "all"})
+        force_authenticate(request, user=user)
+        response = CatalogPartListView.as_view()(request)
+        assert "Prestation nettoyage" not in _names(response)
+        assert materiel.name in _names(response)
+
+    @pytest.mark.django_db
+    def test_ids_filter_returns_exact_matches(self, factory, user, parts):
+        request = factory.get(
+            CATALOG_URL,
+            {"ids": f"{parts['tente'].pk},{parts['gobelet'].pk}", "rentable": "all"},
+        )
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        assert _names(response) == {"Tente 4 places", "Gobelet carton"}
+
 
 class TestRentableFlagBulkUpdate:
     def test_anonymous_returns_401(self, factory):
@@ -175,6 +213,38 @@ class TestRentableFlagBulkUpdate:
 
         response = RentableFlagBulkUpdateView.as_view()(request)
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+class TestCatalogPartDetail:
+    def _url(self, pk):
+        return f"/plugin/inventree-location/catalog/{pk}/"
+
+    @pytest.mark.django_db
+    def test_get_returns_part_detail(self, factory, user, parts):
+        request = factory.get(self._url(parts["tente"].pk))
+        force_authenticate(request, user=user)
+
+        response = CatalogPartDetailView.as_view()(request, pk=parts["tente"].pk)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["id"] == parts["tente"].pk
+        assert response.data["name"] == "Tente 4 places"
+        assert response.data["rentable"] is True
+        assert response.data["consommable"] is False
+
+    @pytest.mark.django_db
+    def test_get_missing_part_returns_404(self, factory, user):
+        request = factory.get(self._url(99999))
+        force_authenticate(request, user=user)
+
+        response = CatalogPartDetailView.as_view()(request, pk=99999)
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_anonymous_returns_401(self, factory, parts):
+        """Une requête anonyme doit renvoyer 401 sur l'endpoint détail."""
+        request = factory.get(self._url(parts["tente"].pk))
+        response = CatalogPartDetailView.as_view()(request, pk=parts["tente"].pk)
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 class TestRentablePartDetail:

@@ -5,25 +5,29 @@ import random
 import string
 from urllib.error import HTTPError, URLError
 
+from django.contrib.auth import get_user_model
 from django.db.models import Q
 from rest_framework import generics, permissions, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Lieu, RentableItem, Reservation
+from .models import Lieu, Prestation, RentableItem, Reservation
 from .permissions import (
     CatalogPermission,
     LieuPermission,
     ReservationPermission,
+    RoleBasedPermission,
 )
 from .serializers import (
     CatalogPartSerializer,
     ExampleSerializer,
     LieuSerializer,
+    PrestationSerializer,
     RentableItemSerializer,
     ReservationSerializer,
     ReservationTransitionSerializer,
+    UserSerializer,
     geocode_address,
 )
 from .services.workflow_service import (
@@ -145,18 +149,32 @@ class GeocodeAddressView(APIView):
 
 
 class ReservationListCreateView(generics.ListCreateAPIView):
-    """CRUD réservation — partie collection."""
+    """CRUD réservation — partie collection.
+
+    - GET  : liste les réservations, filtrables par statut et période.
+    - POST : crée une nouvelle réservation (lignes imbriquées supportées).
+
+    Paramètres de filtre :
+    - statut    : filtre exact sur le statut (répétable)
+    - date_from : réservations dont le retour prévu est >= à cette date
+    - date_to   : réservations dont le retrait prévu est <= à cette date
+    - search    : recherche sur le numéro, l'événement ou le demandeur
+
+    Tri par date de demande décroissante par défaut.
+    """
 
     serializer_class = ReservationSerializer
     permission_classes = [ReservationPermission]
 
     def get_queryset(self):
-        """Retourne les réservations, filtrées par statut et période."""
+        """Retourne les réservations, filtrées par statut, période et recherche."""
 
-        queryset = Reservation.objects.prefetch_related(
-            "lignes",
-            "status_logs",
-        ).all()
+        queryset = (
+            Reservation.objects.select_related("prestation", "demandeur")
+            .prefetch_related("lignes")
+            .all()
+            .order_by("-date_demande")
+        )
 
         statuts = self.request.query_params.getlist("statut")
 
@@ -171,6 +189,17 @@ class ReservationListCreateView(generics.ListCreateAPIView):
 
         if date_to:
             queryset = queryset.filter(date_retrait_prevue__lte=date_to)
+
+        search = self.request.query_params.get("search")
+
+        if search:
+            queryset = queryset.filter(
+                Q(numero__icontains=search)
+                | Q(prestation__nom__icontains=search)
+                | Q(demandeur__username__icontains=search)
+                | Q(demandeur__first_name__icontains=search)
+                | Q(demandeur__last_name__icontains=search)
+            )
 
         return queryset
 
@@ -261,6 +290,11 @@ class CatalogPartListView(APIView):
         categories = request.query_params.get("categories")
         active = request.query_params.get("active")
         rentable = request.query_params.get("rentable")
+        virtual = request.query_params.get("virtual")
+        ids = request.query_params.get("ids")
+
+        if ids:
+            queryset = queryset.filter(pk__in=self._parse_ids(ids))
 
         if search:
             queryset = queryset.filter(
@@ -280,6 +314,7 @@ class CatalogPartListView(APIView):
             queryset = queryset.filter(active=active_value)
 
         queryset = self._filter_rentable(queryset, rentable)
+        queryset = self._filter_virtual(queryset, virtual)
 
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(queryset, request)
@@ -287,6 +322,11 @@ class CatalogPartListView(APIView):
         serializer = self.serializer_class(page, many=True)
 
         return paginator.get_paginated_response(serializer.data)
+
+    def _parse_ids(self, ids):
+        """Parse une liste d'identifiants de Part séparés par des virgules."""
+
+        return [int(value) for value in str(ids).split(",") if value.strip().isdigit()]
 
     def _parse_category_ids(self, category, categories):
         """Parse category filters from query parameters."""
@@ -343,6 +383,51 @@ class CatalogPartListView(APIView):
 
         return queryset.filter(rentable_info__is_rentable=False)
 
+    def _filter_virtual(self, queryset, virtual):
+        """Filtre optionnel sur le drapeau article virtuel de RentableItem.
+
+        - virtual absent : pas de filtre (matériel réel + virtuel).
+        - virtual=true    : articles virtuels uniquement (ex: prestations).
+        - virtual=false   : matériel réel uniquement.
+        """
+
+        virtual_value = self._parse_boolean(virtual)
+
+        if virtual_value is None:
+            return queryset
+
+        if virtual_value:
+            return queryset.filter(rentable_info__is_virtual=True)
+
+        return queryset.filter(
+            Q(rentable_info__is_virtual=False) | Q(rentable_info__isnull=True)
+        )
+
+
+class CatalogPartDetailView(APIView):
+    """Fiche détail d'un Part du catalogue."""
+
+    permission_classes = [CatalogPermission]
+    serializer_class = CatalogPartSerializer
+
+    def get(self, request, pk, *args, **kwargs):
+        from part.models import Part
+
+        part = (
+            Part.objects.select_related("category", "rentable_info")
+            .filter(pk=pk)
+            .first()
+        )
+
+        if part is None:
+            return Response(
+                {"detail": "Part introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = self.serializer_class(part)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 class RentableFlagBulkUpdateView(APIView):
     """Met à jour en masse le drapeau louable / consommable de Part."""
@@ -369,6 +454,9 @@ class RentableFlagBulkUpdateView(APIView):
 
         if "consommable" in request.data:
             defaults["consommable"] = bool(request.data.get("consommable"))
+
+        if "is_virtual" in request.data:
+            defaults["is_virtual"] = bool(request.data.get("is_virtual"))
 
         if not defaults:
             return Response(
@@ -417,6 +505,7 @@ class RentablePartDetailView(APIView):
                     "part": pk,
                     "is_rentable": True,
                     "consommable": False,
+                    "is_virtual": False,
                     "caution": None,
                     "valeur_remplacement": None,
                     "seuil_alerte_bas": None,
@@ -450,3 +539,63 @@ class RentablePartDetailView(APIView):
         serializer.save()
 
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class PrestationListView(generics.ListAPIView):
+    """Liste des prestations (lecture seule), pour le sélecteur événement.
+
+    Paramètre de filtre :
+    - search : recherche sur le nom de la prestation ou de sa manifestation.
+    """
+
+    permission_classes = [RoleBasedPermission]
+    serializer_class = PrestationSerializer
+    pagination_class = LieuPagination
+
+    def get_queryset(self):
+        """Retourne les prestations, filtrées par recherche texte."""
+
+        queryset = (
+            Prestation.objects.select_related("manifestation")
+            .prefetch_related("lieux")
+            .all()
+            .order_by("-date_debut")
+        )
+
+        search = self.request.query_params.get("search")
+
+        if search:
+            queryset = queryset.filter(
+                Q(nom__icontains=search) | Q(manifestation__nom__icontains=search)
+            )
+
+        return queryset
+
+
+class UserListView(generics.ListAPIView):
+    """Liste des utilisateurs actifs (lecture seule), pour le sélecteur demandeur.
+
+    Paramètre de filtre :
+    - search : recherche sur username, prénom, nom ou email.
+    """
+
+    permission_classes = [RoleBasedPermission]
+    serializer_class = UserSerializer
+    pagination_class = CatalogPagination
+
+    def get_queryset(self):
+        """Retourne les utilisateurs actifs, filtrés par recherche texte."""
+
+        queryset = get_user_model().objects.filter(is_active=True).order_by("username")
+
+        search = self.request.query_params.get("search")
+
+        if search:
+            queryset = queryset.filter(
+                Q(username__icontains=search)
+                | Q(first_name__icontains=search)
+                | Q(last_name__icontains=search)
+                | Q(email__icontains=search)
+            )
+
+        return queryset
