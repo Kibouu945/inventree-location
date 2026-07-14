@@ -11,9 +11,10 @@ from rest_framework import serializers
 from .models import (
     LigneReservation,
     Lieu,
+    Reservation,
+    ReservationStatusLog,
     Prestation,
     RentableItem,
-    Reservation,
     StatutReservation,
 )
 
@@ -57,7 +58,7 @@ def geocode_address(address):
 
 
 class LigneReservationSerializer(serializers.ModelSerializer):
-    """Sérialiseur d'une ligne de réservation (Part natif + quantités)."""
+    """Sérialiseur d'une ligne de réservation."""
 
     class Meta:
         """Configuration du serializer LigneReservation."""
@@ -75,12 +76,65 @@ class LigneReservationSerializer(serializers.ModelSerializer):
         read_only_fields = ["id"]
 
 
+class ReservationStatusLogSerializer(serializers.ModelSerializer):
+    """Sérialiseur du journal de transition de statut."""
+
+    changed_by_username = serializers.CharField(
+        source="changed_by.username",
+        read_only=True,
+        allow_null=True,
+    )
+
+    class Meta:
+        """Configuration du serializer ReservationStatusLog."""
+
+        model = ReservationStatusLog
+        fields = [
+            "id",
+            "reservation",
+            "changed_by",
+            "changed_by_username",
+            "from_status",
+            "to_status",
+            "comment",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "reservation",
+            "changed_by",
+            "changed_by_username",
+            "from_status",
+            "to_status",
+            "comment",
+            "created_at",
+        ]
+
+
+class ReservationTransitionSerializer(serializers.Serializer):
+    """Serializer utilisé pour demander une transition de statut."""
+
+    statut = serializers.ChoiceField(
+        choices=StatutReservation.choices,
+        required=True,
+        help_text="Nouveau statut demandé pour la réservation.",
+    )
+    comment = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Commentaire facultatif lié à la transition.",
+    )
+
+
 class ReservationSerializer(serializers.ModelSerializer):
     """Sérialiseur DRF pour le modèle Reservation, avec lignes imbriquées."""
 
     lignes = LigneReservationSerializer(many=True, required=False)
+    status_logs = ReservationStatusLogSerializer(many=True, read_only=True)
     prestation_nom = serializers.CharField(source="prestation.nom", read_only=True)
     demandeur_nom = serializers.SerializerMethodField()
+    validateur_nom = serializers.SerializerMethodField()
 
     class Meta:
         """Configuration du serializer Reservation."""
@@ -94,6 +148,7 @@ class ReservationSerializer(serializers.ModelSerializer):
             "demandeur",
             "demandeur_nom",
             "validateur",
+            "validateur_nom",
             "statut",
             "forced",
             "date_demande",
@@ -103,24 +158,32 @@ class ReservationSerializer(serializers.ModelSerializer):
             "date_retour_reelle",
             "commentaire",
             "lignes",
+            "status_logs",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "numero", "created_at", "updated_at"]
+        read_only_fields = ["id", "numero", "created_at", "updated_at", "status_logs"]
 
-    def get_demandeur_nom(self, obj):
-        """Nom lisible du demandeur : « Prénom Nom (username) », sinon username."""
+    @staticmethod
+    def _user_label(user):
+        """Nom lisible d'un utilisateur : « Prénom Nom (username) », sinon username."""
 
-        demandeur = obj.demandeur
-
-        if demandeur is None:
+        if user is None:
             return ""
 
-        full_name = f"{demandeur.first_name} {demandeur.last_name}".strip()
+        full_name = f"{user.first_name} {user.last_name}".strip()
 
-        return (
-            f"{full_name} ({demandeur.username})" if full_name else demandeur.username
-        )
+        return f"{full_name} ({user.username})" if full_name else user.username
+
+    def get_demandeur_nom(self, obj):
+        """Nom lisible du demandeur."""
+
+        return self._user_label(obj.demandeur)
+
+    def get_validateur_nom(self, obj):
+        """Nom lisible du validateur (vide tant que la réservation n'est pas validée)."""
+
+        return self._user_label(obj.validateur)
 
     def validate(self, attrs):
         """Règles métier : permissives en brouillon, strictes au-delà.
@@ -241,7 +304,7 @@ class ReservationSerializer(serializers.ModelSerializer):
 
 
 class RentableItemSerializer(serializers.ModelSerializer):
-    """Drapeaux location (louable / consommable + champs financiers) d'un Part."""
+    """Drapeaux location d'un Part."""
 
     class Meta:
         """Configuration du serializer RentableItem."""
@@ -291,12 +354,7 @@ class ExampleSerializer(serializers.Serializer):
 
 
 class LieuSerializer(serializers.ModelSerializer):
-    """Serializer for location places with GPS coordinates.
-
-    If auto_geocode is set to true and an address is provided without
-    latitude / longitude, the serializer tries to fill GPS coordinates
-    automatically using the geocoding service.
-    """
+    """Serializer for location places with GPS coordinates."""
 
     auto_geocode = serializers.BooleanField(
         write_only=True,
@@ -430,10 +488,8 @@ class CatalogPartSerializer(serializers.Serializer):
         return None
 
     def get_rentable(self, obj):
-        """Drapeau louable issu de RentableItem.
+        """Drapeau louable issu de RentableItem."""
 
-        Un Part sans RentableItem associé est considéré louable par défaut.
-        """
         rentable_info = getattr(obj, "rentable_info", None)
 
         if rentable_info is None:
@@ -442,7 +498,8 @@ class CatalogPartSerializer(serializers.Serializer):
         return bool(rentable_info.is_rentable)
 
     def get_consommable(self, obj):
-        """Drapeau consommable issu de RentableItem (False par défaut)."""
+        """Drapeau consommable issu de RentableItem."""
+
         rentable_info = getattr(obj, "rentable_info", None)
 
         if rentable_info is None:

@@ -26,8 +26,13 @@ from .serializers import (
     PrestationSerializer,
     RentableItemSerializer,
     ReservationSerializer,
+    ReservationTransitionSerializer,
     UserSerializer,
     geocode_address,
+)
+from .services.workflow_service import (
+    get_available_transitions,
+    transition_reservation_status,
 )
 
 
@@ -100,13 +105,7 @@ class LieuListCreateView(generics.ListCreateAPIView):
 
 
 class LieuDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """Retrieve, update or delete a place.
-
-    This endpoint allows manual update of GPS coordinates:
-    - adresse
-    - latitude
-    - longitude
-    """
+    """Retrieve, update or delete a place."""
 
     permission_classes = [LieuPermission]
     serializer_class = LieuSerializer
@@ -206,32 +205,68 @@ class ReservationListCreateView(generics.ListCreateAPIView):
 
 
 class ReservationDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """CRUD réservation — partie instance unique.
+    """CRUD réservation — partie instance unique."""
 
-    - GET    : lit une réservation.
-    - PUT    : remplace l'intégralité de ses champs.
-    - PATCH  : modifie partiellement ses champs.
-    - DELETE : la supprime.
-    """
-
-    queryset = Reservation.objects.all()
+    queryset = Reservation.objects.prefetch_related(
+        "lignes",
+        "status_logs",
+    ).all()
     serializer_class = ReservationSerializer
     permission_classes = [ReservationPermission]
 
 
+class ReservationTransitionView(APIView):
+    """Endpoint permettant de faire évoluer le statut d'une réservation."""
+
+    permission_classes = [ReservationPermission]
+    serializer_class = ReservationTransitionSerializer
+
+    def get(self, request, pk, *args, **kwargs):
+        """Retourne les transitions disponibles pour la réservation."""
+
+        reservation = Reservation.objects.filter(pk=pk).first()
+
+        if reservation is None:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(
+            {
+                "reservation": reservation.pk,
+                "current_status": reservation.statut,
+                "available_transitions": get_available_transitions(reservation.statut),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def patch(self, request, pk, *args, **kwargs):
+        """Applique une transition de statut à une réservation."""
+
+        reservation = Reservation.objects.filter(pk=pk).first()
+
+        if reservation is None:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        result = transition_reservation_status(
+            reservation=reservation,
+            new_status=serializer.validated_data["statut"],
+            user=request.user,
+            comment=serializer.validated_data.get("comment", ""),
+        )
+
+        return Response(result, status=status.HTTP_200_OK)
+
+
 class CatalogPartListView(APIView):
-    """List InvenTree parts with catalog filters.
-
-    Supported query parameters:
-    - search: text search on name, description and IPN
-    - category: single category id
-    - categories: comma-separated category ids
-    - active: true / false
-    - rentable: true / false / all (par défaut : louable uniquement)
-
-    Le drapeau louable provient de RentableItem ; un Part sans RentableItem
-    associé est considéré louable par défaut.
-    """
+    """List InvenTree parts with catalog filters."""
 
     permission_classes = [CatalogPermission]
     serializer_class = CatalogPartSerializer
@@ -329,14 +364,7 @@ class CatalogPartListView(APIView):
         return None
 
     def _filter_rentable(self, queryset, rentable):
-        """Filtre le catalogue selon le drapeau louable de RentableItem.
-
-        Un Part sans RentableItem associé est considéré louable par défaut.
-        - rentable absent : filtre par défaut « louable uniquement »
-        - rentable=all    : pas de filtre (tout le matériel)
-        - rentable=true    : louables uniquement
-        - rentable=false   : non-louables uniquement
-        """
+        """Filtre le catalogue selon le drapeau louable de RentableItem."""
 
         if rentable is not None and str(rentable).lower().strip() == "all":
             return queryset
@@ -344,7 +372,6 @@ class CatalogPartListView(APIView):
         rentable_value = self._parse_boolean(rentable)
 
         if rentable_value is None:
-            # Par défaut, on n'expose que le matériel louable.
             rentable_value = True
 
         if rentable_value:
@@ -401,17 +428,7 @@ class CatalogPartDetailView(APIView):
 
 
 class RentableFlagBulkUpdateView(APIView):
-    """Met à jour en masse le drapeau louable / consommable de Part.
-
-    PATCH body attendu :
-        {
-            "part_ids": [1, 2, 3],
-            "is_rentable": false,        # optionnel
-            "consommable": true          # optionnel
-        }
-
-    Crée le RentableItem associé s'il n'existe pas encore.
-    """
+    """Met à jour en masse le drapeau louable / consommable de Part."""
 
     permission_classes = [CatalogPermission]
 
@@ -462,12 +479,7 @@ class RentableFlagBulkUpdateView(APIView):
 
 
 class RentablePartDetailView(APIView):
-    """Drapeaux location d'un Part unique (CAT-04 / CAT-05).
-
-    - GET   : retourne les drapeaux du Part (valeurs par défaut si aucun
-      RentableItem n'existe encore : louable=true, consommable=false).
-    - PATCH : crée ou met à jour le RentableItem (admin / gestionnaire).
-    """
+    """Drapeaux location d'un Part unique."""
 
     permission_classes = [CatalogPermission]
     serializer_class = RentableItemSerializer
@@ -517,7 +529,9 @@ class RentablePartDetailView(APIView):
 
         rentable_item, _created = RentableItem.objects.get_or_create(part_id=pk)
         serializer = self.serializer_class(
-            rentable_item, data=request.data, partial=True
+            rentable_item,
+            data=request.data,
+            partial=True,
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()

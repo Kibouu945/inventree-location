@@ -38,6 +38,7 @@ class StatutReservation(models.TextChoices):
     SOUMISE = "soumise", _("Soumise")
     VALIDEE = "validee", _("Validée")
     REFUSEE = "refusee", _("Refusée")
+    ANNULEE = "annulee", _("Annulée")
     LIVREE = "livree", _("Livrée")
     RETOURNEE = "retournee", _("Retournée")
     CLOTUREE = "cloturee", _("Clôturée")
@@ -445,3 +446,54 @@ class LigneReservation(TimestampedModel):
 
     def __str__(self):
         return f"part#{self.part_id} x{self.quantite_demandee}"
+
+
+class ReservationStatusLog(TimestampedModel):
+    """Journal des transitions de statut d'une réservation."""
+
+    reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.CASCADE,
+        related_name="status_logs",
+        verbose_name=_("réservation"),
+    )
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reservation_status_changes",
+        verbose_name=_("modifié par"),
+    )
+    from_status = models.CharField(
+        max_length=20,
+        choices=StatutReservation.choices,
+        verbose_name=_("ancien statut"),
+    )
+    to_status = models.CharField(
+        max_length=20,
+        choices=StatutReservation.choices,
+        verbose_name=_("nouveau statut"),
+    )
+    comment = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("commentaire"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-created_at"]
+        verbose_name = _("log de statut de réservation")
+        verbose_name_plural = _("logs de statut de réservation")
+        indexes = [
+            models.Index(
+                fields=["reservation", "created_at"],
+                name="resa_status_log_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Réservation #{self.reservation_id}: {self.from_status} → {self.to_status}"
+        )

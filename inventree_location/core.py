@@ -78,6 +78,7 @@ class InvenTreeLocation(
             RentablePartDetailView,
             ReservationDetailView,
             ReservationListCreateView,
+            ReservationTransitionView,
             UserListView,
         )
 
@@ -88,14 +89,14 @@ class InvenTreeLocation(
             path("geocode/", GeocodeAddressView.as_view(), name="geocode-address"),
             path("catalog/", CatalogPartListView.as_view(), name="catalog-part-list"),
             path(
-                "catalog/<int:pk>/",
-                CatalogPartDetailView.as_view(),
-                name="catalog-part-detail",
-            ),
-            path(
                 "catalog/rentable/",
                 RentableFlagBulkUpdateView.as_view(),
                 name="catalog-rentable-bulk-update",
+            ),
+            path(
+                "catalog/<int:pk>/",
+                CatalogPartDetailView.as_view(),
+                name="catalog-part-detail",
             ),
             path(
                 "catalog/<int:pk>/rentable/",
@@ -111,6 +112,11 @@ class InvenTreeLocation(
                 "reservations/<int:pk>/",
                 ReservationDetailView.as_view(),
                 name="reservation-detail",
+            ),
+            path(
+                "reservations/<int:pk>/transition/",
+                ReservationTransitionView.as_view(),
+                name="reservation-transition",
             ),
             path(
                 "prestations/",
