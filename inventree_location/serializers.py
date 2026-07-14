@@ -134,6 +134,7 @@ class ReservationSerializer(serializers.ModelSerializer):
     status_logs = ReservationStatusLogSerializer(many=True, read_only=True)
     prestation_nom = serializers.CharField(source="prestation.nom", read_only=True)
     demandeur_nom = serializers.SerializerMethodField()
+    validateur_nom = serializers.SerializerMethodField()
 
     class Meta:
         """Configuration du serializer Reservation."""
@@ -147,6 +148,7 @@ class ReservationSerializer(serializers.ModelSerializer):
             "demandeur",
             "demandeur_nom",
             "validateur",
+            "validateur_nom",
             "statut",
             "forced",
             "date_demande",
@@ -162,19 +164,26 @@ class ReservationSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "numero", "created_at", "updated_at", "status_logs"]
 
-    def get_demandeur_nom(self, obj):
-        """Nom lisible du demandeur : « Prénom Nom (username) », sinon username."""
+    @staticmethod
+    def _user_label(user):
+        """Nom lisible d'un utilisateur : « Prénom Nom (username) », sinon username."""
 
-        demandeur = obj.demandeur
-
-        if demandeur is None:
+        if user is None:
             return ""
 
-        full_name = f"{demandeur.first_name} {demandeur.last_name}".strip()
+        full_name = f"{user.first_name} {user.last_name}".strip()
 
-        return (
-            f"{full_name} ({demandeur.username})" if full_name else demandeur.username
-        )
+        return f"{full_name} ({user.username})" if full_name else user.username
+
+    def get_demandeur_nom(self, obj):
+        """Nom lisible du demandeur."""
+
+        return self._user_label(obj.demandeur)
+
+    def get_validateur_nom(self, obj):
+        """Nom lisible du validateur (vide tant que la réservation n'est pas validée)."""
+
+        return self._user_label(obj.validateur)
 
     def validate(self, attrs):
         """Règles métier : permissives en brouillon, strictes au-delà.
