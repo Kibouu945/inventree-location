@@ -1,13 +1,13 @@
 import {
-    checkPluginVersion,
-    type InvenTreePluginContext
+  checkPluginVersion,
+  type InvenTreePluginContext
 } from '@inventreedb/ui';
 
 import { ConflictsList } from './conflicts/ConflictsList';
 
 export function renderInvenTreeLocationConflicts(
-    context: InvenTreePluginContext
+  context: InvenTreePluginContext
 ) {
-    checkPluginVersion(context);
-    return <ConflictsList context={context} />;
+  checkPluginVersion(context);
+  return <ConflictsList context={context} />;
 }
