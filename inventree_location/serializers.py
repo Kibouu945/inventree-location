@@ -6,8 +6,10 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from rest_framework import serializers
 
+from .conflicts import detect_reservation_conflicts
 from .models import (
     LigneReservation,
     Lieu,
@@ -270,8 +272,9 @@ class ReservationSerializer(serializers.ModelSerializer):
 
         return attrs
 
+    @transaction.atomic
     def create(self, validated_data):
-        """Crée une réservation et ses lignes imbriquées."""
+        """Crée une réservation, ses lignes, et refuse la validation en conflit."""
 
         lignes_data = validated_data.pop("lignes", None)
         reservation = super().create(validated_data)
@@ -279,16 +282,21 @@ class ReservationSerializer(serializers.ModelSerializer):
         if lignes_data:
             self._replace_lignes(reservation, lignes_data)
 
+        self._validate_stock_conflicts_if_needed(reservation)
+
         return reservation
 
+    @transaction.atomic
     def update(self, instance, validated_data):
-        """Met à jour une réservation et, si fournies, remplace ses lignes."""
+        """Met à jour une réservation et refuse la validation en conflit."""
 
         lignes_data = validated_data.pop("lignes", None)
         reservation = super().update(instance, validated_data)
 
         if lignes_data is not None:
             self._replace_lignes(reservation, lignes_data)
+
+        self._validate_stock_conflicts_if_needed(reservation)
 
         return reservation
 
@@ -301,6 +309,29 @@ class ReservationSerializer(serializers.ModelSerializer):
             LigneReservation(reservation=reservation, **ligne_data)
             for ligne_data in lignes_data
         ])
+
+    def _validate_stock_conflicts_if_needed(self, reservation):
+        """Refuse la validation d'une réservation en conflit de stock non forcé.
+
+        La règle ne s'applique qu'au passage en statut « validée » : une
+        réservation `forced=True` peut être validée malgré les conflits
+        (US-03 : « Forcer malgré les conflits »). Levée dans la transaction
+        de create/update, la ValidationError annule donc la sauvegarde.
+        """
+
+        if reservation.statut != StatutReservation.VALIDEE or reservation.forced:
+            return
+
+        conflict_result = detect_reservation_conflicts(reservation)
+
+        if conflict_result["has_conflict"]:
+            raise serializers.ValidationError({
+                "detail": (
+                    "Validation refusée : conflit de stock détecté. "
+                    "Résolvez le conflit ou passez forced=true."
+                ),
+                "conflicts": conflict_result["conflicts"],
+            })
 
 
 class RentableItemSerializer(serializers.ModelSerializer):
@@ -315,6 +346,7 @@ class RentableItemSerializer(serializers.ModelSerializer):
             "is_rentable",
             "consommable",
             "is_virtual",
+            "stock_total",
             "caution",
             "valeur_remplacement",
             "seuil_alerte_bas",
@@ -465,6 +497,7 @@ class CatalogPartSerializer(serializers.Serializer):
     rentable = serializers.SerializerMethodField()
     consommable = serializers.SerializerMethodField()
     is_virtual = serializers.SerializerMethodField()
+    stock_total = serializers.SerializerMethodField()
 
     def get_stock_available(self, obj):
         """Stock disponible de la part, exposé à 0 si non renseigné."""
@@ -515,6 +548,15 @@ class CatalogPartSerializer(serializers.Serializer):
             return False
 
         return bool(rentable_info.is_virtual)
+
+    def get_stock_total(self, obj):
+        """Stock total louable issu de RentableItem (0 par défaut)."""
+        rentable_info = getattr(obj, "rentable_info", None)
+
+        if rentable_info is None:
+            return 0
+
+        return rentable_info.stock_total
 
 
 class UserSerializer(serializers.ModelSerializer):

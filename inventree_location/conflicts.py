@@ -103,3 +103,152 @@ def compute_conflicts(
             reservation.date_retour_prevue,
         )
     ]
+
+
+# ---------------------------------------------------------------------------
+# Détection de conflits basée sur le stock (US-03 / SCRUM-76)
+#
+# Couche de plus haut niveau construite sur `compute_conflicts` : pour une
+# réservation donnée, on compare la quantité demandée au stock projeté
+# (stock total − quantités déjà réservées sur la période) de chaque ligne.
+# ---------------------------------------------------------------------------
+
+RESERVATION_DIRECT_LINK = "/api/plugin/inventree-location/reservations/{pk}/"
+
+
+def get_part_total_stock(part, rentable_item=None) -> int:
+    """Retourne le stock total disponible pour une Part.
+
+    Priorité :
+    1. ``RentableItem.stock_total`` s'il existe ;
+    2. attributs natifs InvenTree (total_stock, in_stock, …) ;
+    3. 0 par défaut.
+    """
+
+    from .models import RentableItem
+
+    if rentable_item is None:
+        rentable_item = RentableItem.objects.filter(part=part).first()
+
+    if rentable_item is not None:
+        return rentable_item.stock_total
+
+    for attr in ("total_stock", "in_stock", "stock", "quantity"):
+        value = getattr(part, attr, None)
+
+        if value is not None:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+
+    stock_method = getattr(part, "get_stock_count", None)
+
+    if callable(stock_method):
+        try:
+            return int(stock_method())
+        except (TypeError, ValueError):
+            return 0
+
+    return 0
+
+
+def detect_reservation_conflicts(reservation) -> dict:
+    """Détecte les conflits de stock d'une réservation, ligne par ligne.
+
+    Pour chaque ligne : stock projeté = stock total − somme des quantités
+    déjà réservées sur la période (réservations dont le statut est bloquant,
+    cf. ``CONFLICT_STATUSES``). Un conflit est levé quand la quantité
+    demandée dépasse le stock projeté.
+
+    Les articles virtuels (services, ex. « nettoyage ») sont ignorés : ils
+    ne portent pas de contrainte de stock physique.
+
+    Retourne ``{"has_conflict": bool, "reservation": pk, "conflicts": [...]}``.
+    """
+
+    from django.db.models import Sum
+
+    from .models import LigneReservation, RentableItem
+
+    empty = {"has_conflict": False, "reservation": reservation.pk, "conflicts": []}
+
+    start = reservation.date_retrait_prevue
+    end = reservation.date_retour_prevue
+
+    if not start or not end:
+        return empty
+
+    if normalize_to_datetime(start) > normalize_to_datetime(end, end=True):
+        return empty
+
+    conflicts = []
+
+    for ligne in reservation.lignes.select_related("part").all():
+        part = ligne.part
+        requested = ligne.quantite_demandee
+
+        rentable_item = RentableItem.objects.filter(part=part).first()
+
+        # Les articles virtuels n'ont pas de stock physique à arbitrer.
+        if rentable_item is not None and rentable_item.is_virtual:
+            continue
+
+        total_stock = get_part_total_stock(part, rentable_item=rentable_item)
+
+        overlapping = compute_conflicts(
+            part.pk,
+            requested,
+            start,
+            end,
+            exclude_resa_id=reservation.pk,
+        )
+
+        reserved = (
+            LigneReservation.objects.filter(
+                part=part,
+                reservation__in=overlapping,
+            ).aggregate(total=Sum("quantite_demandee"))["total"]
+            or 0
+        )
+
+        available = total_stock - reserved
+
+        if requested > available:
+            safe_available = max(available, 0)
+
+            conflicts.append({
+                "part_id": part.pk,
+                "part_name": getattr(part, "name", str(part)),
+                "requested_quantity": requested,
+                "total_stock": total_stock,
+                "already_reserved_quantity": reserved,
+                "available_quantity": available,
+                "missing_quantity": requested - available,
+                "conflicting_reservations": [
+                    {
+                        "reservation_id": resa.pk,
+                        "numero": resa.numero,
+                        "statut": resa.statut,
+                        "direct_link": RESERVATION_DIRECT_LINK.format(pk=resa.pk),
+                    }
+                    for resa in overlapping
+                ],
+                "suggestions": [
+                    f"Réduire la quantité demandée à {safe_available}.",
+                    "Choisir une autre période de réservation.",
+                    "Libérer ou modifier une réservation existante en conflit.",
+                ],
+            })
+
+    return {
+        "has_conflict": bool(conflicts),
+        "reservation": reservation.pk,
+        "conflicts": conflicts,
+    }
+
+
+def reservation_has_conflicts(reservation) -> bool:
+    """Retourne True si la réservation présente au moins un conflit de stock."""
+
+    return detect_reservation_conflicts(reservation)["has_conflict"]

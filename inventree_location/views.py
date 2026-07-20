@@ -12,6 +12,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .conflicts import detect_reservation_conflicts
 from .models import Lieu, Prestation, RentableItem, Reservation
 from .permissions import (
     CatalogPermission,
@@ -213,6 +214,40 @@ class ReservationDetailView(generics.RetrieveUpdateDestroyAPIView):
     ).all()
     serializer_class = ReservationSerializer
     permission_classes = [ReservationPermission]
+
+
+class ReservationConflictCheckView(APIView):
+    """Détection des conflits de stock d'une réservation (US-03 / SCRUM-76).
+
+    GET renvoie le détail des conflits de stock de la réservation :
+    - 200 s'il n'y a aucun conflit ;
+    - 409 si au moins un conflit est détecté.
+    """
+
+    permission_classes = [ReservationPermission]
+
+    def get(self, request, pk, *args, **kwargs):
+        """Retourne les conflits de stock de la réservation."""
+
+        reservation = (
+            Reservation.objects.prefetch_related("lignes").filter(pk=pk).first()
+        )
+
+        if reservation is None:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        conflict_result = detect_reservation_conflicts(reservation)
+
+        response_status = (
+            status.HTTP_409_CONFLICT
+            if conflict_result["has_conflict"]
+            else status.HTTP_200_OK
+        )
+
+        return Response(conflict_result, status=response_status)
 
 
 class ReservationTransitionView(APIView):
@@ -456,9 +491,17 @@ class RentableFlagBulkUpdateView(APIView):
         if "is_virtual" in request.data:
             defaults["is_virtual"] = bool(request.data.get("is_virtual"))
 
+        if "stock_total" in request.data:
+            defaults["stock_total"] = int(request.data.get("stock_total"))
+
         if not defaults:
             return Response(
-                {"detail": "Fournir au moins is_rentable ou consommable."},
+                {
+                    "detail": (
+                        "Fournir au moins is_rentable, consommable, "
+                        "is_virtual ou stock_total."
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -504,6 +547,7 @@ class RentablePartDetailView(APIView):
                     "is_rentable": True,
                     "consommable": False,
                     "is_virtual": False,
+                    "stock_total": 0,
                     "caution": None,
                     "valeur_remplacement": None,
                     "seuil_alerte_bas": None,
