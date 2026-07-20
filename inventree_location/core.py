@@ -76,6 +76,7 @@ class InvenTreeLocation(
             PrestationListView,
             RentableFlagBulkUpdateView,
             RentablePartDetailView,
+            ReservationConflictCheckView,
             ReservationDetailView,
             ReservationListCreateView,
             ReservationTransitionView,
@@ -117,6 +118,11 @@ class InvenTreeLocation(
                 "reservations/<int:pk>/transition/",
                 ReservationTransitionView.as_view(),
                 name="reservation-transition",
+            ),
+            path(
+                "reservations/<int:pk>/conflicts/",
+                ReservationConflictCheckView.as_view(),
+                name="reservation-conflict-check",
             ),
             path(
                 "prestations/",
