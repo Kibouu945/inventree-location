@@ -12,7 +12,11 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .conflicts import detect_reservation_conflicts
+from .conflicts import (
+    CONFLICT_STATUSES,
+    compute_conflicts,
+    detect_reservation_conflicts,
+)
 from .models import Lieu, Prestation, RentableItem, Reservation
 from .permissions import (
     CatalogPermission,
@@ -298,6 +302,72 @@ class ReservationTransitionView(APIView):
         )
 
         return Response(result, status=status.HTTP_200_OK)
+
+
+class ConflictsListView(APIView):
+    """Liste les réservations actuellement en conflit."""
+
+    permission_classes = [ReservationPermission]
+
+    def get(self, request, *args, **kwargs):
+        """Retourne les réservations en conflit triées par date de retrait prévue."""
+
+        queryset = (
+            Reservation.objects.select_related("prestation", "demandeur")
+            .prefetch_related("lignes")
+            .filter(
+                statut__in=CONFLICT_STATUSES,
+                date_retrait_prevue__isnull=False,
+                date_retour_prevue__isnull=False,
+            )
+            .order_by("date_retrait_prevue", "date_retour_prevue", "pk")
+        )
+
+        payload = []
+        processed_ids = set()
+
+        for reservation in queryset:
+            if reservation.pk in processed_ids:
+                continue
+
+            conflicting_ids = set()
+
+            for ligne in reservation.lignes.all():
+                conflicts = compute_conflicts(
+                    ligne.part_id,
+                    ligne.quantite_demandee,
+                    reservation.date_retrait_prevue,
+                    reservation.date_retour_prevue,
+                    exclude_resa_id=reservation.pk,
+                )
+
+                conflicting_ids.update(
+                    conflict.pk
+                    for conflict in conflicts
+                    if conflict.pk != reservation.pk
+                )
+
+            if not conflicting_ids:
+                continue
+
+            processed_ids.update({reservation.pk, *conflicting_ids})
+
+            payload.append({
+                "id": reservation.pk,
+                "numero": reservation.numero,
+                "statut": reservation.statut,
+                "date_retrait_prevue": reservation.date_retrait_prevue,
+                "date_retour_prevue": reservation.date_retour_prevue,
+                "prestation_nom": reservation.prestation.nom,
+                "demandeur_nom": (
+                    reservation.demandeur.get_full_name()
+                    or reservation.demandeur.username
+                ),
+                "conflict_count": len(conflicting_ids),
+                "conflicting_reservation_ids": sorted(conflicting_ids),
+            })
+
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class CatalogPartListView(APIView):

@@ -69,6 +69,7 @@ class InvenTreeLocation(
         from .views import (
             CatalogPartDetailView,
             CatalogPartListView,
+            ConflictsListView,
             ExampleView,
             GeocodeAddressView,
             LieuDetailView,
@@ -119,6 +120,7 @@ class InvenTreeLocation(
                 ReservationTransitionView.as_view(),
                 name="reservation-transition",
             ),
+            path("conflicts/", ConflictsListView.as_view(), name="conflict-list"),
             path(
                 "reservations/<int:pk>/conflicts/",
                 ReservationConflictCheckView.as_view(),
@@ -182,6 +184,20 @@ class InvenTreeLocation(
 
         items = []
 
+        conflicts_count = 0
+
+        try:
+            from .conflicts import CONFLICT_STATUSES
+            from .models import Reservation
+
+            conflicts_count = Reservation.objects.filter(
+                statut__in=CONFLICT_STATUSES,
+                date_retrait_prevue__isnull=False,
+                date_retour_prevue__isnull=False,
+            ).count()
+        except Exception:
+            conflicts_count = 0
+
         items.append({
             "key": "inventree-location-dashboard",
             "title": "InvenTree Location Dashboard Item",
@@ -218,6 +234,23 @@ class InvenTreeLocation(
                 "Reservations.js:renderInvenTreeLocationReservations"
             ),
             # Liste dense (filtres + tableau + modale)
+            "options": {
+                "width": 12,
+                "height": 8,
+            },
+            "context": {
+                "settings": self.get_settings_dict(),
+            },
+        })
+
+        items.append({
+            "key": "inventree-location-conflicts",
+            "title": f"Conflits actuels ({conflicts_count})",
+            "description": "Liste des réservations actuellement en conflit",
+            "icon": "ti:alert-triangle:outline",
+            "source": self.plugin_static_file(
+                "Conflicts.js:renderInvenTreeLocationConflicts"
+            ),
             "options": {
                 "width": 12,
                 "height": 8,
