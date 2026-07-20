@@ -141,6 +141,11 @@ class RentableItem(TimestampedModel):
     is_rentable = models.BooleanField(default=True, verbose_name=_("louable"))
     consommable = models.BooleanField(default=False, verbose_name=_("consommable"))
     is_virtual = models.BooleanField(default=False, verbose_name=_("article virtuel"))
+    stock_total = models.PositiveIntegerField(
+        default=0,
+        verbose_name=_("stock total"),
+        help_text=_("Stock total disponible pour la location."),
+    )
     caution = models.DecimalField(
         max_digits=10,
         decimal_places=2,
