@@ -56,3 +56,41 @@ def user_has_any_role(user, roles) -> bool:
         return True
 
     return bool(user_roles(user) & set(roles))
+
+
+#: Widgets dashboard visibles par rôle métier (RBAC, cf. cahier des charges —
+#: un filtrage sur les 7 groupes, PAS sur ``is_staff``). Les écrans propres à
+#: certains rôles (tournées livreur, retours magasinier, tickets SAV) arriveront
+#: aux sprints suivants ; on ne mappe ici que les widgets existants.
+DASHBOARD_WIDGET_ROLES: dict[str, set[str]] = {
+    "inventree-location-catalog": {ADMIN, GESTIONNAIRE, MAGASINIER, LECTEUR},
+    "inventree-location-reservations": {
+        ADMIN,
+        GESTIONNAIRE,
+        MAGASINIER,
+        LIVREUR,
+        ORGANISATEUR,
+        LECTEUR,
+    },
+    "inventree-location-conflicts": {ADMIN, GESTIONNAIRE, LECTEUR},
+}
+
+
+def visible_dashboard_widget_keys(user) -> set[str]:
+    """Clés des widgets dashboard visibles pour cet utilisateur (RBAC métier).
+
+    - un utilisateur sans rôle plugin ne voit rien ;
+    - le superutilisateur voit tous les widgets ;
+    - sinon, chaque widget est visible si l'un des rôles de l'utilisateur
+      figure dans ``DASHBOARD_WIDGET_ROLES``.
+    """
+
+    if not user_has_any_role(user, ALL_ROLES):
+        return set()
+
+    if getattr(user, "is_superuser", False):
+        return set(DASHBOARD_WIDGET_ROLES)
+
+    owned = user_roles(user)
+
+    return {key for key, allowed in DASHBOARD_WIDGET_ROLES.items() if owned & allowed}
