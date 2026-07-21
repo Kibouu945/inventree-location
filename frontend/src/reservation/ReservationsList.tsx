@@ -19,6 +19,7 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
+import { canWriteReservations } from '../roles';
 import { ReservationForm } from './ReservationForm';
 import type { Page, Reservation } from './types';
 
@@ -113,6 +114,9 @@ export function ReservationsList({
     ? query.data
     : (query.data?.results ?? []);
 
+  // Livreur / magasinier / sav / lecteur : lecture seule (cf. permissions.py).
+  const canWrite = canWriteReservations(context);
+
   function closeModal() {
     setModalState({ open: false });
   }
@@ -123,13 +127,15 @@ export function ReservationsList({
         <Title order={4} c={context.theme.primaryColor}>
           Réservations
         </Title>
-        <Button
-          onClick={() =>
-            setModalState({ open: true, reservationId: undefined })
-          }
-        >
-          Nouvelle réservation
-        </Button>
+        {canWrite && (
+          <Button
+            onClick={() =>
+              setModalState({ open: true, reservationId: undefined })
+            }
+          >
+            Nouvelle réservation
+          </Button>
+        )}
       </Group>
 
       <Group align='flex-end' gap='md' wrap='wrap'>
@@ -224,14 +230,17 @@ export function ReservationsList({
         onClose={closeModal}
         size='xl'
         title={
-          modalState.reservationId
-            ? 'Modifier la réservation'
-            : 'Nouvelle réservation'
+          !canWrite
+            ? 'Détail de la réservation'
+            : modalState.reservationId
+              ? 'Modifier la réservation'
+              : 'Nouvelle réservation'
         }
       >
         <ReservationForm
           context={context}
           reservationId={modalState.reservationId}
+          readOnly={!canWrite}
           onSaved={closeModal}
         />
       </Modal>
