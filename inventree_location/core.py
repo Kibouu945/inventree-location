@@ -187,14 +187,9 @@ class InvenTreeLocation(
         conflicts_count = 0
 
         try:
-            from .conflicts import CONFLICT_STATUSES
-            from .models import Reservation
+            from .conflicts import count_current_conflicts
 
-            conflicts_count = Reservation.objects.filter(
-                statut__in=CONFLICT_STATUSES,
-                date_retrait_prevue__isnull=False,
-                date_retour_prevue__isnull=False,
-            ).count()
+            conflicts_count = count_current_conflicts()
         except Exception:
             conflicts_count = 0
 

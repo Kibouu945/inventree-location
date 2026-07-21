@@ -252,3 +252,75 @@ def reservation_has_conflicts(reservation) -> bool:
     """Retourne True si la réservation présente au moins un conflit de stock."""
 
     return detect_reservation_conflicts(reservation)["has_conflict"]
+
+
+def list_current_conflicts() -> List[dict]:
+    """Liste les réservations actuellement en conflit, regroupées.
+
+    Chaque entrée représente un *groupe* de conflit : une réservation et
+    l'ensemble des réservations qui la chevauchent sur un même article. Les
+    réservations déjà rattachées à un groupe ne réapparaissent pas comme
+    entrées distinctes.
+    """
+
+    from .models import Reservation
+
+    queryset = (
+        Reservation.objects.select_related("prestation", "demandeur")
+        .prefetch_related("lignes")
+        .filter(
+            statut__in=CONFLICT_STATUSES,
+            date_retrait_prevue__isnull=False,
+            date_retour_prevue__isnull=False,
+        )
+        .order_by("date_retrait_prevue", "date_retour_prevue", "pk")
+    )
+
+    payload = []
+    processed_ids = set()
+
+    for reservation in queryset:
+        if reservation.pk in processed_ids:
+            continue
+
+        conflicting_ids = set()
+
+        for ligne in reservation.lignes.all():
+            conflicts = compute_conflicts(
+                ligne.part_id,
+                ligne.quantite_demandee,
+                reservation.date_retrait_prevue,
+                reservation.date_retour_prevue,
+                exclude_resa_id=reservation.pk,
+            )
+
+            conflicting_ids.update(
+                conflict.pk for conflict in conflicts if conflict.pk != reservation.pk
+            )
+
+        if not conflicting_ids:
+            continue
+
+        processed_ids.update({reservation.pk, *conflicting_ids})
+
+        payload.append({
+            "id": reservation.pk,
+            "numero": reservation.numero,
+            "statut": reservation.statut,
+            "date_retrait_prevue": reservation.date_retrait_prevue,
+            "date_retour_prevue": reservation.date_retour_prevue,
+            "prestation_nom": reservation.prestation.nom,
+            "demandeur_nom": (
+                reservation.demandeur.get_full_name() or reservation.demandeur.username
+            ),
+            "conflict_count": len(conflicting_ids),
+            "conflicting_reservation_ids": sorted(conflicting_ids),
+        })
+
+    return payload
+
+
+def count_current_conflicts() -> int:
+    """Nombre de groupes de conflit actuels (cf. ``list_current_conflicts``)."""
+
+    return len(list_current_conflicts())
