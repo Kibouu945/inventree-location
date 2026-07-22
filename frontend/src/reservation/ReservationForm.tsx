@@ -73,10 +73,13 @@ function apiErrorFields(error: unknown): Record<string, string> {
 export function ReservationForm({
   context,
   reservationId,
+  readOnly = false,
   onSaved
 }: {
   context: InvenTreePluginContext;
   reservationId?: number;
+  /** Masque toute action d'écriture (rôles sans droit — cf. roles.ts). */
+  readOnly?: boolean;
   onSaved?: () => void;
 }) {
   const isEdit = reservationId != null;
@@ -254,6 +257,12 @@ export function ReservationForm({
         )}
       </Group>
 
+      {readOnly && (
+        <Alert color='blue' title='Lecture seule'>
+          Votre rôle ne permet pas de modifier cette réservation.
+        </Alert>
+      )}
+
       <Select
         label='Événement / Prestation'
         placeholder='Rechercher une prestation…'
@@ -268,6 +277,7 @@ export function ReservationForm({
           form.setFieldValue('prestation', value ? Number(value) : null)
         }
         error={form.errors.prestation}
+        disabled={readOnly}
         required
       />
 
@@ -296,6 +306,7 @@ export function ReservationForm({
           form.setFieldValue('demandeur', value ? Number(value) : null)
         }
         error={form.errors.demandeur}
+        disabled={readOnly}
         required
       />
 
@@ -310,6 +321,7 @@ export function ReservationForm({
             )
           }
           error={form.errors.date_retrait_prevue}
+          disabled={readOnly}
           clearable
         />
         <DateTimePicker
@@ -322,6 +334,7 @@ export function ReservationForm({
             )
           }
           error={form.errors.date_retour_prevue}
+          disabled={readOnly}
           clearable
         />
       </Group>
@@ -334,26 +347,37 @@ export function ReservationForm({
           form.setFieldValue('commentaire', event.currentTarget.value)
         }
         minRows={2}
+        disabled={readOnly}
       />
 
       <Title order={5}>Matériel</Title>
-      <PartPicker
-        context={context}
-        label='Ajouter un article'
-        onAdd={(ligne) =>
-          form.setFieldValue('lignes', upsertLigne(form.values.lignes, ligne))
-        }
-      />
+      {!readOnly && (
+        <>
+          <PartPicker
+            context={context}
+            label='Ajouter un article'
+            onAdd={(ligne) =>
+              form.setFieldValue(
+                'lignes',
+                upsertLigne(form.values.lignes, ligne)
+              )
+            }
+          />
 
-      <Title order={5}>Article virtuel (obligatoire à la soumission)</Title>
-      <PartPicker
-        context={context}
-        label='Ajouter une prestation (ex: nettoyage)'
-        virtualOnly
-        onAdd={(ligne) =>
-          form.setFieldValue('lignes', upsertLigne(form.values.lignes, ligne))
-        }
-      />
+          <Title order={5}>Article virtuel (obligatoire à la soumission)</Title>
+          <PartPicker
+            context={context}
+            label='Ajouter une prestation (ex: nettoyage)'
+            virtualOnly
+            onAdd={(ligne) =>
+              form.setFieldValue(
+                'lignes',
+                upsertLigne(form.values.lignes, ligne)
+              )
+            }
+          />
+        </>
+      )}
 
       {form.errors.lignes && (
         <Alert color='red' title='Matériel'>
@@ -368,7 +392,7 @@ export function ReservationForm({
               <Table.Th>Article</Table.Th>
               <Table.Th>Quantité</Table.Th>
               <Table.Th>Type</Table.Th>
-              <Table.Th />
+              {!readOnly && <Table.Th />}
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -383,39 +407,46 @@ export function ReservationForm({
                     <Badge color='green'>Matériel</Badge>
                   )}
                 </Table.Td>
-                <Table.Td>
-                  <Button
-                    size='xs'
-                    variant='subtle'
-                    color='red'
-                    onClick={() =>
-                      form.setFieldValue(
-                        'lignes',
-                        removeLigne(form.values.lignes, ligne.part)
-                      )
-                    }
-                  >
-                    Retirer
-                  </Button>
-                </Table.Td>
+                {!readOnly && (
+                  <Table.Td>
+                    <Button
+                      size='xs'
+                      variant='subtle'
+                      color='red'
+                      onClick={() =>
+                        form.setFieldValue(
+                          'lignes',
+                          removeLigne(form.values.lignes, ligne.part)
+                        )
+                      }
+                    >
+                      Retirer
+                    </Button>
+                  </Table.Td>
+                )}
               </Table.Tr>
             ))}
           </Table.Tbody>
         </Table>
       )}
 
-      <Group justify='flex-end'>
-        <Button
-          variant='light'
-          loading={mutation.isPending}
-          onClick={() => submit('brouillon')}
-        >
-          Enregistrer en brouillon
-        </Button>
-        <Button loading={mutation.isPending} onClick={() => submit('soumise')}>
-          Soumettre
-        </Button>
-      </Group>
+      {!readOnly && (
+        <Group justify='flex-end'>
+          <Button
+            variant='light'
+            loading={mutation.isPending}
+            onClick={() => submit('brouillon')}
+          >
+            Enregistrer en brouillon
+          </Button>
+          <Button
+            loading={mutation.isPending}
+            onClick={() => submit('soumise')}
+          >
+            Soumettre
+          </Button>
+        </Group>
+      )}
     </Stack>
   );
 }

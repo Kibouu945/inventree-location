@@ -10,7 +10,7 @@ from plugin.mixins import (
     UserInterfaceMixin,
 )
 
-from . import PLUGIN_VERSION
+from . import PLUGIN_VERSION, roles
 
 
 class InvenTreeLocation(
@@ -179,81 +179,76 @@ class InvenTreeLocation(
     def get_ui_dashboard_items(self, request, context: dict, **kwargs):
         """Return a list of custom dashboard items to be rendered in the InvenTree user interface."""
 
-        if not request.user or not request.user.is_staff:
+        # Filtrage RBAC métier basé sur les 7 groupes (cf. roles.py)
+        visible_keys = roles.visible_dashboard_widget_keys(request.user)
+
+        if not visible_keys:
             return []
+
+        def visible(key):
+            return key in visible_keys
 
         items = []
 
-        conflicts_count = 0
+        if visible("inventree-location-catalog"):
+            items.append({
+                "key": "inventree-location-catalog",
+                "title": "Catalogue du matériel",
+                "description": "Liste filtrable du matériel louable",
+                "icon": "ti:list-search:outline",
+                "source": self.plugin_static_file(
+                    "Catalog.js:renderInvenTreeLocationCatalog"
+                ),
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
 
-        try:
-            from .conflicts import count_current_conflicts
+        if visible("inventree-location-reservations"):
+            items.append({
+                "key": "inventree-location-reservations",
+                "title": "Réservations",
+                "description": "Création et suivi des réservations de matériel",
+                "icon": "ti:calendar-event:outline",
+                "source": self.plugin_static_file(
+                    "Reservations.js:renderInvenTreeLocationReservations"
+                ),
+                # Liste dense (filtres + tableau + modale)
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
 
-            conflicts_count = count_current_conflicts()
-        except Exception:
+        if visible("inventree-location-conflicts"):
             conflicts_count = 0
 
-        items.append({
-            "key": "inventree-location-dashboard",
-            "title": "InvenTree Location Dashboard Item",
-            "description": "Custom dashboard item",
-            "icon": "ti:dashboard:outline",
-            "source": self.plugin_static_file(
-                "Dashboard.js:renderInvenTreeLocationDashboardItem"
-            ),
-            "context": {
-                "settings": self.get_settings_dict(),
-                "bar": "foo",
-            },
-        })
+            try:
+                from .conflicts import count_current_conflicts
 
-        items.append({
-            "key": "inventree-location-catalog",
-            "title": "Catalogue du matériel",
-            "description": "Liste filtrable du matériel louable",
-            "icon": "ti:list-search:outline",
-            "source": self.plugin_static_file(
-                "Catalog.js:renderInvenTreeLocationCatalog"
-            ),
-            "context": {
-                "settings": self.get_settings_dict(),
-            },
-        })
+                conflicts_count = count_current_conflicts()
+            except Exception:
+                conflicts_count = 0
 
-        items.append({
-            "key": "inventree-location-reservations",
-            "title": "Réservations",
-            "description": "Création et suivi des réservations de matériel",
-            "icon": "ti:calendar-event:outline",
-            "source": self.plugin_static_file(
-                "Reservations.js:renderInvenTreeLocationReservations"
-            ),
-            # Liste dense (filtres + tableau + modale)
-            "options": {
-                "width": 12,
-                "height": 8,
-            },
-            "context": {
-                "settings": self.get_settings_dict(),
-            },
-        })
-
-        items.append({
-            "key": "inventree-location-conflicts",
-            "title": f"Conflits actuels ({conflicts_count})",
-            "description": "Liste des réservations actuellement en conflit",
-            "icon": "ti:alert-triangle:outline",
-            "source": self.plugin_static_file(
-                "Conflicts.js:renderInvenTreeLocationConflicts"
-            ),
-            "options": {
-                "width": 12,
-                "height": 8,
-            },
-            "context": {
-                "settings": self.get_settings_dict(),
-            },
-        })
+            items.append({
+                "key": "inventree-location-conflicts",
+                "title": f"Conflits actuels ({conflicts_count})",
+                "description": "Liste des réservations actuellement en conflit",
+                "icon": "ti:alert-triangle:outline",
+                "source": self.plugin_static_file(
+                    "Conflicts.js:renderInvenTreeLocationConflicts"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
 
         return items
 

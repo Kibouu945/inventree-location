@@ -18,17 +18,12 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
+import { canWriteCatalog } from './roles';
+
 interface RentableFlags {
   part: number;
   is_rentable: boolean;
   consommable: boolean;
-}
-
-const MANAGER_ROLES = ['admin', 'gestionnaire'];
-
-function userRoles(context: InvenTreePluginContext): string[] {
-  const groups = (context.user as { groups?: unknown })?.groups;
-  return Array.isArray(groups) ? groups.map((group) => String(group)) : [];
 }
 
 /**
@@ -42,13 +37,7 @@ function InvenTreeLocationPanel({
 }) {
   const partId = useMemo(() => context.id ?? null, [context.id]);
 
-  const canManage = useMemo(() => {
-    const roles = userRoles(context);
-    return (
-      Boolean((context.user as { is_superuser?: boolean })?.is_superuser) ||
-      roles.some((role) => MANAGER_ROLES.includes(role))
-    );
-  }, [context]);
+  const canManage = useMemo(() => canWriteCatalog(context), [context]);
 
   const rentableUrl = `/plugin/inventree-location/catalog/${partId}/rentable/`;
 

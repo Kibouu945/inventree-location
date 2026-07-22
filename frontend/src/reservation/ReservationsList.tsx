@@ -20,6 +20,7 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
+import { canWriteReservations } from '../roles';
 import { ReservationForm } from './ReservationForm';
 import {
   buildReservationQuery,
@@ -177,13 +178,15 @@ export function ReservationsList({
         <Title order={4} c={context.theme.primaryColor}>
           Réservations
         </Title>
-        <Button
-          onClick={() =>
-            setModalState({ open: true, reservationId: undefined })
-          }
-        >
-          Nouvelle réservation
-        </Button>
+        {canWrite && (
+          <Button
+            onClick={() =>
+              setModalState({ open: true, reservationId: undefined })
+            }
+          >
+            Nouvelle réservation
+          </Button>
+        )}
       </Group>
 
       <Group align='flex-end' gap='md' wrap='wrap'>
@@ -315,14 +318,17 @@ export function ReservationsList({
         onClose={closeModal}
         size='xl'
         title={
-          modalState.reservationId
-            ? 'Modifier la réservation'
-            : 'Nouvelle réservation'
+          !canWrite
+            ? 'Détail de la réservation'
+            : modalState.reservationId
+              ? 'Modifier la réservation'
+              : 'Nouvelle réservation'
         }
       >
         <ReservationForm
           context={context}
           reservationId={modalState.reservationId}
+          readOnly={!canWrite}
           onSaved={closeModal}
         />
       </Modal>

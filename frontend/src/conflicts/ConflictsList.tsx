@@ -12,8 +12,8 @@ import {
 } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-
 import { ReservationForm } from '../reservation/ReservationForm';
+import { canWriteReservations } from '../roles';
 
 interface ConflictItem {
   id: number;
@@ -40,6 +40,9 @@ export function ConflictsList({
   context: InvenTreePluginContext;
 }) {
   const [modalState, setModalState] = useState<ModalState>({ open: false });
+
+  // Le lecteur voit les conflits mais ne peut pas éditer les réservations.
+  const canWrite = canWriteReservations(context);
 
   const query = useQuery<ConflictItem[]>(
     {
@@ -132,6 +135,7 @@ export function ConflictsList({
         <ReservationForm
           context={context}
           reservationId={modalState.reservationId}
+          readOnly={!canWrite}
           onSaved={closeModal}
         />
       </Modal>
