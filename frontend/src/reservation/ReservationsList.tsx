@@ -4,6 +4,7 @@ import {
   Alert,
   Badge,
   Button,
+  Chip,
   Group,
   Loader,
   Modal,
@@ -17,9 +18,16 @@ import {
 import { DatePickerInput } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { ReservationForm } from './ReservationForm';
+import {
+  buildReservationQuery,
+  DEFAULT_RESERVATION_FILTERS,
+  parseReservationFilters,
+  type ReservationFiltersState,
+  serializeReservationFilters
+} from './reservationParams';
 import type { Page, Reservation } from './types';
 
 const RESERVATIONS_URL = '/plugin/inventree-location/reservations/';
@@ -50,28 +58,28 @@ interface ModalState {
   reservationId?: number;
 }
 
-/** Construit les query params de la liste à partir de l'état des filtres. */
-function buildQuery(
-  search: string,
-  statuts: string[],
-  dateRange: [string | null, string | null]
-): Record<string, string | string[]> {
-  const params: Record<string, string | string[]> = {};
+interface CategoryResponseItem {
+  id?: number;
+  pk?: number;
+  name?: string;
+}
 
-  if (search.trim()) {
-    params.search = search.trim();
-  }
-  if (statuts.length > 0) {
-    params.statut = statuts;
-  }
-  if (dateRange[0]) {
-    params.date_from = dateRange[0];
-  }
-  if (dateRange[1]) {
-    params.date_to = dateRange[1];
+function syncUrl(filters: ReservationFiltersState) {
+  if (typeof window === 'undefined' || !window.history?.replaceState) {
+    return;
   }
 
-  return params;
+  const query = serializeReservationFilters(filters);
+  const url = query ? `?${query}` : window.location.pathname;
+  window.history.replaceState(null, '', url);
+}
+
+function initialFilters(): ReservationFiltersState {
+  if (typeof window === 'undefined') {
+    return DEFAULT_RESERVATION_FILTERS;
+  }
+
+  return parseReservationFilters(window.location.search);
 }
 
 /**
@@ -87,16 +95,34 @@ export function ReservationsList({
   context: InvenTreePluginContext;
 }) {
   const [modalState, setModalState] = useState<ModalState>({ open: false });
+  const [filters, setFilters] = useState<ReservationFiltersState>(initialFilters);
+  const [debouncedSearch] = useDebouncedValue(filters.search, 300);
 
-  const [search, setSearch] = useState('');
-  const [debouncedSearch] = useDebouncedValue(search, 300);
-  const [statuts, setStatuts] = useState<string[]>([]);
-  const [dateRange, setDateRange] = useState<[string | null, string | null]>([
-    null,
-    null
-  ]);
+  const effectiveFilters = useMemo(
+    () => ({ ...filters, search: debouncedSearch }),
+    [filters, debouncedSearch]
+  );
 
-  const params = buildQuery(debouncedSearch, statuts, dateRange);
+  useEffect(() => {
+    syncUrl(effectiveFilters);
+  }, [effectiveFilters]);
+
+  const params = buildReservationQuery(effectiveFilters);
+
+  const categoriesQuery = useQuery<
+    CategoryResponseItem[] | { results: CategoryResponseItem[] }
+  >(
+    {
+      queryKey: ['reservation-category-options'],
+      queryFn: async () => {
+        const response = await context.api.get('/api/part/category/', {
+          params: { limit: 250 }
+        });
+        return response.data;
+      }
+    },
+    context.queryClient
+  );
 
   const query = useQuery<Reservation[] | Page<Reservation>>(
     {
@@ -112,6 +138,34 @@ export function ReservationsList({
   const rows = Array.isArray(query.data)
     ? query.data
     : (query.data?.results ?? []);
+
+  const categoryOptions = useMemo(() => {
+    const payload = categoriesQuery.data;
+
+    if (!payload) {
+      return [];
+    }
+
+    const categories = Array.isArray(payload) ? payload : payload.results;
+
+    return categories
+      .map((category) => ({
+        id: category.id ?? category.pk,
+        name: category.name ?? ''
+      }))
+      .filter((category) => Number.isInteger(category.id) && category.name)
+      .map((category) => ({
+        value: String(category.id),
+        label: category.name
+      }));
+  }, [categoriesQuery.data]);
+
+  function updateFilters(patch: Partial<ReservationFiltersState>) {
+    setFilters((current) => ({
+      ...current,
+      ...patch
+    }));
+  }
 
   function closeModal() {
     setModalState({ open: false });
@@ -136,16 +190,24 @@ export function ReservationsList({
         <TextInput
           label='Recherche'
           placeholder='Numéro, événement, demandeur…'
-          value={search}
-          onChange={(event) => setSearch(event.currentTarget.value)}
+          value={filters.search}
+          onChange={(event) =>
+            updateFilters({ search: event.currentTarget.value })
+          }
           w={260}
         />
         <MultiSelect
-          label='Statut'
+          label='Catégories'
           placeholder='Tous'
-          data={STATUT_OPTIONS}
-          value={statuts}
-          onChange={setStatuts}
+          data={categoryOptions}
+          value={filters.categories.map(String)}
+          onChange={(values) =>
+            updateFilters({
+              categories: values
+                .map((value) => Number.parseInt(value, 10))
+                .filter((value) => Number.isInteger(value))
+            })
+          }
           clearable
           w={240}
         />
@@ -153,12 +215,41 @@ export function ReservationsList({
           type='range'
           label='Période'
           placeholder='Retrait — Retour'
-          value={dateRange}
-          onChange={setDateRange}
+          value={filters.dateRange}
+          onChange={(value) =>
+            updateFilters({
+              dateRange: [value[0], value[1]]
+            })
+          }
           clearable
           w={260}
         />
+        <Button
+          variant='default'
+          onClick={() => setFilters(DEFAULT_RESERVATION_FILTERS)}
+        >
+          Reset filtres
+        </Button>
       </Group>
+
+      <Stack gap={6}>
+        <Text size='sm' fw={500}>
+          Statuts
+        </Text>
+        <Chip.Group
+          multiple
+          value={filters.statuts}
+          onChange={(values) => updateFilters({ statuts: values })}
+        >
+          <Group gap='xs' wrap='wrap'>
+            {STATUT_OPTIONS.map((option) => (
+              <Chip key={option.value} value={option.value}>
+                {option.label}
+              </Chip>
+            ))}
+          </Group>
+        </Chip.Group>
+      </Stack>
 
       {query.isError && (
         <Alert color='red' title='Erreur'>
