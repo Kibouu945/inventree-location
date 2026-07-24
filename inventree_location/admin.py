@@ -3,6 +3,7 @@
 from django.contrib import admin
 
 from .models import (
+    ConflictHistory,
     Groupe,
     Lieu,
     LigneReservation,
@@ -83,6 +84,24 @@ class LigneReservationAdmin(admin.ModelAdmin):
     search_fields = ("part__name", "part__IPN")
 
 
+class ConflictHistoryAdmin(admin.ModelAdmin):
+    list_display = (
+        "pk",
+        "conflict_type",
+        "state",
+        "reservation",
+        "conflicting_reservation",
+        "created_at",
+        "resolved_at",
+    )
+    list_filter = ("conflict_type", "state")
+    search_fields = (
+        "reservation__numero",
+        "conflicting_reservation__numero",
+        "location_key",
+    )
+
+
 _register(Groupe, GroupeAdmin)
 _register(Profile, ProfileAdmin)
 _register(RentableItem, RentableItemAdmin)
@@ -91,3 +110,4 @@ _register(Prestation, PrestationAdmin)
 _register(Lieu, LieuAdmin)
 _register(Reservation, ReservationAdmin)
 _register(LigneReservation, LigneReservationAdmin)
+_register(ConflictHistory, ConflictHistoryAdmin)

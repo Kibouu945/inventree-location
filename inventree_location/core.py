@@ -70,6 +70,8 @@ class InvenTreeLocation(
             CatalogPartDetailView,
             CatalogPartListView,
             ConflictsListView,
+            ConflictHistoryListView,
+            ConflictHistoryResolveView,
             ExampleView,
             GeocodeAddressView,
             LieuDetailView,
@@ -141,6 +143,16 @@ class InvenTreeLocation(
                 "users/",
                 UserListView.as_view(),
                 name="user-list",
+            ),
+            path(
+                "conflicts/history/",
+                ConflictHistoryListView.as_view(),
+                name="conflicts-history-list",
+            ),
+            path(
+                "conflicts/history/<int:pk>/resolve/",
+                ConflictHistoryResolveView.as_view(),
+                name="conflicts-history-resolve",
             ),
         ]
 
