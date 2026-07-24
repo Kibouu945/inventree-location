@@ -1,0 +1,197 @@
+from __future__ import annotations
+
+from datetime import timedelta
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+from rest_framework import serializers, status
+from rest_framework.test import APIRequestFactory, force_authenticate
+
+from inventree_location.conflicts import detect_location_reservation_conflicts
+from inventree_location.models import (
+    ConflictHistory,
+    ConflictState,
+    ConflictType,
+    Groupe,
+    Lieu,
+    Manifestation,
+    Prestation,
+    RentableItem,
+    Reservation,
+    StatutReservation,
+)
+from inventree_location.serializers import ReservationSerializer
+from inventree_location.views import ConflictHistoryListView, ConflictHistoryResolveView
+
+from part.models import Part, PartCategory
+
+User = get_user_model()
+
+
+@pytest.fixture
+def manager(db):
+    from django.contrib.auth.models import Group
+
+    from inventree_location import roles
+
+    group, _ = Group.objects.get_or_create(name=roles.GESTIONNAIRE)
+    user = User.objects.create_user(username="manager", password="pwd")
+    user.groups.add(group)
+    return user
+
+
+@pytest.fixture
+def location_setup(db):
+    now = timezone.now().replace(minute=0, second=0, microsecond=0)
+    group = Groupe.objects.create(nom="G1", code="G1")
+    organizer = User.objects.create_user(username="org2", password="pwd")
+
+    manifestation = Manifestation.objects.create(
+        nom="Camp été",
+        date_debut=now,
+        date_fin=now + timedelta(days=5),
+        statut="planifiee",
+        organisateur=organizer,
+        groupe=group,
+    )
+
+    prestation_a = Prestation.objects.create(
+        manifestation=manifestation,
+        nom="Prestation A",
+        date_debut=now + timedelta(days=1),
+        date_fin=now + timedelta(days=2),
+    )
+    prestation_b = Prestation.objects.create(
+        manifestation=manifestation,
+        nom="Prestation B",
+        date_debut=now + timedelta(days=1),
+        date_fin=now + timedelta(days=2),
+    )
+
+    Lieu.objects.create(
+        prestation=prestation_a,
+        nom="Lieu A",
+        adresse="10 Rue de la Paix, Paris",
+        latitude=48.8566,
+        longitude=2.3522,
+    )
+    Lieu.objects.create(
+        prestation=prestation_b,
+        nom="Lieu B",
+        adresse="10 Rue de la Paix, Paris",
+        latitude=48.8566,
+        longitude=2.3522,
+    )
+
+    category = PartCategory.objects.create(name="Services")
+    virtual_part = Part.objects.create(name="Nettoyage", category=category)
+    RentableItem.objects.create(
+        part=virtual_part,
+        is_rentable=True,
+        is_virtual=True,
+        stock_total=0,
+    )
+
+    requester = User.objects.create_user(username="requester", password="pwd")
+
+    existing = Reservation.objects.create(
+        prestation=prestation_a,
+        demandeur=requester,
+        statut=StatutReservation.VALIDEE,
+        date_retrait_prevue=now + timedelta(days=1, hours=8),
+        date_retour_prevue=now + timedelta(days=1, hours=12),
+    )
+    existing.lignes.create(part=virtual_part, quantite_demandee=1)
+
+    return {
+        "now": now,
+        "requester": requester,
+        "prestation_b": prestation_b,
+        "virtual_part": virtual_part,
+    }
+
+
+@pytest.mark.django_db
+def test_location_conflict_blocks_save_and_creates_history(location_setup):
+    candidate = Reservation.objects.create(
+        prestation=location_setup["prestation_b"],
+        demandeur=location_setup["requester"],
+        statut=StatutReservation.SOUMISE,
+        date_retrait_prevue=location_setup["now"] + timedelta(days=1, hours=9),
+        date_retour_prevue=location_setup["now"] + timedelta(days=1, hours=10),
+    )
+    candidate.lignes.create(part=location_setup["virtual_part"], quantite_demandee=1)
+
+    with pytest.raises(serializers.ValidationError):
+        ReservationSerializer()._validate_stock_conflicts_on_save(candidate)
+
+    history = ConflictHistory.objects.filter(
+        reservation=candidate,
+        conflict_type=ConflictType.LOCATION,
+        state=ConflictState.OPEN,
+    )
+    assert history.exists()
+
+
+@pytest.mark.django_db
+def test_location_conflict_not_detected_when_address_differs(location_setup):
+    Lieu.objects.filter(prestation=location_setup["prestation_b"]).update(
+        adresse="20 Avenue des Champs, Paris",
+        latitude=48.8700,
+        longitude=2.3100,
+    )
+
+    candidate = Reservation.objects.create(
+        prestation=location_setup["prestation_b"],
+        demandeur=location_setup["requester"],
+        statut=StatutReservation.SOUMISE,
+        date_retrait_prevue=location_setup["now"] + timedelta(days=1, hours=9),
+        date_retour_prevue=location_setup["now"] + timedelta(days=1, hours=10),
+    )
+    candidate.lignes.create(part=location_setup["virtual_part"], quantite_demandee=1)
+
+    result = detect_location_reservation_conflicts(candidate)
+    assert result["has_conflict"] is False
+
+
+@pytest.mark.django_db
+def test_conflict_history_filters_and_resolve(manager, location_setup):
+    reservation = Reservation.objects.create(
+        prestation=location_setup["prestation_b"],
+        demandeur=location_setup["requester"],
+        statut=StatutReservation.SOUMISE,
+        date_retrait_prevue=location_setup["now"] + timedelta(days=1, hours=9),
+        date_retour_prevue=location_setup["now"] + timedelta(days=1, hours=10),
+    )
+    reservation.lignes.create(part=location_setup["virtual_part"], quantite_demandee=1)
+
+    with pytest.raises(serializers.ValidationError):
+        ReservationSerializer()._validate_stock_conflicts_on_save(reservation)
+
+    history_item = ConflictHistory.objects.filter(reservation=reservation).first()
+    assert history_item is not None
+
+    factory = APIRequestFactory()
+    list_request = factory.get(
+        "/plugin/inventree-location/conflicts/history/",
+        {"state": "open", "type": "location"},
+    )
+    force_authenticate(list_request, user=manager)
+
+    list_response = ConflictHistoryListView.as_view()(list_request)
+    assert list_response.status_code == status.HTTP_200_OK
+    assert len(list_response.data) >= 1
+
+    resolve_request = factory.patch(
+        f"/plugin/inventree-location/conflicts/history/{history_item.pk}/resolve/",
+        {"note": "handled"},
+        format="json",
+    )
+    force_authenticate(resolve_request, user=manager)
+
+    resolve_response = ConflictHistoryResolveView.as_view()(resolve_request, pk=history_item.pk)
+    assert resolve_response.status_code == status.HTTP_200_OK
+
+    history_item.refresh_from_db()
+    assert history_item.state == ConflictState.RESOLVED

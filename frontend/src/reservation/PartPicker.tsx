@@ -86,7 +86,9 @@ export function PartPicker({
           }
         });
       } catch (error) {
-        const response = (error as { response?: { data?: any } }).response;
+        const response = (
+          error as { response?: { status?: number; data?: any } }
+        ).response;
         const payload = response?.data ?? {};
         const missing = Number(payload?.missing_quantity ?? 0);
         const available = Number(payload?.available_quantity ?? 0);

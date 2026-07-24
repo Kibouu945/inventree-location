@@ -419,6 +419,179 @@ def list_current_conflicts() -> List[dict]:
     return payload
 
 
+def register_stock_conflict_history(reservation, conflict_result: dict) -> None:
+    """Enregistre les conflits de stock détectés dans l'historique."""
+
+    from .models import ConflictHistory, ConflictState, ConflictType, Reservation
+
+    if not conflict_result.get("has_conflict"):
+        return
+
+    for conflict in conflict_result.get("conflicts", []):
+        conflicting_ids = [
+            item.get("reservation_id")
+            for item in conflict.get("conflicting_reservations", [])
+            if item.get("reservation_id")
+        ]
+
+        if not conflicting_ids:
+            conflicting_ids = [None]
+
+        for conflicting_id in conflicting_ids:
+            conflicting_reservation = None
+
+            if conflicting_id is not None:
+                conflicting_reservation = Reservation.objects.filter(
+                    pk=conflicting_id
+                ).first()
+
+            ConflictHistory.objects.get_or_create(
+                conflict_type=ConflictType.STOCK,
+                state=ConflictState.OPEN,
+                reservation=reservation,
+                conflicting_reservation=conflicting_reservation,
+                part_id=conflict.get("part_id"),
+                period_start=reservation.date_retrait_prevue,
+                period_end=reservation.date_retour_prevue,
+                defaults={
+                    "details": {
+                        "part_name": conflict.get("part_name"),
+                        "requested_quantity": conflict.get("requested_quantity"),
+                        "available_quantity": conflict.get("available_quantity"),
+                        "missing_quantity": conflict.get("missing_quantity"),
+                        "occupation_rate": conflict.get("occupation_rate"),
+                        "tension_level": conflict.get("tension_level"),
+                    }
+                },
+            )
+
+
+def detect_location_reservation_conflicts(reservation) -> dict:
+    """Détecte les conflits de lieu (même adresse/GPS, même jour)."""
+
+    from .models import Reservation
+
+    empty = {"has_conflict": False, "reservation": reservation.pk, "conflicts": []}
+
+    start = reservation.date_retrait_prevue
+    end = reservation.date_retour_prevue
+
+    if not start or not end or not reservation.prestation_id:
+        return empty
+
+    current_places = list(
+        reservation.prestation.lieux.values("nom", "adresse", "latitude", "longitude")
+    )
+
+    if not current_places:
+        return empty
+
+    period_start, period_end = to_day_period(start, end)
+
+    candidates = (
+        Reservation.objects.select_related("prestation", "demandeur")
+        .prefetch_related("prestation__lieux")
+        .filter(
+            statut__in=CONFLICT_STATUSES,
+            date_retrait_prevue__isnull=False,
+            date_retour_prevue__isnull=False,
+        )
+        .exclude(pk=reservation.pk)
+    )
+
+    conflicts = []
+
+    for candidate in candidates:
+        if not periods_overlap(
+            period_start,
+            period_end,
+            candidate.date_retrait_prevue,
+            candidate.date_retour_prevue,
+        ):
+            continue
+
+        for place in current_places:
+            current_address = (place.get("adresse") or "").strip().lower()
+            current_lat = place.get("latitude")
+            current_lon = place.get("longitude")
+
+            for existing_place in candidate.prestation.lieux.all():
+                other_address = (existing_place.adresse or "").strip().lower()
+                other_lat = existing_place.latitude
+                other_lon = existing_place.longitude
+
+                same_address = bool(current_address and current_address == other_address)
+                same_gps = (
+                    current_lat is not None
+                    and current_lon is not None
+                    and other_lat is not None
+                    and other_lon is not None
+                    and str(current_lat) == str(other_lat)
+                    and str(current_lon) == str(other_lon)
+                )
+
+                if not same_address and not same_gps:
+                    continue
+
+                conflicts.append(
+                    {
+                        "reservation_id": candidate.pk,
+                        "numero": candidate.numero,
+                        "statut": candidate.statut,
+                        "prestation_nom": candidate.prestation.nom,
+                        "lieu_nom": existing_place.nom,
+                        "adresse": existing_place.adresse,
+                        "latitude": existing_place.latitude,
+                        "longitude": existing_place.longitude,
+                    }
+                )
+                break
+
+    return {
+        "has_conflict": bool(conflicts),
+        "reservation": reservation.pk,
+        "conflicts": conflicts,
+    }
+
+
+def register_location_conflict_history(reservation, conflict_result: dict) -> None:
+    """Enregistre les conflits de lieu détectés dans l'historique."""
+
+    from .models import ConflictHistory, ConflictState, ConflictType, Reservation
+
+    if not conflict_result.get("has_conflict"):
+        return
+
+    for conflict in conflict_result.get("conflicts", []):
+        conflicting_reservation = Reservation.objects.filter(
+            pk=conflict.get("reservation_id")
+        ).first()
+
+        location_key = (
+            (conflict.get("adresse") or "").strip().lower()
+            or f"{conflict.get('latitude')}:{conflict.get('longitude')}"
+        )
+
+        ConflictHistory.objects.get_or_create(
+            conflict_type=ConflictType.LOCATION,
+            state=ConflictState.OPEN,
+            reservation=reservation,
+            conflicting_reservation=conflicting_reservation,
+            period_start=reservation.date_retrait_prevue,
+            period_end=reservation.date_retour_prevue,
+            location_key=location_key,
+            defaults={
+                "details": {
+                    "prestation_nom": conflict.get("prestation_nom"),
+                    "lieu_nom": conflict.get("lieu_nom"),
+                    "adresse": conflict.get("adresse"),
+                    "latitude": str(conflict.get("latitude") or ""),
+                    "longitude": str(conflict.get("longitude") or ""),
+                }
+            },
+        )
+
+
 def count_current_conflicts() -> int:
     """Nombre de groupes de conflit actuels (cf. ``list_current_conflicts``)."""
 

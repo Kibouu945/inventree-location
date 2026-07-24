@@ -9,7 +9,12 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import serializers
 
-from .conflicts import detect_reservation_conflicts
+from .conflicts import (
+    detect_location_reservation_conflicts,
+    detect_reservation_conflicts,
+    register_location_conflict_history,
+    register_stock_conflict_history,
+)
 from .models import (
     LigneReservation,
     Lieu,
@@ -326,12 +331,25 @@ class ReservationSerializer(serializers.ModelSerializer):
         conflict_result = detect_reservation_conflicts(reservation)
 
         if conflict_result["has_conflict"]:
+            register_stock_conflict_history(reservation, conflict_result)
             raise serializers.ValidationError({
                 "detail": (
                     "Validation refusée : conflit de stock détecté. "
                     "Résolvez le conflit ou passez forced=true."
                 ),
                 "conflicts": conflict_result["conflicts"],
+            })
+
+        location_conflicts = detect_location_reservation_conflicts(reservation)
+
+        if location_conflicts["has_conflict"]:
+            register_location_conflict_history(reservation, location_conflicts)
+            raise serializers.ValidationError({
+                "detail": (
+                    "Validation refusée : conflit de lieu détecté "
+                    "(même adresse/GPS, même jour)."
+                ),
+                "location_conflicts": location_conflicts["conflicts"],
             })
 
 
