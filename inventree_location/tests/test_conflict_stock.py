@@ -31,6 +31,7 @@ from inventree_location.models import (
 )
 from inventree_location.serializers import ReservationSerializer
 from inventree_location.views import ReservationConflictCheckView
+from inventree_location.views import StockAvailabilityCheckView
 
 from part.models import Part
 
@@ -241,26 +242,89 @@ def test_validation_refused_when_validee_and_conflict(stock_setup):
     candidate = _make_candidate(stock_setup, qty=1, statut=StatutReservation.VALIDEE)
 
     with pytest.raises(serializers.ValidationError):
-        ReservationSerializer()._validate_stock_conflicts_if_needed(candidate)
+        ReservationSerializer()._validate_stock_conflicts_on_save(candidate)
 
 
 @pytest.mark.django_db
-def test_forced_reservation_bypasses_validation(stock_setup):
-    """`forced=True` permet de valider malgré le conflit (US-03)."""
+def test_forced_reservation_does_not_bypass_save_block(stock_setup):
+    """Le blocage SCRUM-105 s'applique même avec `forced=True`."""
 
     candidate = _make_candidate(
         stock_setup, qty=1, statut=StatutReservation.VALIDEE, forced=True
     )
 
-    # Ne doit pas lever.
-    ReservationSerializer()._validate_stock_conflicts_if_needed(candidate)
+    with pytest.raises(serializers.ValidationError):
+        ReservationSerializer()._validate_stock_conflicts_on_save(candidate)
 
 
 @pytest.mark.django_db
-def test_non_validee_status_is_not_blocked(stock_setup):
-    """Un statut autre que `validée` n'est jamais bloqué par le check conflit."""
+def test_non_validee_status_is_blocked_on_save(stock_setup):
+    """Une sauvegarde en conflit est bloquée quel que soit le statut."""
 
     candidate = _make_candidate(stock_setup, qty=1, statut=StatutReservation.SOUMISE)
 
-    # Ne doit pas lever malgré le conflit sous-jacent.
-    ReservationSerializer()._validate_stock_conflicts_if_needed(candidate)
+    with pytest.raises(serializers.ValidationError):
+        ReservationSerializer()._validate_stock_conflicts_on_save(candidate)
+
+
+@pytest.mark.django_db
+def test_day_granularity_detects_same_day_conflict(stock_setup):
+    """Conflit même jour même si les heures ne se chevauchent pas strictement."""
+
+    now = stock_setup["now"]
+    candidate = Reservation.objects.create(
+        prestation=stock_setup["prestation"],
+        demandeur=stock_setup["user"],
+        date_demande=now,
+        statut=StatutReservation.SOUMISE,
+        date_retrait_prevue=now.replace(hour=23, minute=0),
+        date_retour_prevue=now.replace(hour=23, minute=30),
+    )
+    LigneReservation.objects.create(
+        reservation=candidate, part=stock_setup["part"], quantite_demandee=1
+    )
+
+    result = detect_reservation_conflicts(candidate)
+    assert result["has_conflict"] is True
+
+
+@pytest.mark.django_db
+def test_stock_availability_endpoint_returns_409_on_shortage(gestionnaire, stock_setup):
+    now = stock_setup["now"]
+    factory = APIRequestFactory()
+    request = factory.get(
+        "/plugin/inventree-location/reservations/check-stock/",
+        {
+            "part": stock_setup["part"].pk,
+            "quantity": 1,
+            "date_retrait_prevue": (now + timedelta(hours=1)).isoformat(),
+            "date_retour_prevue": (now + timedelta(hours=2)).isoformat(),
+        },
+    )
+    force_authenticate(request, user=gestionnaire)
+
+    response = StockAvailabilityCheckView.as_view()(request)
+
+    assert response.status_code == status.HTTP_409_CONFLICT
+    assert response.data["has_conflict"] is True
+
+
+@pytest.mark.django_db
+def test_stock_availability_endpoint_returns_200_when_available(gestionnaire, stock_setup):
+    now = stock_setup["now"]
+    factory = APIRequestFactory()
+    request = factory.get(
+        "/plugin/inventree-location/reservations/check-stock/",
+        {
+            "part": stock_setup["part"].pk,
+            "quantity": 1,
+            "date_retrait_prevue": (now + timedelta(days=7)).isoformat(),
+            "date_retour_prevue": (now + timedelta(days=8)).isoformat(),
+        },
+    )
+    force_authenticate(request, user=gestionnaire)
+
+    response = StockAvailabilityCheckView.as_view()(request)
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["has_conflict"] is False

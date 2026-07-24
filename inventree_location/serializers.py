@@ -282,7 +282,7 @@ class ReservationSerializer(serializers.ModelSerializer):
         if lignes_data:
             self._replace_lignes(reservation, lignes_data)
 
-        self._validate_stock_conflicts_if_needed(reservation)
+        self._validate_stock_conflicts_on_save(reservation)
 
         return reservation
 
@@ -296,7 +296,7 @@ class ReservationSerializer(serializers.ModelSerializer):
         if lignes_data is not None:
             self._replace_lignes(reservation, lignes_data)
 
-        self._validate_stock_conflicts_if_needed(reservation)
+        self._validate_stock_conflicts_on_save(reservation)
 
         return reservation
 
@@ -310,16 +310,17 @@ class ReservationSerializer(serializers.ModelSerializer):
             for ligne_data in lignes_data
         ])
 
-    def _validate_stock_conflicts_if_needed(self, reservation):
-        """Refuse la validation d'une réservation en conflit de stock non forcé.
+    def _validate_stock_conflicts_on_save(self, reservation):
+        """Refuse toute création / mise à jour menant à un conflit de stock.
 
-        La règle ne s'applique qu'au passage en statut « validée » : une
-        réservation `forced=True` peut être validée malgré les conflits
-        (US-03 : « Forcer malgré les conflits »). Levée dans la transaction
-        de create/update, la ValidationError annule donc la sauvegarde.
+        Source de vérité backend (SCRUM-105) : une réservation ne doit jamais
+        être enregistrée si elle met le stock en dépassement sur la période.
         """
 
-        if reservation.statut != StatutReservation.VALIDEE or reservation.forced:
+        if not reservation.date_retrait_prevue or not reservation.date_retour_prevue:
+            return
+
+        if not reservation.lignes.exists():
             return
 
         conflict_result = detect_reservation_conflicts(reservation)

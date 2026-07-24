@@ -93,6 +93,7 @@ export function ReservationForm({
   const [debouncedPrestationSearch] = useDebouncedValue(prestationSearch, 300);
   const [userSearch, setUserSearch] = useState('');
   const [debouncedUserSearch] = useDebouncedValue(userSearch, 300);
+  const [availabilityError, setAvailabilityError] = useState<string>('');
 
   const existingQuery = useQuery<Reservation>(
     {
@@ -169,7 +170,7 @@ export function ReservationForm({
 
   const selectedPrestation = useMemo(
     () =>
-      prestationsQuery.data?.results.find(
+      prestationsQuery.data?.results?.find(
         (prestation) => prestation.id === form.values.prestation
       ) ?? null,
     [prestationsQuery.data, form.values.prestation]
@@ -356,12 +357,17 @@ export function ReservationForm({
           <PartPicker
             context={context}
             label='Ajouter un article'
-            onAdd={(ligne) =>
+            dateRetraitPrevue={form.values.date_retrait_prevue}
+            dateRetourPrevue={form.values.date_retour_prevue}
+            reservationId={reservationId}
+            onConflict={setAvailabilityError}
+            onAdd={(ligne) => {
+              setAvailabilityError('');
               form.setFieldValue(
                 'lignes',
                 upsertLigne(form.values.lignes, ligne)
-              )
-            }
+              );
+            }}
           />
 
           <Title order={5}>Article virtuel (obligatoire à la soumission)</Title>
@@ -369,14 +375,25 @@ export function ReservationForm({
             context={context}
             label='Ajouter une prestation (ex: nettoyage)'
             virtualOnly
-            onAdd={(ligne) =>
+            dateRetraitPrevue={form.values.date_retrait_prevue}
+            dateRetourPrevue={form.values.date_retour_prevue}
+            reservationId={reservationId}
+            onConflict={setAvailabilityError}
+            onAdd={(ligne) => {
+              setAvailabilityError('');
               form.setFieldValue(
                 'lignes',
                 upsertLigne(form.values.lignes, ligne)
-              )
-            }
+              );
+            }}
           />
         </>
+      )}
+
+      {availabilityError && (
+        <Alert color='red' title='Conflit de stock'>
+          {availabilityError}
+        </Alert>
       )}
 
       {form.errors.lignes && (

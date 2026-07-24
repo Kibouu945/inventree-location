@@ -81,6 +81,7 @@ class InvenTreeLocation(
             ReservationDetailView,
             ReservationListCreateView,
             ReservationTransitionView,
+            StockAvailabilityCheckView,
             UserListView,
         )
 
@@ -125,6 +126,11 @@ class InvenTreeLocation(
                 "reservations/<int:pk>/conflicts/",
                 ReservationConflictCheckView.as_view(),
                 name="reservation-conflict-check",
+            ),
+            path(
+                "reservations/check-stock/",
+                StockAvailabilityCheckView.as_view(),
+                name="reservation-stock-check",
             ),
             path(
                 "prestations/",

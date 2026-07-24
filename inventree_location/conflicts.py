@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, time
 from typing import Iterable, List, Optional, Union
 
+from django.utils import timezone
+
 DateOrDateTime = Union[date, datetime]
 CONFLICT_STATUSES = {
     "confirmée",
@@ -27,9 +29,14 @@ class ReservationRecord:
 
 def normalize_to_datetime(value: DateOrDateTime, *, end: bool = False) -> datetime:
     if isinstance(value, datetime):
-        return value
+        dt = value
+    else:
+        dt = datetime.combine(value, time.max if end else time.min)
 
-    return datetime.combine(value, time.max if end else time.min)
+    if timezone.is_naive(dt):
+        return timezone.make_aware(dt, timezone.get_current_timezone())
+
+    return dt
 
 
 def periods_overlap(
@@ -44,6 +51,25 @@ def periods_overlap(
     end_b = normalize_to_datetime(end_b, end=True)
 
     return start_a <= end_b and end_a >= start_b
+
+
+def to_day_period(
+    start: DateOrDateTime,
+    end: DateOrDateTime,
+) -> tuple[datetime, datetime]:
+    """Normalise une période en bornes jour entier.
+
+    La réservation est saisie en date/heure, mais le calcul de disponibilité
+    et de conflit se fait au jour entier (CDC).
+    """
+
+    start_dt = normalize_to_datetime(start)
+    end_dt = normalize_to_datetime(end, end=True)
+
+    start_day = datetime.combine(start_dt.date(), time.min, tzinfo=start_dt.tzinfo)
+    end_day = datetime.combine(end_dt.date(), time.max, tzinfo=end_dt.tzinfo)
+
+    return start_day, end_day
 
 
 def find_conflicting_reservations(
@@ -75,8 +101,7 @@ def compute_conflicts(
     end: DateOrDateTime,
     exclude_resa_id: Optional[int] = None,
 ) -> List:
-    period_start = normalize_to_datetime(start)
-    period_end = normalize_to_datetime(end, end=True)
+    period_start, period_end = to_day_period(start, end)
 
     if period_start > period_end:
         raise ValueError("start must be before or equal to end")
@@ -103,6 +128,88 @@ def compute_conflicts(
             reservation.date_retour_prevue,
         )
     ]
+
+
+def tension_level(occupation_rate: float) -> str:
+    """Retourne le tag de tension selon le ratio d'occupation prévisionnel."""
+
+    if occupation_rate > 98:
+        return "red"
+    if occupation_rate >= 90:
+        return "orange"
+    if occupation_rate >= 75:
+        return "yellow"
+    if occupation_rate >= 50:
+        return "blue"
+    return "green"
+
+
+def compute_part_availability(
+    part,
+    requested_quantity: int,
+    start: DateOrDateTime,
+    end: DateOrDateTime,
+    *,
+    exclude_resa_id: Optional[int] = None,
+) -> dict:
+    """Calcule la disponibilité prévisionnelle d'un article sur une période.
+
+    Le calcul est porté au jour entier, conformément au CDC.
+    """
+
+    from django.db.models import Sum
+
+    from .models import LigneReservation, RentableItem
+
+    rentable_item = RentableItem.objects.filter(part=part).first()
+
+    if rentable_item is not None and rentable_item.is_virtual:
+        return {
+            "is_virtual": True,
+            "total_stock": 0,
+            "already_reserved_quantity": 0,
+            "available_quantity": 0,
+            "missing_quantity": 0,
+            "has_conflict": False,
+            "occupation_rate": 0.0,
+            "tension_level": "green",
+            "conflicting_reservations": [],
+        }
+
+    total_stock = get_part_total_stock(part, rentable_item=rentable_item)
+
+    overlapping = compute_conflicts(
+        part.pk,
+        requested_quantity,
+        start,
+        end,
+        exclude_resa_id=exclude_resa_id,
+    )
+
+    reserved = (
+        LigneReservation.objects.filter(
+            part=part,
+            reservation__in=overlapping,
+        ).aggregate(total=Sum("quantite_demandee"))["total"]
+        or 0
+    )
+
+    available = total_stock - reserved
+    missing = max(requested_quantity - available, 0)
+    base = max(total_stock, 1)
+    occupation_rate = ((reserved + requested_quantity) / base) * 100
+
+    return {
+        "is_virtual": False,
+        "total_stock": total_stock,
+        "already_reserved_quantity": reserved,
+        "available_quantity": available,
+        "missing_quantity": missing,
+        "has_conflict": missing > 0,
+        "occupation_rate": occupation_rate,
+        "tension_level": tension_level(occupation_rate),
+        "conflicting_reservations": overlapping,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -194,37 +301,29 @@ def detect_reservation_conflicts(reservation) -> dict:
         if rentable_item is not None and rentable_item.is_virtual:
             continue
 
-        total_stock = get_part_total_stock(part, rentable_item=rentable_item)
-
-        overlapping = compute_conflicts(
-            part.pk,
+        availability = compute_part_availability(
+            part,
             requested,
             start,
             end,
             exclude_resa_id=reservation.pk,
         )
 
-        reserved = (
-            LigneReservation.objects.filter(
-                part=part,
-                reservation__in=overlapping,
-            ).aggregate(total=Sum("quantite_demandee"))["total"]
-            or 0
-        )
-
-        available = total_stock - reserved
-
-        if requested > available:
-            safe_available = max(available, 0)
+        if availability["has_conflict"]:
+            safe_available = max(availability["available_quantity"], 0)
 
             conflicts.append({
                 "part_id": part.pk,
                 "part_name": getattr(part, "name", str(part)),
                 "requested_quantity": requested,
-                "total_stock": total_stock,
-                "already_reserved_quantity": reserved,
-                "available_quantity": available,
-                "missing_quantity": requested - available,
+                "total_stock": availability["total_stock"],
+                "already_reserved_quantity": availability[
+                    "already_reserved_quantity"
+                ],
+                "available_quantity": availability["available_quantity"],
+                "missing_quantity": availability["missing_quantity"],
+                "occupation_rate": availability["occupation_rate"],
+                "tension_level": availability["tension_level"],
                 "conflicting_reservations": [
                     {
                         "reservation_id": resa.pk,
@@ -232,7 +331,7 @@ def detect_reservation_conflicts(reservation) -> dict:
                         "statut": resa.statut,
                         "direct_link": RESERVATION_DIRECT_LINK.format(pk=resa.pk),
                     }
-                    for resa in overlapping
+                    for resa in availability["conflicting_reservations"]
                 ],
                 "suggestions": [
                     f"Réduire la quantité demandée à {safe_available}.",

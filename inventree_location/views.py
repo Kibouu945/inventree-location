@@ -7,12 +7,14 @@ from urllib.error import HTTPError, URLError
 
 from django.contrib.auth import get_user_model
 from django.db.models import Q
+from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import generics, permissions, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .conflicts import (
+    compute_part_availability,
     detect_reservation_conflicts,
     list_current_conflicts,
 )
@@ -302,6 +304,101 @@ class ReservationTransitionView(APIView):
 
         return Response(result, status=status.HTTP_200_OK)
 
+class StockAvailabilityCheckView(APIView):
+    """Verifie en temps reel la disponibilite stock d'un article sur une periode."""
+
+    permission_classes = [ReservationPermission]
+
+    def get(self, request, *args, **kwargs):
+        from part.models import Part
+
+        part_id = request.query_params.get("part")
+        quantity = request.query_params.get("quantity", "1")
+        start_raw = request.query_params.get("date_retrait_prevue")
+        end_raw = request.query_params.get("date_retour_prevue")
+        reservation_raw = request.query_params.get("reservation")
+
+        if not part_id or not start_raw or not end_raw:
+            return Response(
+                {
+                    "detail": (
+                        "Les parametres part, date_retrait_prevue et "
+                        "date_retour_prevue sont obligatoires."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            part_id = int(part_id)
+            quantity = max(int(quantity), 1)
+        except ValueError:
+            return Response(
+                {"detail": "Les parametres part et quantity doivent etre numeriques."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        start = parse_datetime(start_raw) or parse_date(start_raw)
+        end = parse_datetime(end_raw) or parse_date(end_raw)
+
+        if start is None or end is None:
+            return Response(
+                {
+                    "detail": (
+                        "Les dates fournies sont invalides. "
+                        "Utilisez un format ISO 8601."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        part = Part.objects.filter(pk=part_id).first()
+
+        if part is None:
+            return Response(
+                {"detail": "Article introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        exclude_reservation_id = None
+
+        if reservation_raw:
+            try:
+                exclude_reservation_id = int(reservation_raw)
+            except ValueError:
+                return Response(
+                    {"detail": "Le parametre reservation doit etre numerique."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        availability = compute_part_availability(
+            part,
+            quantity,
+            start,
+            end,
+            exclude_resa_id=exclude_reservation_id,
+        )
+
+        return Response(
+            {
+                "part_id": part.pk,
+                "part_name": getattr(part, "name", str(part)),
+                "requested_quantity": quantity,
+                "total_stock": availability["total_stock"],
+                "already_reserved_quantity": availability["already_reserved_quantity"],
+                "available_quantity": availability["available_quantity"],
+                "missing_quantity": availability["missing_quantity"],
+                "is_virtual": availability["is_virtual"],
+                "has_conflict": availability["has_conflict"],
+                "tension_level": availability["tension_level"],
+                "occupation_rate": availability["occupation_rate"],
+            },
+            status=(
+                status.HTTP_409_CONFLICT
+                if availability["has_conflict"]
+                else status.HTTP_200_OK
+            ),
+        )
 
 class ConflictsListView(APIView):
     """Liste les réservations actuellement en conflit."""
