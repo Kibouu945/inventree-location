@@ -183,19 +183,12 @@ class ReservationSerializer(serializers.ModelSerializer):
         return self._user_label(obj.demandeur)
 
     def get_validateur_nom(self, obj):
-        """Nom lisible du validateur (vide tant que la réservation n'est pas validée)."""
+        """Nom lisible du validateur."""
 
         return self._user_label(obj.validateur)
 
     def validate(self, attrs):
-        """Règles métier : permissives en brouillon, strictes au-delà.
-
-        Une réservation en statut `brouillon` peut être sauvegardée
-        incomplète. Dès qu'elle est soumise (ou plus), le demandeur, la
-        prestation, la période, au moins une ligne et au moins un article
-        virtuel (ex: prestation de nettoyage) deviennent obligatoires, et la
-        période doit couvrir au minimum les dates de la prestation.
-        """
+        """Règles métier : permissives en brouillon, strictes au-delà."""
 
         statut = attrs.get(
             "statut", getattr(self.instance, "statut", StatutReservation.BROUILLON)
@@ -209,9 +202,6 @@ class ReservationSerializer(serializers.ModelSerializer):
                 return attrs[field]
             return getattr(self.instance, field, None) if self.instance else None
 
-        # `demandeur` et `prestation` sont des FK non-nullables : leur
-        # présence est déjà garantie par la validation de champ de DRF avant
-        # que `validate()` ne soit appelée.
         prestation = effective("prestation")
         date_retrait = effective("date_retrait_prevue")
         date_retour = effective("date_retour_prevue")
@@ -222,6 +212,7 @@ class ReservationSerializer(serializers.ModelSerializer):
             errors["date_retrait_prevue"] = (
                 "La date de retrait est obligatoire pour soumettre la réservation."
             )
+
         if not date_retour:
             errors["date_retour_prevue"] = (
                 "La date de retour est obligatoire pour soumettre la réservation."
@@ -237,6 +228,7 @@ class ReservationSerializer(serializers.ModelSerializer):
                     errors["date_retrait_prevue"] = (
                         "La période doit couvrir au moins les dates de la prestation."
                     )
+
                 if date_retour < prestation.date_fin:
                     errors["date_retour_prevue"] = (
                         "La période doit couvrir au moins les dates de la prestation."
@@ -259,8 +251,29 @@ class ReservationSerializer(serializers.ModelSerializer):
                 for ligne in lignes
             ]
 
+            inactive_part_ids = RentableItem.objects.filter(
+                part_id__in=part_ids,
+                part__active=False,
+            ).values_list("part_id", flat=True)
+
+            if inactive_part_ids:
+                errors["lignes"] = (
+                    "Un objet non actif ne peut pas être ajouté à une réservation."
+                )
+
+            non_rentable_part_ids = RentableItem.objects.filter(
+                part_id__in=part_ids,
+                is_rentable=False,
+            ).values_list("part_id", flat=True)
+
+            if non_rentable_part_ids:
+                errors["lignes"] = (
+                    "Un objet non louable ne peut pas être ajouté à une réservation."
+                )
+
             if not RentableItem.objects.filter(
-                part_id__in=part_ids, is_virtual=True
+                part_id__in=part_ids,
+                is_virtual=True,
             ).exists():
                 errors["lignes"] = (
                     "Au moins un article virtuel (ex: prestation de nettoyage) "
@@ -311,13 +324,7 @@ class ReservationSerializer(serializers.ModelSerializer):
         ])
 
     def _validate_stock_conflicts_if_needed(self, reservation):
-        """Refuse la validation d'une réservation en conflit de stock non forcé.
-
-        La règle ne s'applique qu'au passage en statut « validée » : une
-        réservation `forced=True` peut être validée malgré les conflits
-        (US-03 : « Forcer malgré les conflits »). Levée dans la transaction
-        de create/update, la ValidationError annule donc la sauvegarde.
-        """
+        """Refuse la validation d'une réservation en conflit de stock non forcé."""
 
         if reservation.statut != StatutReservation.VALIDEE or reservation.forced:
             return
@@ -332,6 +339,131 @@ class ReservationSerializer(serializers.ModelSerializer):
                 ),
                 "conflicts": conflict_result["conflicts"],
             })
+
+
+class RamassageSerializer(serializers.ModelSerializer):
+    """Sérialiseur pour SCRUM-89 : liste des ramassages à effectuer."""
+
+    prestation_nom = serializers.CharField(source="prestation.nom", read_only=True)
+    manifestation_nom = serializers.CharField(
+        source="prestation.manifestation.nom",
+        read_only=True,
+    )
+    demandeur_nom = serializers.SerializerMethodField()
+    date_ramassage = serializers.DateTimeField(
+        source="date_retour_prevue",
+        read_only=True,
+    )
+    lieux = serializers.SerializerMethodField()
+    nb_objets = serializers.SerializerMethodField()
+    quantite_totale = serializers.SerializerMethodField()
+    recap_par_vehicule = serializers.SerializerMethodField()
+
+    class Meta:
+        """Configuration du serializer Ramassage."""
+
+        model = Reservation
+        fields = [
+            "id",
+            "numero",
+            "prestation",
+            "prestation_nom",
+            "manifestation_nom",
+            "demandeur",
+            "demandeur_nom",
+            "statut",
+            "date_ramassage",
+            "date_retrait_prevue",
+            "date_retour_prevue",
+            "lieux",
+            "nb_objets",
+            "quantite_totale",
+            "recap_par_vehicule",
+        ]
+
+    def get_demandeur_nom(self, obj):
+        """Nom lisible du demandeur."""
+
+        return ReservationSerializer._user_label(obj.demandeur)
+
+    def get_lieux(self, obj):
+        """Lieux liés à la prestation."""
+
+        lieux = []
+
+        for lieu in obj.prestation.lieux.all():
+            lieux.append({
+                "id": lieu.id,
+                "nom": lieu.nom,
+                "adresse": lieu.adresse,
+                "latitude": str(lieu.latitude) if lieu.latitude is not None else None,
+                "longitude": str(lieu.longitude) if lieu.longitude is not None else None,
+            })
+
+        return lieux
+
+    def get_nb_objets(self, obj):
+        """Nombre de lignes à ramasser."""
+
+        return obj.lignes.count()
+
+    def get_quantite_totale(self, obj):
+        """Quantité totale à ramasser."""
+
+        total = 0
+
+        for ligne in obj.lignes.all():
+            total += ligne.quantite_livree or ligne.quantite_demandee or 0
+
+        return total
+
+    def get_recap_par_vehicule(self, obj):
+        """Récap quantité totale par véhicule.
+
+        MVP : aucun modèle véhicule n'existe encore.
+        On retourne donc un regroupement "Non attribué".
+        """
+
+        return [
+            {
+                "vehicule": "Non attribué",
+                "quantite_totale": self.get_quantite_totale(obj),
+            }
+        ]
+
+
+class BonRamassageSerializer(RamassageSerializer):
+    """Sérialiseur détaillé pour le bon de ramassage imprimable."""
+
+    lignes = serializers.SerializerMethodField()
+
+    class Meta(RamassageSerializer.Meta):
+        """Configuration du serializer BonRamassage."""
+
+        fields = RamassageSerializer.Meta.fields + [
+            "lignes",
+            "commentaire",
+        ]
+
+    def get_lignes(self, obj):
+        """Détail des articles à ramasser."""
+
+        lignes = []
+
+        for ligne in obj.lignes.select_related("part").all():
+            lignes.append({
+                "part": ligne.part_id,
+                "part_nom": ligne.part.name,
+                "quantite_demandee": ligne.quantite_demandee,
+                "quantite_livree": ligne.quantite_livree,
+                "quantite_a_ramasser": ligne.quantite_livree
+                or ligne.quantite_demandee,
+                "quantite_retournee": ligne.quantite_retournee,
+                "etat_retour": ligne.etat_retour,
+                "commentaire": ligne.commentaire,
+            })
+
+        return lignes
 
 
 class RentableItemSerializer(serializers.ModelSerializer):
@@ -375,7 +507,7 @@ class ExampleSerializer(serializers.Serializer):
 
     part_count = serializers.IntegerField(
         label="Number of Parts",
-        help_text="Total number of parts in the InvenTree database.",
+        help_text="Total number of Parts in the InvenTree database.",
     )
 
     today = serializers.DateField(
@@ -483,7 +615,7 @@ class LieuSerializer(serializers.ModelSerializer):
 
 
 class CatalogPartSerializer(serializers.Serializer):
-    """Serializer used to expose InvenTree parts in the rental catalog."""
+    """Serializer used to expose InvenTree Parts in the rental catalog."""
 
     id = serializers.IntegerField(read_only=True)
     name = serializers.CharField(read_only=True)
@@ -499,10 +631,25 @@ class CatalogPartSerializer(serializers.Serializer):
     is_virtual = serializers.SerializerMethodField()
     stock_total = serializers.SerializerMethodField()
 
+    def _rentable_info(self, obj):
+        """Récupère l'extension RentableItem attachée par la vue catalogue."""
+
+        attached = getattr(obj, "_location_rentable_info", None)
+
+        if attached is not None:
+            return attached
+
+        try:
+            return getattr(obj, "rentable_info", None)
+        except Exception:
+            return None
+
     def get_stock_available(self, obj):
-        """Stock disponible de la part, exposé à 0 si non renseigné."""
+        """Stock disponible de la Part, exposé à 0 si non renseigné."""
+
         for attr in ["stock_available", "available_stock"]:
             value = getattr(obj, attr, None)
+
             if value is not None:
                 try:
                     return float(value)
@@ -513,8 +660,10 @@ class CatalogPartSerializer(serializers.Serializer):
 
     def get_image_url(self, obj):
         """URL de l'image principale si le modèle en expose une."""
+
         for attr in ["image", "image_url", "thumbnail", "thumbnail_url"]:
             value = getattr(obj, attr, None)
+
             if value:
                 return str(value)
 
@@ -523,7 +672,10 @@ class CatalogPartSerializer(serializers.Serializer):
     def get_rentable(self, obj):
         """Drapeau louable issu de RentableItem."""
 
-        rentable_info = getattr(obj, "rentable_info", None)
+        if not bool(getattr(obj, "active", True)):
+            return False
+
+        rentable_info = self._rentable_info(obj)
 
         if rentable_info is None:
             return True
@@ -533,7 +685,7 @@ class CatalogPartSerializer(serializers.Serializer):
     def get_consommable(self, obj):
         """Drapeau consommable issu de RentableItem."""
 
-        rentable_info = getattr(obj, "rentable_info", None)
+        rentable_info = self._rentable_info(obj)
 
         if rentable_info is None:
             return False
@@ -541,8 +693,9 @@ class CatalogPartSerializer(serializers.Serializer):
         return bool(rentable_info.consommable)
 
     def get_is_virtual(self, obj):
-        """Drapeau article virtuel issu de RentableItem (False par défaut)."""
-        rentable_info = getattr(obj, "rentable_info", None)
+        """Drapeau article virtuel issu de RentableItem."""
+
+        rentable_info = self._rentable_info(obj)
 
         if rentable_info is None:
             return False
@@ -550,8 +703,9 @@ class CatalogPartSerializer(serializers.Serializer):
         return bool(rentable_info.is_virtual)
 
     def get_stock_total(self, obj):
-        """Stock total louable issu de RentableItem (0 par défaut)."""
-        rentable_info = getattr(obj, "rentable_info", None)
+        """Stock total louable issu de RentableItem."""
+
+        rentable_info = self._rentable_info(obj)
 
         if rentable_info is None:
             return 0
@@ -560,7 +714,7 @@ class CatalogPartSerializer(serializers.Serializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
-    """Sérialiseur léger d'un utilisateur InvenTree (sélecteur demandeur)."""
+    """Sérialiseur léger d'un utilisateur InvenTree."""
 
     class Meta:
         """Configuration du serializer User."""
@@ -574,7 +728,8 @@ class PrestationSerializer(serializers.ModelSerializer):
     """Sérialiseur de lecture d'une prestation, avec manifestation et lieux."""
 
     manifestation_nom = serializers.CharField(
-        source="manifestation.nom", read_only=True
+        source="manifestation.nom",
+        read_only=True,
     )
     lieux = LieuSerializer(many=True, read_only=True)
 
