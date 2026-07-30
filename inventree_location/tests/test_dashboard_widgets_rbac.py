@@ -19,14 +19,21 @@ User = get_user_model()
 
 CATALOG = "inventree-location-catalog"
 RESERVATIONS = "inventree-location-reservations"
+RAMASSAGES = "inventree-location-ramassages"
 CONFLICTS = "inventree-location-conflicts"
 ORGANISATION = "inventree-location-organisation"
 STOCK_ALERTS = "inventree-location-stock-alerts"
+BACKOFFICE_USERS = "inventree-location-backoffice-users"
+BACKOFFICE_PARTS = "inventree-location-backoffice-parts"
 
 #: Dérivé du mapping et non figé en dur : un widget ajouté à
 #: ``DASHBOARD_WIDGET_ROLES`` sans toucher ce test faisait échouer cinq cas d'un
 #: coup, sans que la régression concerne les rôles.
 ALL_WIDGETS = set(roles.DASHBOARD_WIDGET_ROLES)
+
+#: Les back-offices sont réservés à l'admin : tous les autres rôles voient
+#: l'ensemble des widgets *sauf* ceux-là.
+BACKOFFICE_WIDGETS = {BACKOFFICE_USERS, BACKOFFICE_PARTS}
 
 
 def _make_user(username, role=None, *, is_staff=False, is_superuser=False):
@@ -67,13 +74,16 @@ class TestVisibleDashboardWidgetKeys:
         "role, expected",
         [
             (roles.ADMIN, ALL_WIDGETS),
-            (roles.GESTIONNAIRE, ALL_WIDGETS),
-            (roles.LECTEUR, ALL_WIDGETS),
+            (roles.GESTIONNAIRE, ALL_WIDGETS - BACKOFFICE_WIDGETS),
+            # Le lecteur consulte tout sauf les back-offices et les ramassages,
+            # qui sont des écrans d'exploitation (SCRUM-89).
+            (roles.LECTEUR, ALL_WIDGETS - BACKOFFICE_WIDGETS - {RAMASSAGES}),
             # Le magasinier suit la disponibilité future et l'inventaire :
             # les alertes de seuil le concernent (US-09).
-            (roles.MAGASINIER, {CATALOG, RESERVATIONS, STOCK_ALERTS}),
+            (roles.MAGASINIER, {CATALOG, RESERVATIONS, RAMASSAGES, STOCK_ALERTS}),
             (roles.ORGANISATEUR, {RESERVATIONS, ORGANISATION}),
-            (roles.LIVREUR, {RESERVATIONS}),
+            (roles.LIVREUR, {RESERVATIONS, RAMASSAGES}),
+            (roles.ACHETEUR, {CATALOG}),
             (roles.SAV, set()),
         ],
     )

@@ -18,27 +18,18 @@ class InvenTreeLocation(
 ):
     """InvenTreeLocation - custom InvenTree plugin."""
 
-    # Plugin metadata
     TITLE = "InvenTree Location"
     NAME = "InvenTreeLocation"
     SLUG = "inventree-location"
     DESCRIPTION = "Module de gestion des locations événementielles pour InvenTree"
     VERSION = PLUGIN_VERSION
 
-    # Additional project information
     AUTHOR = "groupe-6"
     WEBSITE = "https://github.com/Kibouu945/inventree-location"
     LICENSE = "MIT"
 
-    # Optionally specify supported InvenTree versions
-    # MIN_VERSION = '0.18.0'
-    # MAX_VERSION = '2.0.0'
-
-    # Render custom UI elements to the plugin settings page
     ADMIN_SOURCE = "Settings.js:renderPluginSettings"
 
-    # Plugin settings (from SettingsMixin)
-    # Ref: https://docs.inventree.org/en/latest/plugins/mixins/settings/
     SETTINGS = {
         "CUSTOM_VALUE": {
             "name": "Custom Value",
@@ -48,25 +39,34 @@ class InvenTreeLocation(
         }
     }
 
-    # Respond to InvenTree events (from EventMixin)
-    # Ref: https://docs.inventree.org/en/latest/plugins/mixins/event/
     def wants_process_event(self, event: str) -> bool:
         """Return True if the plugin wants to process the given event."""
+
         return event == "part_part.created"
 
     def process_event(self, event: str, *args, **kwargs) -> None:
         """Process the provided event."""
+
         print("Processing custom event:", event)
         print("Arguments:", args)
         print("Keyword arguments:", kwargs)
 
-    # Custom URL endpoints (from UrlsMixin)
-    # Ref: https://docs.inventree.org/en/latest/plugins/mixins/urls/
     def setup_urls(self):
         """Configure custom URL endpoints for this plugin."""
+
         from django.urls import path
 
+        from .backoffice import (
+            BackOfficeRoleListView,
+            BackOfficeUserDetailView,
+            BackOfficeUserListCreateView,
+        )
+        from .part_backoffice import (
+            PartBackOfficeDetailView,
+            PartBackOfficeListCreateView,
+        )
         from .views import (
+            BonRamassageView,
             CatalogPartDetailView,
             CatalogPartListView,
             ConflictsListView,
@@ -81,6 +81,7 @@ class InvenTreeLocation(
             PrestationListCreateView,
             PrestationStockPreviewView,
             PrestationStockView,
+            RamassageListView,
             RentableFlagBulkUpdateView,
             RentablePartDetailView,
             ReservationConflictCheckView,
@@ -127,7 +128,6 @@ class InvenTreeLocation(
                 ReservationTransitionView.as_view(),
                 name="reservation-transition",
             ),
-            path("conflicts/", ConflictsListView.as_view(), name="conflict-list"),
             path(
                 "reservations/<int:pk>/conflicts/",
                 ReservationConflictCheckView.as_view(),
@@ -143,6 +143,42 @@ class InvenTreeLocation(
                 ManifestationDetailView.as_view(),
                 name="manifestation-detail",
             ),
+            path(
+                "ramassages/",
+                RamassageListView.as_view(),
+                name="ramassage-list",
+            ),
+            path(
+                "ramassages/<int:pk>/bon/",
+                BonRamassageView.as_view(),
+                name="ramassage-bon",
+            ),
+            path(
+                "backoffice/users/",
+                BackOfficeUserListCreateView.as_view(),
+                name="backoffice-user-list-create",
+            ),
+            path(
+                "backoffice/users/<int:pk>/",
+                BackOfficeUserDetailView.as_view(),
+                name="backoffice-user-detail",
+            ),
+            path(
+                "backoffice/parts/",
+                PartBackOfficeListCreateView.as_view(),
+                name="backoffice-part-list-create",
+            ),
+            path(
+                "backoffice/parts/<int:pk>/",
+                PartBackOfficeDetailView.as_view(),
+                name="backoffice-part-detail",
+            ),
+            path(
+                "backoffice/roles/",
+                BackOfficeRoleListView.as_view(),
+                name="backoffice-role-list",
+            ),
+            path("conflicts/", ConflictsListView.as_view(), name="conflict-list"),
             path(
                 "prestations/",
                 PrestationListCreateView.as_view(),
@@ -180,11 +216,8 @@ class InvenTreeLocation(
             ),
         ]
 
-    # User interface elements (from UserInterfaceMixin)
-    # Ref: https://docs.inventree.org/en/latest/plugins/mixins/ui/
-
     def get_ui_panels(self, request, context: dict, **kwargs):
-        """Return a list of custom panels to be rendered in the InvenTree user interface."""
+        """Return custom panels for the InvenTree user interface."""
 
         panels = []
 
@@ -219,9 +252,8 @@ class InvenTreeLocation(
         return panels
 
     def get_ui_dashboard_items(self, request, context: dict, **kwargs):
-        """Return a list of custom dashboard items to be rendered in the InvenTree user interface."""
+        """Return custom dashboard items for the InvenTree user interface."""
 
-        # Filtrage RBAC métier basé sur les 7 groupes (cf. roles.py)
         visible_keys = roles.visible_dashboard_widget_keys(request.user)
 
         if not visible_keys:
@@ -280,7 +312,24 @@ class InvenTreeLocation(
                 "source": self.plugin_static_file(
                     "Reservations.js:renderInvenTreeLocationReservations"
                 ),
-                # Liste dense (filtres + tableau + modale)
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-ramassages"):
+            items.append({
+                "key": "inventree-location-ramassages",
+                "title": "Mes ramassages",
+                "description": "Liste des ramassages à effectuer après les prestations",
+                "icon": "ti:truck-delivery:outline",
+                "source": self.plugin_static_file(
+                    "Ramassages.js:renderInvenTreeLocationRamassages"
+                ),
                 "options": {
                     "width": 12,
                     "height": 8,
@@ -335,10 +384,47 @@ class InvenTreeLocation(
                 },
             })
 
+        if visible("inventree-location-backoffice-users"):
+            items.append({
+                "key": "inventree-location-backoffice-users",
+                "title": "Back-office utilisateurs",
+                "description": "Créer, éditer, activer et affecter les rôles utilisateurs",
+                "icon": "ti:users-group:outline",
+                "source": self.plugin_static_file(
+                    "BackOfficeUsers.js:renderInvenTreeLocationBackOfficeUsers"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-backoffice-parts"):
+            items.append({
+                "key": "inventree-location-backoffice-parts",
+                "title": "Back-office Parts",
+                "description": "Créer, éditer, activer et déclarer les Parts louables",
+                "icon": "ti:packages:outline",
+                "source": self.plugin_static_file(
+                    "BackOfficeParts.js:renderInvenTreeLocationBackOfficeParts"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
         return items
 
     def get_ui_spotlight_actions(self, request, context, **kwargs):
-        """Return a list of custom spotlight actions to be made available."""
+        """Return custom spotlight actions."""
+
         return [
             {
                 "key": "sample-spotlight-action",

@@ -34,7 +34,6 @@ export default defineConfig({
     jsx: "preserve",
   },
   build: {
-    // minify: false,
     target: "esnext",
     cssCodeSplit: false,
     manifest: true,
@@ -47,20 +46,20 @@ export default defineConfig({
         "./src/Settings.tsx",
         "./src/Catalog.tsx",
         "./src/Reservations.tsx",
+        "./src/Ramassages.tsx",
+        "./src/BackOfficeUsers.tsx",
+        "./src/BackOfficeParts.tsx",
         "./src/Conflicts.tsx",
         "./src/Organisation.tsx",
         "./src/PartDetail.tsx",
       ],
       output: [
-        // Generate two sets of output files:
-        // One without hashes - for backwards compatibility
         {
           dir: "../inventree_location/static",
           entryFileNames: "[name].js",
           assetFileNames: "assets/[name].[ext]",
           globals: externalLibs,
         },
-        // And one with hashes for cache busting
         {
           dir: "../inventree_location/static",
           entryFileNames: "[name]-[hash].js",
