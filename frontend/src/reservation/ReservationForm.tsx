@@ -11,7 +11,8 @@ import {
   Table,
   Text,
   Textarea,
-  Title
+  Title,
+  Tooltip
 } from '@mantine/core';
 import { DateTimePicker } from '@mantine/dates';
 import { useForm } from '@mantine/form';
@@ -23,6 +24,7 @@ import {
   buildReservationPayload,
   emptyReservationValues,
   enrichLignesFromCatalog,
+  isReservationEditable,
   removeLigne,
   reservationToFormValues,
   upsertLigne,
@@ -46,6 +48,13 @@ const CATALOG_URL = '/plugin/inventree-location/catalog/';
 function userLabel(user: UserOption): string {
   const fullName = `${user.first_name} ${user.last_name}`.trim();
   return fullName ? `${fullName} (${user.username})` : user.username;
+}
+
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    day: '2-digit',
+    month: '2-digit'
+  });
 }
 
 function apiErrorFields(error: unknown): Record<string, string> {
@@ -175,6 +184,13 @@ export function ReservationForm({
     [prestationsQuery.data, form.values.prestation]
   );
 
+  // Une réservation validée (ou au-delà) n'est plus modifiable : lecture seule.
+  const locked =
+    isEdit &&
+    existingQuery.data != null &&
+    !isReservationEditable(existingQuery.data.statut);
+  const effectiveReadOnly = readOnly || locked;
+
   const mutation = useMutation(
     {
       mutationFn: async (statut: ReservationStatut) => {
@@ -237,7 +253,9 @@ export function ReservationForm({
   const prestationOptions = (prestationsQuery.data?.results ?? []).map(
     (prestation) => ({
       value: String(prestation.id),
-      label: `${prestation.nom} — ${prestation.manifestation_nom}`
+      label: `${prestation.nom} — ${prestation.manifestation_nom} (${shortDate(
+        prestation.date_debut
+      )}→${shortDate(prestation.date_fin)})`
     })
   );
 
@@ -257,14 +275,54 @@ export function ReservationForm({
         )}
       </Group>
 
-      {readOnly && (
+      {effectiveReadOnly && (
         <Alert color='blue' title='Lecture seule'>
-          Votre rôle ne permet pas de modifier cette réservation.
+          {locked
+            ? 'Cette réservation est validée : elle n’est plus modifiable.'
+            : 'Votre rôle ne permet pas de modifier cette réservation.'}
         </Alert>
       )}
 
+      {/* Tooltip sur l'icône, pas sur le Select (le wrapper casse le dropdown). */}
       <Select
-        label='Événement / Prestation'
+        label={
+          <Group gap={6} component='span' align='center'>
+            <span>Événement / Prestation</span>
+            {selectedPrestation && (
+              <Tooltip
+                multiline
+                w={280}
+                openDelay={100}
+                closeDelay={2000}
+                events={{ hover: true, focus: true, touch: true }}
+                label={
+                  <Stack gap={2}>
+                    <Text size='sm' fw={600}>
+                      {selectedPrestation.nom} —{' '}
+                      {selectedPrestation.manifestation_nom}
+                    </Text>
+                    <Text size='xs'>
+                      Du{' '}
+                      {new Date(selectedPrestation.date_debut).toLocaleString()}{' '}
+                      au{' '}
+                      {new Date(selectedPrestation.date_fin).toLocaleString()}
+                    </Text>
+                    <Text size='xs'>
+                      Lieu : {selectedPrestation.lieu_detail?.nom ?? 'aucun'}
+                    </Text>
+                    <Text size='xs' c='yellow'>
+                      La réservation doit couvrir ces dates.
+                    </Text>
+                  </Stack>
+                }
+              >
+                <Text component='span' c='blue' style={{ cursor: 'help' }}>
+                  ⓘ dates
+                </Text>
+              </Tooltip>
+            )}
+          </Group>
+        }
         placeholder='Rechercher une prestation…'
         data={prestationOptions}
         searchable
@@ -277,16 +335,16 @@ export function ReservationForm({
           form.setFieldValue('prestation', value ? Number(value) : null)
         }
         error={form.errors.prestation}
-        disabled={readOnly}
+        disabled={effectiveReadOnly}
         required
       />
 
       {selectedPrestation && (
-        <Alert color='gray' title='Événement / Lieu(x)'>
+        <Alert color='gray' title='Événement / Lieu'>
           <Text size='sm'>{selectedPrestation.manifestation_nom}</Text>
           <Text size='sm' c='dimmed'>
-            {selectedPrestation.lieux.length > 0
-              ? selectedPrestation.lieux.map((lieu) => lieu.nom).join(', ')
+            {selectedPrestation.lieu_detail
+              ? selectedPrestation.lieu_detail.nom
               : 'Aucun lieu associé à cette prestation.'}
           </Text>
         </Alert>
@@ -306,7 +364,7 @@ export function ReservationForm({
           form.setFieldValue('demandeur', value ? Number(value) : null)
         }
         error={form.errors.demandeur}
-        disabled={readOnly}
+        disabled={effectiveReadOnly}
         required
       />
 
@@ -321,7 +379,7 @@ export function ReservationForm({
             )
           }
           error={form.errors.date_retrait_prevue}
-          disabled={readOnly}
+          disabled={effectiveReadOnly}
           clearable
         />
         <DateTimePicker
@@ -334,7 +392,7 @@ export function ReservationForm({
             )
           }
           error={form.errors.date_retour_prevue}
-          disabled={readOnly}
+          disabled={effectiveReadOnly}
           clearable
         />
       </Group>
@@ -347,11 +405,11 @@ export function ReservationForm({
           form.setFieldValue('commentaire', event.currentTarget.value)
         }
         minRows={2}
-        disabled={readOnly}
+        disabled={effectiveReadOnly}
       />
 
       <Title order={5}>Matériel</Title>
-      {!readOnly && (
+      {!effectiveReadOnly && (
         <>
           <PartPicker
             context={context}
@@ -392,7 +450,7 @@ export function ReservationForm({
               <Table.Th>Article</Table.Th>
               <Table.Th>Quantité</Table.Th>
               <Table.Th>Type</Table.Th>
-              {!readOnly && <Table.Th />}
+              {!effectiveReadOnly && <Table.Th />}
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -407,7 +465,7 @@ export function ReservationForm({
                     <Badge color='green'>Matériel</Badge>
                   )}
                 </Table.Td>
-                {!readOnly && (
+                {!effectiveReadOnly && (
                   <Table.Td>
                     <Button
                       size='xs'
@@ -430,7 +488,7 @@ export function ReservationForm({
         </Table>
       )}
 
-      {!readOnly && (
+      {!effectiveReadOnly && (
         <Group justify='flex-end'>
           <Button
             variant='light'

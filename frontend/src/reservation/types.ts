@@ -22,7 +22,9 @@ export interface Prestation {
   date_fin: string;
   manifestation: number;
   manifestation_nom: string;
-  lieux: LieuSummary[];
+  // ORG-02 : une prestation se déroule sur un seul lieu géolocalisé.
+  lieu: number | null;
+  lieu_detail: LieuSummary | null;
 }
 
 /** Réponse paginée DRF (PageNumberPagination). */

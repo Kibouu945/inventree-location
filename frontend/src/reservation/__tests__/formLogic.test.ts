@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildReservationPayload,
+  canArbitrateReservation,
   emptyReservationValues,
   enrichLignesFromCatalog,
+  isReservationEditable,
   removeLigne,
   reservationToFormValues,
+  transitionErrorMessage,
   upsertLigne,
   validateReservationValues
 } from '../formLogic';
@@ -23,7 +26,8 @@ const PRESTATION: Prestation = {
   date_fin: '2026-07-10T18:00:00Z',
   manifestation: 1,
   manifestation_nom: 'Camp été 2026',
-  lieux: [{ id: 1, nom: 'Terrain central', adresse: '' }]
+  lieu: 1,
+  lieu_detail: { id: 1, nom: 'Terrain central', adresse: '' }
 };
 
 function values(
@@ -210,5 +214,63 @@ describe('reservationToFormValues / enrichLignesFromCatalog', () => {
     const base = reservationToFormValues(RESERVATION).lignes;
     const enriched = enrichLignesFromCatalog(base, []);
     expect(enriched).toEqual(base);
+  });
+});
+
+describe('canArbitrateReservation', () => {
+  it('ouvre l’arbitrage uniquement sur une réservation soumise', () => {
+    expect(canArbitrateReservation('soumise')).toBe(true);
+  });
+
+  it('n’ouvre pas l’arbitrage sur les autres statuts', () => {
+    for (const statut of [
+      'brouillon',
+      'validee',
+      'refusee',
+      'livree',
+      'retournee',
+      'cloturee'
+    ]) {
+      expect(canArbitrateReservation(statut)).toBe(false);
+    }
+  });
+});
+
+describe('transitionErrorMessage', () => {
+  it('remonte le detail backend (ex. conflit de stock)', () => {
+    const error = {
+      response: { data: { detail: 'Validation refusée : conflit de stock.' } }
+    };
+    expect(transitionErrorMessage(error)).toBe(
+      'Validation refusée : conflit de stock.'
+    );
+  });
+
+  it('retombe sur un message générique sans detail exploitable', () => {
+    expect(transitionErrorMessage(new Error('boom'))).toBe(
+      "Le statut n'a pas pu être changé."
+    );
+    expect(transitionErrorMessage(undefined)).toBe(
+      "Le statut n'a pas pu être changé."
+    );
+  });
+});
+
+describe('isReservationEditable', () => {
+  it('éditable en brouillon et soumise', () => {
+    expect(isReservationEditable('brouillon')).toBe(true);
+    expect(isReservationEditable('soumise')).toBe(true);
+  });
+
+  it('verrouillée dès validée et au-delà', () => {
+    for (const statut of [
+      'validee',
+      'refusee',
+      'livree',
+      'retournee',
+      'cloturee'
+    ]) {
+      expect(isReservationEditable(statut)).toBe(false);
+    }
   });
 });

@@ -16,10 +16,12 @@ import {
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
-import { useQuery } from '@tanstack/react-query';
+import { notifications } from '@mantine/notifications';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import { canWriteReservations } from '../roles';
+import { canArbitrateReservations, canWriteReservations } from '../roles';
+import { canArbitrateReservation, transitionErrorMessage } from './formLogic';
 import { ReservationForm } from './ReservationForm';
 import type { Page, Reservation } from './types';
 
@@ -103,7 +105,11 @@ export function ReservationsList({
     {
       queryKey: ['reservations', params],
       queryFn: async () => {
-        const response = await context.api.get(RESERVATIONS_URL, { params });
+        const response = await context.api.get(RESERVATIONS_URL, {
+          params,
+          // Clés répétées `statut=a&statut=b` (le backend lit getlist).
+          paramsSerializer: { indexes: null }
+        });
         return response.data;
       }
     },
@@ -116,6 +122,45 @@ export function ReservationsList({
 
   // Livreur / magasinier / sav / lecteur : lecture seule (cf. permissions.py).
   const canWrite = canWriteReservations(context);
+  const canArbitrate = canArbitrateReservations(context);
+
+  // Validation / refus d'une réservation soumise via l'endpoint de transition.
+  const transitionMutation = useMutation(
+    {
+      mutationFn: async ({
+        id,
+        statut
+      }: {
+        id: number;
+        statut: 'validee' | 'refusee';
+      }) => {
+        const response = await context.api.patch(
+          `${RESERVATIONS_URL}${id}/transition/`,
+          { statut }
+        );
+        return response.data;
+      },
+      onSuccess: (_data, variables) => {
+        context.queryClient.invalidateQueries({ queryKey: ['reservations'] });
+        notifications.show({
+          title: variables.statut === 'validee' ? 'Validée' : 'Refusée',
+          message:
+            variables.statut === 'validee'
+              ? 'Réservation validée.'
+              : 'Réservation refusée.',
+          color: variables.statut === 'validee' ? 'green' : 'orange'
+        });
+      },
+      onError: (error: unknown) => {
+        notifications.show({
+          title: 'Action impossible',
+          message: transitionErrorMessage(error),
+          color: 'red'
+        });
+      }
+    },
+    context.queryClient
+  );
 
   function closeModal() {
     setModalState({ open: false });
@@ -189,6 +234,7 @@ export function ReservationsList({
               <Table.Th>Retour prévu</Table.Th>
               <Table.Th>Statut</Table.Th>
               <Table.Th>Nb objets</Table.Th>
+              {canArbitrate && <Table.Th>Actions</Table.Th>}
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -219,6 +265,61 @@ export function ReservationsList({
                   </Badge>
                 </Table.Td>
                 <Table.Td>{reservation.lignes.length}</Table.Td>
+                {canArbitrate && (
+                  <Table.Td
+                    // Les actions ne doivent pas ouvrir la modale de détail.
+                    onClick={(event) => event.stopPropagation()}
+                    style={{ cursor: 'default' }}
+                  >
+                    {canArbitrateReservation(reservation.statut) ? (
+                      <Group gap='xs' wrap='nowrap'>
+                        <Button
+                          size='xs'
+                          color='green'
+                          loading={
+                            transitionMutation.isPending &&
+                            transitionMutation.variables?.id ===
+                              reservation.id &&
+                            transitionMutation.variables?.statut === 'validee'
+                          }
+                          disabled={transitionMutation.isPending}
+                          onClick={() =>
+                            transitionMutation.mutate({
+                              id: reservation.id,
+                              statut: 'validee'
+                            })
+                          }
+                        >
+                          Valider
+                        </Button>
+                        <Button
+                          size='xs'
+                          variant='light'
+                          color='red'
+                          loading={
+                            transitionMutation.isPending &&
+                            transitionMutation.variables?.id ===
+                              reservation.id &&
+                            transitionMutation.variables?.statut === 'refusee'
+                          }
+                          disabled={transitionMutation.isPending}
+                          onClick={() =>
+                            transitionMutation.mutate({
+                              id: reservation.id,
+                              statut: 'refusee'
+                            })
+                          }
+                        >
+                          Refuser
+                        </Button>
+                      </Group>
+                    ) : (
+                      <Text c='dimmed' size='sm'>
+                        —
+                      </Text>
+                    )}
+                  </Table.Td>
+                )}
               </Table.Tr>
             ))}
           </Table.Tbody>

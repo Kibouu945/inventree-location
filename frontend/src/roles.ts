@@ -16,6 +16,9 @@ export const LECTEUR = 'lecteur';
 // Rôles autorisés en écriture, alignés sur permissions.py.
 export const RESERVATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE, ORGANISATEUR];
 export const CATALOG_WRITE_ROLES = [ADMIN, GESTIONNAIRE];
+export const ORGANISATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE, ORGANISATEUR];
+// Arbitrage (valider / refuser) : gestionnaire + admin seulement.
+export const RESERVATION_ARBITRAGE_ROLES = [ADMIN, GESTIONNAIRE];
 
 /**
  * Rôles (noms de groupes) de l'utilisateur courant.
@@ -66,7 +69,19 @@ export function canWriteReservations(context: InvenTreePluginContext): boolean {
   return hasAnyRole(context, RESERVATION_WRITE_ROLES);
 }
 
+/** Peut valider / refuser une réservation (admin, gestionnaire). */
+export function canArbitrateReservations(
+  context: InvenTreePluginContext
+): boolean {
+  return hasAnyRole(context, RESERVATION_ARBITRAGE_ROLES);
+}
+
 /** Peut modifier les drapeaux du catalogue (admin, gestionnaire). */
 export function canWriteCatalog(context: InvenTreePluginContext): boolean {
   return hasAnyRole(context, CATALOG_WRITE_ROLES);
+}
+
+/** Peut gérer manifestations / prestations / lieux (admin, gestionnaire, organisateur). */
+export function canWriteOrganisation(context: InvenTreePluginContext): boolean {
+  return hasAnyRole(context, ORGANISATION_WRITE_ROLES);
 }
