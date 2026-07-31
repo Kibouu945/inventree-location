@@ -5,6 +5,7 @@ from django.contrib import admin
 from .models import (
     Groupe,
     Lieu,
+    LignePrestation,
     LigneReservation,
     Manifestation,
     Prestation,
@@ -54,15 +55,19 @@ class ManifestationAdmin(admin.ModelAdmin):
 
 
 class PrestationAdmin(admin.ModelAdmin):
-    list_display = ("nom", "manifestation", "date_debut", "date_fin")
-    list_filter = ("manifestation",)
+    list_display = ("nom", "manifestation", "lieu", "date_debut", "date_fin")
+    list_filter = ("manifestation", "lieu")
     search_fields = ("nom",)
 
 
 class LieuAdmin(admin.ModelAdmin):
-    list_display = ("nom", "prestation", "adresse", "latitude", "longitude", "capacite")
-    list_filter = ("prestation",)
+    list_display = ("nom", "adresse", "latitude", "longitude", "capacite")
     search_fields = ("nom", "adresse")
+
+
+class LignePrestationAdmin(admin.ModelAdmin):
+    list_display = ("prestation", "part", "quantite")
+    search_fields = ("part__name", "part__IPN")
 
 
 class ReservationAdmin(admin.ModelAdmin):
@@ -89,5 +94,6 @@ _register(RentableItem, RentableItemAdmin)
 _register(Manifestation, ManifestationAdmin)
 _register(Prestation, PrestationAdmin)
 _register(Lieu, LieuAdmin)
+_register(LignePrestation, LignePrestationAdmin)
 _register(Reservation, ReservationAdmin)
 _register(LigneReservation, LigneReservationAdmin)

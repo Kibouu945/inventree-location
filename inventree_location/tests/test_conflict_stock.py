@@ -30,6 +30,9 @@ from inventree_location.models import (
     StatutReservation,
 )
 from inventree_location.serializers import ReservationSerializer
+from inventree_location.services.workflow_service import (
+    transition_reservation_status,
+)
 from inventree_location.views import ReservationConflictCheckView
 
 from part.models import Part
@@ -264,3 +267,31 @@ def test_non_validee_status_is_not_blocked(stock_setup):
 
     # Ne doit pas lever malgré le conflit sous-jacent.
     ReservationSerializer()._validate_stock_conflicts_if_needed(candidate)
+
+
+@pytest.mark.django_db
+def test_transition_to_validee_blocked_on_conflict(stock_setup):
+    """Le garde-fou stock s'applique aussi via l'endpoint de transition."""
+
+    candidate = _make_candidate(stock_setup, qty=1, statut=StatutReservation.SOUMISE)
+
+    with pytest.raises(serializers.ValidationError):
+        transition_reservation_status(candidate, StatutReservation.VALIDEE)
+
+    candidate.refresh_from_db()
+    assert candidate.statut == StatutReservation.SOUMISE
+    assert candidate.status_logs.count() == 0
+
+
+@pytest.mark.django_db
+def test_transition_to_validee_allowed_when_forced(stock_setup):
+    """`forced=True` valide malgré le conflit, même par la transition (US-03)."""
+
+    candidate = _make_candidate(
+        stock_setup, qty=1, statut=StatutReservation.SOUMISE, forced=True
+    )
+
+    transition_reservation_status(candidate, StatutReservation.VALIDEE)
+
+    candidate.refresh_from_db()
+    assert candidate.statut == StatutReservation.VALIDEE

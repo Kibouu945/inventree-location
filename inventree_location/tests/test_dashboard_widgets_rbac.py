@@ -20,7 +20,8 @@ User = get_user_model()
 CATALOG = "inventree-location-catalog"
 RESERVATIONS = "inventree-location-reservations"
 CONFLICTS = "inventree-location-conflicts"
-ALL_WIDGETS = {CATALOG, RESERVATIONS, CONFLICTS}
+ORGANISATION = "inventree-location-organisation"
+ALL_WIDGETS = {CATALOG, RESERVATIONS, CONFLICTS, ORGANISATION}
 
 
 def _make_user(username, role=None, *, is_staff=False, is_superuser=False):
@@ -64,7 +65,7 @@ class TestVisibleDashboardWidgetKeys:
             (roles.GESTIONNAIRE, ALL_WIDGETS),
             (roles.LECTEUR, ALL_WIDGETS),
             (roles.MAGASINIER, {CATALOG, RESERVATIONS}),
-            (roles.ORGANISATEUR, {RESERVATIONS}),
+            (roles.ORGANISATEUR, {RESERVATIONS, ORGANISATION}),
             (roles.LIVREUR, {RESERVATIONS}),
             (roles.SAV, set()),
         ],

@@ -1,36 +1,47 @@
 """API serializers for the InvenTreeLocation plugin."""
 
 import json
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 
 from .conflicts import detect_reservation_conflicts
 from .models import (
+    Groupe,
+    LignePrestation,
     LigneReservation,
     Lieu,
+    Manifestation,
     Reservation,
     ReservationStatusLog,
     Prestation,
     RentableItem,
+    StatutManifestation,
     StatutReservation,
 )
+from .services.workflow_service import transition_reservation_status
+from .stock import compute_prestation_stock
 
 
-def geocode_address(address):
-    """Return GPS coordinates for an address using OpenStreetMap Nominatim."""
+# Produit français : on restreint le géocodage à la France pour éviter les
+# faux positifs à l'étranger (ex. « Champ de Mars » → un pic au Québec).
+GEOCODE_COUNTRY_CODES = "fr"
 
-    if not address:
-        return None
+
+def _nominatim_search(address, limit):
+    """Query OpenStreetMap Nominatim (restricted to France) and return the raw list."""
 
     query = urlencode({
         "q": address,
         "format": "json",
-        "limit": 1,
+        "limit": limit,
+        "countrycodes": GEOCODE_COUNTRY_CODES,
     })
 
     url = f"https://nominatim.openstreetmap.org/search?{query}"
@@ -43,7 +54,39 @@ def geocode_address(address):
     )
 
     with urlopen(request, timeout=10) as response:
-        payload = json.loads(response.read().decode("utf-8"))
+        return json.loads(response.read().decode("utf-8"))
+
+
+def geocode_candidates(address, limit=5):
+    """Return up to ``limit`` geocoding candidates for an address.
+
+    Une recherche texte libre est souvent ambiguë (« Champs de Mars » matche
+    plusieurs lieux en France) : on renvoie donc plusieurs candidats pour que
+    l'utilisateur choisisse le bon plutôt que de deviner à sa place.
+    """
+
+    if not address:
+        return []
+
+    payload = _nominatim_search(address, limit)
+
+    return [
+        {
+            "display_name": item.get("display_name"),
+            "latitude": _round_coord(item.get("lat")),
+            "longitude": _round_coord(item.get("lon")),
+        }
+        for item in payload
+    ]
+
+
+def geocode_address(address):
+    """Return the single best GPS match for an address (auto-geocode serveur)."""
+
+    if not address:
+        return None
+
+    payload = _nominatim_search(address, 1)
 
     if not payload:
         return None
@@ -53,10 +96,35 @@ def geocode_address(address):
     return {
         "address": address,
         "display_name": first_result.get("display_name"),
-        "latitude": first_result.get("lat"),
-        "longitude": first_result.get("lon"),
+        "latitude": _round_coord(first_result.get("lat")),
+        "longitude": _round_coord(first_result.get("lon")),
         "source": "OpenStreetMap Nominatim",
     }
+
+
+def _round_coord(value):
+    """Round a coordinate to 6 decimal places (the DB column precision).
+
+    Nominatim renvoie souvent 7+ décimales, ce qui dépasse le
+    ``decimal_places=6`` du modèle ``Lieu`` et fait échouer la validation.
+    """
+
+    if value is None:
+        return None
+
+    try:
+        rounded = Decimal(str(value)).quantize(
+            Decimal("0.000001"), rounding=ROUND_HALF_UP
+        )
+    except (InvalidOperation, ValueError):
+        return value
+
+    # Fixed-point (jamais de notation scientifique), sans zéros de fin.
+    text = format(rounded, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+
+    return text
 
 
 class LigneReservationSerializer(serializers.ModelSerializer):
@@ -385,8 +453,42 @@ class ExampleSerializer(serializers.Serializer):
     )
 
 
+class RoundedDecimalField(serializers.DecimalField):
+    """DecimalField qui arrondit l'entrée au lieu de rejeter l'excès de décimales.
+
+    Les coordonnées GPS collées depuis une carte comportent souvent plus de
+    décimales que le ``decimal_places`` autorisé ; on quantifie plutôt que
+    de renvoyer une 400.
+    """
+
+    def validate_precision(self, value):
+        """Round to the allowed decimal places before precision validation."""
+
+        if self.decimal_places is not None:
+            value = value.quantize(
+                Decimal(1).scaleb(-self.decimal_places),
+                rounding=ROUND_HALF_UP,
+            )
+
+        return super().validate_precision(value)
+
+
 class LieuSerializer(serializers.ModelSerializer):
     """Serializer for location places with GPS coordinates."""
+
+    latitude = RoundedDecimalField(
+        max_digits=9,
+        decimal_places=6,
+        required=False,
+        allow_null=True,
+    )
+
+    longitude = RoundedDecimalField(
+        max_digits=9,
+        decimal_places=6,
+        required=False,
+        allow_null=True,
+    )
 
     auto_geocode = serializers.BooleanField(
         write_only=True,
@@ -401,7 +503,6 @@ class LieuSerializer(serializers.ModelSerializer):
         model = Lieu
         fields = [
             "id",
-            "prestation",
             "nom",
             "adresse",
             "latitude",
@@ -559,6 +660,17 @@ class CatalogPartSerializer(serializers.Serializer):
         return rentable_info.stock_total
 
 
+class GroupeSerializer(serializers.ModelSerializer):
+    """Sérialiseur léger d'un groupe scout (sélecteur manifestation)."""
+
+    class Meta:
+        """Configuration du serializer Groupe."""
+
+        model = Groupe
+        fields = ["id", "nom", "code", "adresse"]
+        read_only_fields = fields
+
+
 class UserSerializer(serializers.ModelSerializer):
     """Sérialiseur léger d'un utilisateur InvenTree (sélecteur demandeur)."""
 
@@ -570,13 +682,40 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class LignePrestationSerializer(serializers.ModelSerializer):
+    """Article + quantité rattaché à une prestation (RES-09)."""
+
+    part_name = serializers.CharField(source="part.name", read_only=True)
+
+    class Meta:
+        """Configuration du serializer LignePrestation."""
+
+        model = LignePrestation
+        fields = [
+            "id",
+            "part",
+            "part_name",
+            "quantite",
+            "commentaire",
+        ]
+        read_only_fields = ["id", "part_name"]
+
+
 class PrestationSerializer(serializers.ModelSerializer):
-    """Sérialiseur de lecture d'une prestation, avec manifestation et lieux."""
+    """CRUD d'une prestation : manifestation, lieu unique et liste d'articles.
+
+    Une prestation se déroule sur un seul lieu (ORG-02) et porte sa propre liste
+    de matériel + quantités (RES-09). Les lignes sont imbriquées et remplacées
+    intégralement à chaque écriture, comme pour les réservations.
+    """
 
     manifestation_nom = serializers.CharField(
         source="manifestation.nom", read_only=True
     )
-    lieux = LieuSerializer(many=True, read_only=True)
+    lieu_detail = LieuSerializer(source="lieu", read_only=True)
+    lignes = LignePrestationSerializer(
+        source="lignes_prestation", many=True, required=False
+    )
 
     class Meta:
         """Configuration du serializer Prestation."""
@@ -590,6 +729,255 @@ class PrestationSerializer(serializers.ModelSerializer):
             "description",
             "manifestation",
             "manifestation_nom",
-            "lieux",
+            "lieu",
+            "lieu_detail",
+            "lignes",
+            "created_at",
+            "updated_at",
         ]
-        read_only_fields = fields
+        read_only_fields = [
+            "id",
+            "manifestation_nom",
+            "lieu_detail",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate(self, attrs):
+        """Dates de prestation incluses dans celles de la manifestation."""
+
+        def effective(field):
+            if field in attrs:
+                return attrs[field]
+            return getattr(self.instance, field, None) if self.instance else None
+
+        date_debut = effective("date_debut")
+        date_fin = effective("date_fin")
+        manifestation = effective("manifestation")
+
+        errors = {}
+
+        # Nouvelle prestation seulement sur une manif pas encore démarrée.
+        if (
+            self.instance is None
+            and manifestation
+            and not manifestation.accepte_nouvelles_prestations
+        ):
+            errors["manifestation"] = (
+                "Impossible d'ajouter une prestation : la manifestation est "
+                f"« {manifestation.get_statut_display().lower()} » "
+                f"(statut effectif : {manifestation.statut_effectif})."
+            )
+
+        if date_debut and date_fin and date_debut > date_fin:
+            errors["date_fin"] = (
+                "La date de fin doit être postérieure ou égale à la date de début."
+            )
+
+        # Bornage au jour, dans le fuseau courant (localdate sur les deux dates
+        # sinon le jour décale à minuit entre l'entrée DRF et l'UTC en base).
+        if (
+            manifestation
+            and date_debut
+            and timezone.localdate(date_debut)
+            < timezone.localdate(manifestation.date_debut)
+        ):
+            errors["date_debut"] = (
+                "La prestation doit se dérouler pendant la manifestation "
+                f"(à partir du {timezone.localdate(manifestation.date_debut):%d/%m/%Y})."
+            )
+
+        if (
+            manifestation
+            and date_fin
+            and timezone.localdate(date_fin)
+            > timezone.localdate(manifestation.date_fin)
+        ):
+            errors["date_fin"] = (
+                "La prestation doit se dérouler pendant la manifestation "
+                f"(jusqu'au {timezone.localdate(manifestation.date_fin):%d/%m/%Y})."
+            )
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        """Crée une prestation et ses lignes, puis contrôle le stock (STK-01)."""
+
+        lignes_data = validated_data.pop("lignes_prestation", None)
+        prestation = super().create(validated_data)
+
+        if lignes_data:
+            self._replace_lignes(prestation, lignes_data)
+
+        self._validate_stock(prestation)
+
+        return prestation
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        """Met à jour une prestation et ses lignes, puis contrôle le stock."""
+
+        lignes_data = validated_data.pop("lignes_prestation", None)
+        prestation = super().update(instance, validated_data)
+
+        if lignes_data is not None:
+            self._replace_lignes(prestation, lignes_data)
+
+        self._validate_stock(prestation)
+
+        return prestation
+
+    def _replace_lignes(self, prestation, lignes_data):
+        """Remplace l'intégralité des lignes d'articles de la prestation."""
+
+        prestation.lignes_prestation.all().delete()
+
+        LignePrestation.objects.bulk_create([
+            LignePrestation(prestation=prestation, **ligne_data)
+            for ligne_data in lignes_data
+        ])
+
+    def _validate_stock(self, prestation):
+        """Bloque la sauvegarde si le stock est insuffisant (STK-01).
+
+        Le calcul est au jour entier ; la ValidationError est levée dans la
+        transaction de create/update, ce qui annule donc la sauvegarde.
+        """
+
+        result = compute_prestation_stock(prestation)
+
+        if result["has_shortage"]:
+            shortages = [line for line in result["lines"] if line["shortage"]]
+
+            raise serializers.ValidationError({
+                "detail": (
+                    "Stock insuffisant : la prestation ne peut pas être "
+                    "enregistrée en l'état."
+                ),
+                "stock": shortages,
+            })
+
+
+class ManifestationSerializer(serializers.ModelSerializer):
+    """CRUD d'une manifestation (événement)."""
+
+    organisateur_nom = serializers.SerializerMethodField()
+    prestations_count = serializers.IntegerField(
+        source="prestations.count", read_only=True
+    )
+    statut_effectif = serializers.CharField(read_only=True)
+
+    #: en_cours / terminée sont dérivés des dates, pas posables à la main.
+    STATUTS_MANUELS = (
+        StatutManifestation.BROUILLON,
+        StatutManifestation.PLANIFIEE,
+        StatutManifestation.ANNULEE,
+    )
+
+    class Meta:
+        """Configuration du serializer Manifestation."""
+
+        model = Manifestation
+        fields = [
+            "id",
+            "nom",
+            "description",
+            "date_debut",
+            "date_fin",
+            "statut",
+            "statut_effectif",
+            "organisateur",
+            "organisateur_nom",
+            "groupe",
+            "prestations_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "statut_effectif",
+            "organisateur_nom",
+            "prestations_count",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_organisateur_nom(self, obj):
+        """Nom lisible de l'organisateur."""
+
+        user = obj.organisateur
+        full_name = f"{user.first_name} {user.last_name}".strip()
+
+        return f"{full_name} ({user.username})" if full_name else user.username
+
+    def validate_statut(self, value):
+        """Refuse un statut dérivé posé à la main."""
+
+        if value not in self.STATUTS_MANUELS:
+            raise serializers.ValidationError(
+                "Ce statut est calculé automatiquement d'après les dates et ne "
+                "peut pas être défini manuellement (statuts posables : "
+                "brouillon, planifiée, annulée)."
+            )
+        return value
+
+    def validate(self, attrs):
+        """La date de fin doit être postérieure ou égale à la date de début."""
+
+        def effective(field):
+            if field in attrs:
+                return attrs[field]
+            return getattr(self.instance, field, None) if self.instance else None
+
+        date_debut = effective("date_debut")
+        date_fin = effective("date_fin")
+
+        if date_debut and date_fin and date_debut > date_fin:
+            raise serializers.ValidationError({
+                "date_fin": (
+                    "La date de fin doit être postérieure ou égale à la date de début."
+                )
+            })
+
+        return attrs
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        """Annulation en cascade : les réservations liées sont annulées aussi."""
+
+        becoming_annulee = (
+            validated_data.get("statut") == StatutManifestation.ANNULEE
+            and instance.statut != StatutManifestation.ANNULEE
+        )
+
+        manifestation = super().update(instance, validated_data)
+
+        if becoming_annulee:
+            self._cancel_related_reservations(manifestation)
+
+        return manifestation
+
+    @staticmethod
+    def _cancel_related_reservations(manifestation):
+        """Annule les réservations pré-livraison ; les livrées/retournées
+        (matériel sorti) sont laissées au circuit retour."""
+
+        cancellables = Reservation.objects.filter(
+            prestation__manifestation=manifestation,
+            statut__in=[
+                StatutReservation.BROUILLON,
+                StatutReservation.SOUMISE,
+                StatutReservation.VALIDEE,
+            ],
+        )
+
+        for reservation in cancellables:
+            transition_reservation_status(
+                reservation,
+                StatutReservation.ANNULEE,
+                comment="Manifestation annulée",
+            )

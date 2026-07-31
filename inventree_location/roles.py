@@ -58,11 +58,44 @@ def user_has_any_role(user, roles) -> bool:
     return bool(user_roles(user) & set(roles))
 
 
+#: Rôles voyant les réservations tous statuts confondus.
+FULL_RESERVATION_VIEW_ROLES: tuple[str, ...] = (
+    ADMIN,
+    GESTIONNAIRE,
+    ORGANISATEUR,
+    MAGASINIER,
+    SAV,
+    LECTEUR,
+)
+
+
+def sees_only_deliverable_reservations(user) -> bool:
+    """Vrai pour un livreur pur : il ne voit que les réservations validées."""
+
+    if getattr(user, "is_superuser", False):
+        return False
+
+    owned = user_roles(user)
+
+    return LIVREUR in owned and not (owned & set(FULL_RESERVATION_VIEW_ROLES))
+
+
+#: Rôles habilités à arbitrer une réservation (valider / refuser).
+ARBITRAGE_ROLES: tuple[str, ...] = (ADMIN, GESTIONNAIRE)
+
+
+def can_arbitrate_reservations(user) -> bool:
+    """Vrai si l'utilisateur peut valider / refuser une réservation."""
+
+    return user_has_any_role(user, ARBITRAGE_ROLES)
+
+
 #: Widgets dashboard visibles par rôle métier (RBAC, cf. cahier des charges —
 #: un filtrage sur les 7 groupes, PAS sur ``is_staff``). Les écrans propres à
 #: certains rôles (tournées livreur, retours magasinier, tickets SAV) arriveront
 #: aux sprints suivants ; on ne mappe ici que les widgets existants.
 DASHBOARD_WIDGET_ROLES: dict[str, set[str]] = {
+    "inventree-location-organisation": {ADMIN, GESTIONNAIRE, ORGANISATEUR, LECTEUR},
     "inventree-location-catalog": {ADMIN, GESTIONNAIRE, MAGASINIER, LECTEUR},
     "inventree-location-reservations": {
         ADMIN,

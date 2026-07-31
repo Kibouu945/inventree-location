@@ -72,9 +72,15 @@ class InvenTreeLocation(
             ConflictsListView,
             ExampleView,
             GeocodeAddressView,
+            GroupeListView,
             LieuDetailView,
             LieuListCreateView,
-            PrestationListView,
+            ManifestationDetailView,
+            ManifestationListCreateView,
+            PrestationDetailView,
+            PrestationListCreateView,
+            PrestationStockPreviewView,
+            PrestationStockView,
             RentableFlagBulkUpdateView,
             RentablePartDetailView,
             ReservationConflictCheckView,
@@ -127,9 +133,39 @@ class InvenTreeLocation(
                 name="reservation-conflict-check",
             ),
             path(
+                "manifestations/",
+                ManifestationListCreateView.as_view(),
+                name="manifestation-list-create",
+            ),
+            path(
+                "manifestations/<int:pk>/",
+                ManifestationDetailView.as_view(),
+                name="manifestation-detail",
+            ),
+            path(
                 "prestations/",
-                PrestationListView.as_view(),
-                name="prestation-list",
+                PrestationListCreateView.as_view(),
+                name="prestation-list-create",
+            ),
+            path(
+                "prestations/stock-preview/",
+                PrestationStockPreviewView.as_view(),
+                name="prestation-stock-preview",
+            ),
+            path(
+                "prestations/<int:pk>/",
+                PrestationDetailView.as_view(),
+                name="prestation-detail",
+            ),
+            path(
+                "prestations/<int:pk>/stock/",
+                PrestationStockView.as_view(),
+                name="prestation-stock",
+            ),
+            path(
+                "groupes/",
+                GroupeListView.as_view(),
+                name="groupe-list",
             ),
             path(
                 "users/",
@@ -199,6 +235,24 @@ class InvenTreeLocation(
                 "source": self.plugin_static_file(
                     "Catalog.js:renderInvenTreeLocationCatalog"
                 ),
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-organisation"):
+            items.append({
+                "key": "inventree-location-organisation",
+                "title": "Organisation",
+                "description": ("Gestion des manifestations, prestations et lieux"),
+                "icon": "ti:calendar-cog:outline",
+                "source": self.plugin_static_file(
+                    "Organisation.js:renderInvenTreeLocationOrganisation"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
                 "context": {
                     "settings": self.get_settings_dict(),
                 },

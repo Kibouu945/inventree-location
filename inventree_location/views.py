@@ -8,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 from rest_framework import generics, permissions, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -16,24 +17,38 @@ from .conflicts import (
     detect_reservation_conflicts,
     list_current_conflicts,
 )
-from .models import Lieu, Prestation, RentableItem, Reservation
+from . import roles
+from .models import (
+    Groupe,
+    Lieu,
+    Manifestation,
+    Prestation,
+    RentableItem,
+    Reservation,
+    StatutReservation,
+)
 from .permissions import (
     CatalogPermission,
     LieuPermission,
+    ManifestationPermission,
+    PrestationPermission,
     ReservationPermission,
     RoleBasedPermission,
 )
 from .serializers import (
     CatalogPartSerializer,
     ExampleSerializer,
+    GroupeSerializer,
     LieuSerializer,
+    ManifestationSerializer,
     PrestationSerializer,
     RentableItemSerializer,
     ReservationSerializer,
     ReservationTransitionSerializer,
     UserSerializer,
-    geocode_address,
+    geocode_candidates,
 )
+from .stock import compute_prestation_stock, compute_stock_availability
 from .services.workflow_service import (
     get_available_transitions,
     transition_reservation_status,
@@ -88,22 +103,16 @@ class LieuListCreateView(generics.ListCreateAPIView):
     pagination_class = LieuPagination
 
     def get_queryset(self):
-        """Return places, with optional filters."""
+        """Return places, with optional search filter."""
 
-        queryset = (
-            Lieu.objects.select_related("prestation", "prestation__manifestation")
-            .all()
-            .order_by("nom")
-        )
+        queryset = Lieu.objects.all().order_by("nom")
 
-        prestation_id = self.request.query_params.get("prestation")
         search = self.request.query_params.get("search")
 
-        if prestation_id:
-            queryset = queryset.filter(prestation_id=prestation_id)
-
         if search:
-            queryset = queryset.filter(nom__icontains=search)
+            queryset = queryset.filter(
+                Q(nom__icontains=search) | Q(adresse__icontains=search)
+            )
 
         return queryset
 
@@ -113,7 +122,7 @@ class LieuDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     permission_classes = [LieuPermission]
     serializer_class = LieuSerializer
-    queryset = Lieu.objects.select_related("prestation", "prestation__manifestation")
+    queryset = Lieu.objects.all()
 
 
 class GeocodeAddressView(APIView):
@@ -122,7 +131,7 @@ class GeocodeAddressView(APIView):
     permission_classes = [LieuPermission]
 
     def get(self, request, *args, **kwargs):
-        """Return GPS coordinates for a given address."""
+        """Return a list of geocoding candidates for a given address."""
 
         address = request.query_params.get("address", "").strip()
 
@@ -133,7 +142,7 @@ class GeocodeAddressView(APIView):
             )
 
         try:
-            result = geocode_address(address)
+            results = geocode_candidates(address)
         except (HTTPError, URLError, TimeoutError) as error:
             return Response(
                 {
@@ -143,13 +152,13 @@ class GeocodeAddressView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
-        if result is None:
+        if not results:
             return Response(
                 {"detail": "Aucune coordonnée trouvée pour cette adresse."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        return Response(result, status=status.HTTP_200_OK)
+        return Response({"results": results}, status=status.HTTP_200_OK)
 
 
 class ReservationListCreateView(generics.ListCreateAPIView):
@@ -179,6 +188,10 @@ class ReservationListCreateView(generics.ListCreateAPIView):
             .all()
             .order_by("-date_demande")
         )
+
+        # Un livreur pur ne voit que les réservations validées.
+        if roles.sees_only_deliverable_reservations(self.request.user):
+            queryset = queryset.filter(statut=StatutReservation.VALIDEE)
 
         statuts = self.request.query_params.getlist("statut")
 
@@ -217,6 +230,28 @@ class ReservationDetailView(generics.RetrieveUpdateDestroyAPIView):
     ).all()
     serializer_class = ReservationSerializer
     permission_classes = [ReservationPermission]
+
+    #: Une réservation n'est modifiable qu'avant validation.
+    STATUTS_EDITABLES = (StatutReservation.BROUILLON, StatutReservation.SOUMISE)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.statut not in self.STATUTS_EDITABLES:
+            raise ValidationError({
+                "detail": (
+                    f"Une réservation « {instance.get_statut_display().lower()} » "
+                    "n'est plus modifiable."
+                )
+            })
+        return super().update(request, *args, **kwargs)
+
+    def perform_destroy(self, instance):
+        # Seul un brouillon se supprime ; au-delà on annule via une transition.
+        if instance.statut != StatutReservation.BROUILLON:
+            raise ValidationError({
+                "detail": "Seule une réservation en brouillon peut être supprimée."
+            })
+        instance.delete()
 
 
 class ReservationConflictCheckView(APIView):
@@ -293,9 +328,21 @@ class ReservationTransitionView(APIView):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        new_status = serializer.validated_data["statut"]
+
+        # L'arbitrage (valider / refuser) est réservé au gestionnaire et à l'admin.
+        arbitrage = {StatutReservation.VALIDEE, StatutReservation.REFUSEE}
+        if new_status in arbitrage and not roles.can_arbitrate_reservations(
+            request.user
+        ):
+            return Response(
+                {"detail": "Seul un gestionnaire peut valider ou refuser."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         result = transition_reservation_status(
             reservation=reservation,
-            new_status=serializer.validated_data["statut"],
+            new_status=new_status,
             user=request.user,
             comment=serializer.validated_data.get("comment", ""),
         )
@@ -597,32 +644,185 @@ class RentablePartDetailView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
-class PrestationListView(generics.ListAPIView):
-    """Liste des prestations (lecture seule), pour le sélecteur événement.
+class ManifestationListCreateView(generics.ListCreateAPIView):
+    """CRUD manifestation — collection (ORG-01)."""
 
-    Paramètre de filtre :
-    - search : recherche sur le nom de la prestation ou de sa manifestation.
+    permission_classes = [ManifestationPermission]
+    serializer_class = ManifestationSerializer
+    pagination_class = LieuPagination
+
+    def get_queryset(self):
+        """Retourne les manifestations, filtrées par statut et recherche."""
+
+        queryset = (
+            Manifestation.objects.select_related("organisateur", "groupe")
+            .all()
+            .order_by("-date_debut")
+        )
+
+        statuts = self.request.query_params.getlist("statut")
+
+        if statuts:
+            queryset = queryset.filter(statut__in=statuts)
+
+        search = self.request.query_params.get("search")
+
+        if search:
+            queryset = queryset.filter(nom__icontains=search)
+
+        return queryset
+
+
+class ManifestationDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """CRUD manifestation — instance unique (ORG-01)."""
+
+    permission_classes = [ManifestationPermission]
+    serializer_class = ManifestationSerializer
+    queryset = Manifestation.objects.select_related("organisateur", "groupe")
+
+
+def _prestation_queryset():
+    """Queryset commun aux vues prestation, avec relations préchargées."""
+
+    return (
+        Prestation.objects.select_related("manifestation", "lieu")
+        .prefetch_related("lignes_prestation__part")
+        .all()
+    )
+
+
+class PrestationListCreateView(generics.ListCreateAPIView):
+    """CRUD prestation — collection (ORG-01 / RES-09).
+
+    Paramètres de filtre :
+    - manifestation : filtre exact sur la manifestation parente.
+    - search        : recherche sur le nom de la prestation ou de sa manifestation.
     """
 
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [PrestationPermission]
     serializer_class = PrestationSerializer
     pagination_class = LieuPagination
 
     def get_queryset(self):
-        """Retourne les prestations, filtrées par recherche texte."""
+        """Retourne les prestations, filtrées par manifestation et recherche."""
 
-        queryset = (
-            Prestation.objects.select_related("manifestation")
-            .prefetch_related("lieux")
-            .all()
-            .order_by("-date_debut")
-        )
+        queryset = _prestation_queryset().order_by("-date_debut")
+
+        manifestation_id = self.request.query_params.get("manifestation")
+
+        if manifestation_id:
+            queryset = queryset.filter(manifestation_id=manifestation_id)
 
         search = self.request.query_params.get("search")
 
         if search:
             queryset = queryset.filter(
                 Q(nom__icontains=search) | Q(manifestation__nom__icontains=search)
+            )
+
+        return queryset
+
+
+class PrestationDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """CRUD prestation — instance unique (ORG-01 / RES-09)."""
+
+    permission_classes = [PrestationPermission]
+    serializer_class = PrestationSerializer
+    queryset = _prestation_queryset()
+
+
+class PrestationStockView(APIView):
+    """Disponibilité au jour des articles d'une prestation enregistrée (STK-01).
+
+    - 200 s'il n'y a aucune pénurie ;
+    - 409 si au moins un article est en pénurie.
+    """
+
+    permission_classes = [PrestationPermission]
+
+    def get(self, request, pk, *args, **kwargs):
+        """Retourne la disponibilité de stock de la prestation."""
+
+        prestation = (
+            Prestation.objects.prefetch_related("lignes_prestation")
+            .filter(pk=pk)
+            .first()
+        )
+
+        if prestation is None:
+            return Response(
+                {"detail": "Prestation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        result = compute_prestation_stock(prestation)
+
+        response_status = (
+            status.HTTP_409_CONFLICT if result["has_shortage"] else status.HTTP_200_OK
+        )
+
+        return Response(result, status=response_status)
+
+
+class PrestationStockPreviewView(APIView):
+    """Disponibilité au jour AVANT sauvegarde (temps réel côté front, STK-01).
+
+    Corps attendu : ``{"date_debut", "date_fin", "lignes": [{"part", "quantite"}],
+    "exclude_prestation": <pk optionnel>}``.
+    """
+
+    permission_classes = [PrestationPermission]
+
+    def post(self, request, *args, **kwargs):
+        """Calcule la disponibilité pour une saisie non encore enregistrée."""
+
+        date_debut = request.data.get("date_debut")
+        date_fin = request.data.get("date_fin")
+        lignes = request.data.get("lignes") or []
+
+        if not date_debut or not date_fin:
+            return Response(
+                {"detail": "date_debut et date_fin sont obligatoires."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        requested_lines = [
+            {"part_id": ligne.get("part"), "quantite": ligne.get("quantite", 0)}
+            for ligne in lignes
+            if ligne.get("part") is not None
+        ]
+
+        result = compute_stock_availability(
+            date_debut,
+            date_fin,
+            requested_lines,
+            exclude_prestation_id=request.data.get("exclude_prestation"),
+        )
+
+        response_status = (
+            status.HTTP_409_CONFLICT if result["has_shortage"] else status.HTTP_200_OK
+        )
+
+        return Response(result, status=response_status)
+
+
+class GroupeListView(generics.ListAPIView):
+    """Liste des groupes scouts (lecture seule), pour le sélecteur manifestation."""
+
+    permission_classes = [RoleBasedPermission]
+    serializer_class = GroupeSerializer
+    pagination_class = CatalogPagination
+
+    def get_queryset(self):
+        """Retourne les groupes, filtrés par recherche texte."""
+
+        queryset = Groupe.objects.all().order_by("nom")
+
+        search = self.request.query_params.get("search")
+
+        if search:
+            queryset = queryset.filter(
+                Q(nom__icontains=search) | Q(code__icontains=search)
             )
 
         return queryset

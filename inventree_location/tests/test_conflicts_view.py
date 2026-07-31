@@ -33,7 +33,12 @@ def user(db):
 
 @pytest.fixture
 def setup_conflicts(db):
-    from inventree_location.models import Prestation, Manifestation, Groupe, RentableItem
+    from inventree_location.models import (
+        Prestation,
+        Manifestation,
+        Groupe,
+        RentableItem,
+    )
 
     groupe = Groupe.objects.create(nom="Groupe A", code="GA")
     manifestation = Manifestation.objects.create(
@@ -79,7 +84,9 @@ class TestConflictsListView:
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
     @pytest.mark.django_db
-    def test_returns_conflicting_reservations_sorted_by_start(self, factory, user, setup_conflicts):
+    def test_returns_conflicting_reservations_sorted_by_start(
+        self, factory, user, setup_conflicts
+    ):
         request = factory.get("/plugin/inventree-location/conflicts/")
         force_authenticate(request, user=user)
 

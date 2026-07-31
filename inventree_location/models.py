@@ -217,6 +217,38 @@ class Manifestation(TimestampedModel):
     def __str__(self):
         return self.nom
 
+    #: Statuts où l'on peut encore ajouter des prestations.
+    STATUTS_MODIFIABLES = (
+        StatutManifestation.BROUILLON,
+        StatutManifestation.PLANIFIEE,
+    )
+
+    @property
+    def statut_effectif(self):
+        """Statut réel : brouillon/annulée explicites, en_cours/terminée dérivés
+        des dates dès qu'elle est planifiée."""
+
+        if self.statut in (
+            StatutManifestation.BROUILLON,
+            StatutManifestation.ANNULEE,
+        ):
+            return self.statut
+
+        now = timezone.now()
+
+        if now > self.date_fin:
+            return StatutManifestation.TERMINEE
+        if now >= self.date_debut:
+            return StatutManifestation.EN_COURS
+
+        return StatutManifestation.PLANIFIEE
+
+    @property
+    def accepte_nouvelles_prestations(self) -> bool:
+        """Vrai tant que la manif n'a pas démarré."""
+
+        return self.statut_effectif in self.STATUTS_MODIFIABLES
+
 
 class Prestation(TimestampedModel):
     """Créneau / service interne à une manifestation."""
@@ -226,6 +258,17 @@ class Prestation(TimestampedModel):
         on_delete=models.PROTECT,
         related_name="prestations",
         verbose_name=_("manifestation"),
+    )
+    # ORG-02 : une prestation se déroule sur un seul lieu (géolocalisé), qu'un
+    # même lieu peut porter pour plusieurs prestations (base de CON-06).
+    # Nullable pour autoriser les brouillons de prestation.
+    lieu = models.ForeignKey(
+        "Lieu",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="prestations",
+        verbose_name=_("lieu"),
     )
     nom = models.CharField(max_length=200, verbose_name=_("nom"))
     date_debut = models.DateTimeField(verbose_name=_("date de début"))
@@ -245,14 +288,14 @@ class Prestation(TimestampedModel):
 
 
 class Lieu(TimestampedModel):
-    """Site physique rattaché à une prestation."""
+    """Site physique géolocalisé, réutilisable par plusieurs prestations.
 
-    prestation = models.ForeignKey(
-        Prestation,
-        on_delete=models.PROTECT,
-        related_name="lieux",
-        verbose_name=_("prestation"),
-    )
+    Autonome (ORG-01/ORG-02) : le lieu porte adresse et coordonnées GPS et
+    n'appartient plus à une prestation. C'est la prestation qui référence son
+    lieu unique (``Prestation.lieu``), un même lieu pouvant servir à plusieurs
+    prestations — socle de la détection de conflit de lieu (CON-06).
+    """
+
     nom = models.CharField(max_length=200, verbose_name=_("nom"))
     adresse = models.TextField(blank=True, default="", verbose_name=_("adresse"))
     latitude = models.DecimalField(
@@ -281,6 +324,47 @@ class Lieu(TimestampedModel):
 
     def __str__(self):
         return self.nom
+
+
+class LignePrestation(TimestampedModel):
+    """Article (Part natif) et quantité nécessaires à une prestation (RES-09).
+
+    Chaque prestation porte sa propre liste de matériel + quantités. Ces lignes
+    alimentent le calcul de stock disponible au jour (STK-01) et la détection
+    des conflits de stock.
+    """
+
+    prestation = models.ForeignKey(
+        Prestation,
+        on_delete=models.CASCADE,
+        related_name="lignes_prestation",
+        verbose_name=_("prestation"),
+    )
+    part = models.ForeignKey(
+        "part.Part",
+        on_delete=models.PROTECT,
+        related_name="lignes_prestation",
+        verbose_name=_("part"),
+    )
+    quantite = models.PositiveIntegerField(verbose_name=_("quantité"))
+    commentaire = models.TextField(
+        blank=True, default="", verbose_name=_("commentaire")
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["prestation", "part"]
+        verbose_name = _("ligne de prestation")
+        verbose_name_plural = _("lignes de prestation")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["prestation", "part"],
+                name="unique_prestation_part",
+            ),
+        ]
+
+    def __str__(self):
+        return f"part#{self.part_id} x{self.quantite}"
 
 
 # ---------------------------------------------------------------------------
