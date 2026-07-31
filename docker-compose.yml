@@ -37,6 +37,8 @@ services:
       INVENTREE_PLUGIN_FILE: /home/inventree/data/plugins.txt
       INVENTREE_DEBUG: "True"
       INVENTREE_LOG_LEVEL: INFO
+      # Fuseau métier (le calcul au jour doit être en heure locale, pas UTC).
+      INVENTREE_TIMEZONE: Europe/Paris
       INVENTREE_ADMIN_USER: ${INVENTREE_ADMIN_USER:-admin}
       INVENTREE_ADMIN_PASSWORD: ${INVENTREE_ADMIN_PASSWORD:-admin123}
       INVENTREE_ADMIN_EMAIL: ${INVENTREE_ADMIN_EMAIL:-admin@example.com}
@@ -72,6 +74,8 @@ services:
       INVENTREE_AUTO_UPDATE: "True"
       INVENTREE_DEBUG: "True"
       INVENTREE_LOG_LEVEL: INFO
+      # Même fuseau métier que le serveur.
+      INVENTREE_TIMEZONE: Europe/Paris
     volumes:
       - .:/home/inventree/plugin
       - inventree_data:/home/inventree/data
