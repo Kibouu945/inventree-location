@@ -13,6 +13,8 @@ export interface LieuSummary {
   id: number;
   nom: string;
   adresse: string;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export interface Prestation {
