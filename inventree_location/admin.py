@@ -42,7 +42,14 @@ class ProfileAdmin(admin.ModelAdmin):
 
 
 class RentableItemAdmin(admin.ModelAdmin):
-    list_display = ("part", "is_rentable", "consommable", "caution", "seuil_alerte_bas")
+    list_display = (
+        "part",
+        "is_rentable",
+        "consommable",
+        "caution",
+        "seuil_alerte_bas",
+        "seuil_alerte_haut",
+    )
     list_filter = ("is_rentable", "consommable")
     search_fields = ("part__name", "part__IPN")
 
