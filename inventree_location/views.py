@@ -1,22 +1,35 @@
-"""API views for the InvenTreeLocation plugin."""
+﻿"""API views for the InvenTreeLocation plugin."""
 
-from datetime import date
+from datetime import date, timedelta
 import random
 import string
 from urllib.error import HTTPError, URLError
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db.models import Q
+from django.core.cache import cache
+from django.core.mail import send_mail
+from django.db.models import Q, Sum
+from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .conflicts import (
+    build_part_availability_histogram,
+    compute_part_availability,
     detect_reservation_conflicts,
     list_current_conflicts,
 )
-from .models import Lieu, Prestation, RentableItem, Reservation
+from .models import (
+    Lieu,
+    LigneReservation,
+    Manifestation,
+    Prestation,
+    RentableItem,
+    Reservation,
+)
 from .permissions import (
     CatalogPermission,
     LieuPermission,
@@ -128,7 +141,7 @@ class GeocodeAddressView(APIView):
 
         if not address:
             return Response(
-                {"detail": "Le paramètre address est obligatoire."},
+                {"detail": "Le paramÃ¨tre address est obligatoire."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -137,7 +150,7 @@ class GeocodeAddressView(APIView):
         except (HTTPError, URLError, TimeoutError) as error:
             return Response(
                 {
-                    "detail": "Le service de géocodage est temporairement indisponible.",
+                    "detail": "Le service de gÃ©ocodage est temporairement indisponible.",
                     "error": str(error),
                 },
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -145,7 +158,7 @@ class GeocodeAddressView(APIView):
 
         if result is None:
             return Response(
-                {"detail": "Aucune coordonnée trouvée pour cette adresse."},
+                {"detail": "Aucune coordonnÃ©e trouvÃ©e pour cette adresse."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -153,25 +166,25 @@ class GeocodeAddressView(APIView):
 
 
 class ReservationListCreateView(generics.ListCreateAPIView):
-    """CRUD réservation — partie collection.
+    """CRUD rÃ©servation â€” partie collection.
 
-    - GET  : liste les réservations, filtrables par statut et période.
-    - POST : crée une nouvelle réservation (lignes imbriquées supportées).
+    - GET  : liste les rÃ©servations, filtrables par statut et pÃ©riode.
+    - POST : crÃ©e une nouvelle rÃ©servation (lignes imbriquÃ©es supportÃ©es).
 
-    Paramètres de filtre :
-    - statut    : filtre exact sur le statut (répétable)
-    - date_from : réservations dont le retour prévu est >= à cette date
-    - date_to   : réservations dont le retrait prévu est <= à cette date
-    - search    : recherche sur le numéro, l'événement ou le demandeur
+    ParamÃ¨tres de filtre :
+    - statut    : filtre exact sur le statut (rÃ©pÃ©table)
+    - date_from : rÃ©servations dont le retour prÃ©vu est >= Ã  cette date
+    - date_to   : rÃ©servations dont le retrait prÃ©vu est <= Ã  cette date
+    - search    : recherche sur le numÃ©ro, l'Ã©vÃ©nement ou le demandeur
 
-    Tri par date de demande décroissante par défaut.
+    Tri par date de demande dÃ©croissante par dÃ©faut.
     """
 
     serializer_class = ReservationSerializer
     permission_classes = [ReservationPermission]
 
     def get_queryset(self):
-        """Retourne les réservations, filtrées par statut, période et recherche."""
+        """Retourne les rÃ©servations, filtrÃ©es par statut, pÃ©riode et recherche."""
 
         queryset = (
             Reservation.objects.select_related("prestation", "demandeur")
@@ -209,7 +222,7 @@ class ReservationListCreateView(generics.ListCreateAPIView):
 
 
 class ReservationDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """CRUD réservation — partie instance unique."""
+    """CRUD rÃ©servation â€” partie instance unique."""
 
     queryset = Reservation.objects.prefetch_related(
         "lignes",
@@ -220,17 +233,17 @@ class ReservationDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 class ReservationConflictCheckView(APIView):
-    """Détection des conflits de stock d'une réservation (US-03 / SCRUM-76).
+    """DÃ©tection des conflits de stock d'une rÃ©servation (US-03 / SCRUM-76).
 
-    GET renvoie le détail des conflits de stock de la réservation :
+    GET renvoie le dÃ©tail des conflits de stock de la rÃ©servation :
     - 200 s'il n'y a aucun conflit ;
-    - 409 si au moins un conflit est détecté.
+    - 409 si au moins un conflit est dÃ©tectÃ©.
     """
 
     permission_classes = [ReservationPermission]
 
     def get(self, request, pk, *args, **kwargs):
-        """Retourne les conflits de stock de la réservation."""
+        """Retourne les conflits de stock de la rÃ©servation."""
 
         reservation = (
             Reservation.objects.prefetch_related("lignes").filter(pk=pk).first()
@@ -238,7 +251,7 @@ class ReservationConflictCheckView(APIView):
 
         if reservation is None:
             return Response(
-                {"detail": "Réservation introuvable."},
+                {"detail": "RÃ©servation introuvable."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -254,19 +267,19 @@ class ReservationConflictCheckView(APIView):
 
 
 class ReservationTransitionView(APIView):
-    """Endpoint permettant de faire évoluer le statut d'une réservation."""
+    """Endpoint permettant de faire Ã©voluer le statut d'une rÃ©servation."""
 
     permission_classes = [ReservationPermission]
     serializer_class = ReservationTransitionSerializer
 
     def get(self, request, pk, *args, **kwargs):
-        """Retourne les transitions disponibles pour la réservation."""
+        """Retourne les transitions disponibles pour la rÃ©servation."""
 
         reservation = Reservation.objects.filter(pk=pk).first()
 
         if reservation is None:
             return Response(
-                {"detail": "Réservation introuvable."},
+                {"detail": "RÃ©servation introuvable."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -280,13 +293,13 @@ class ReservationTransitionView(APIView):
         )
 
     def patch(self, request, pk, *args, **kwargs):
-        """Applique une transition de statut à une réservation."""
+        """Applique une transition de statut Ã  une rÃ©servation."""
 
         reservation = Reservation.objects.filter(pk=pk).first()
 
         if reservation is None:
             return Response(
-                {"detail": "Réservation introuvable."},
+                {"detail": "RÃ©servation introuvable."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -304,15 +317,218 @@ class ReservationTransitionView(APIView):
 
 
 class ConflictsListView(APIView):
-    """Liste les réservations actuellement en conflit."""
+    """Liste les rÃ©servations actuellement en conflit."""
 
     permission_classes = [ReservationPermission]
 
     def get(self, request, *args, **kwargs):
-        """Retourne les réservations en conflit triées par date de retrait prévue."""
+        """Retourne les rÃ©servations en conflit triÃ©es par date de retrait prÃ©vue."""
 
         return Response(list_current_conflicts(), status=status.HTTP_200_OK)
 
+class StockAlertListView(APIView):
+    """Liste les objets en alerte de seuil / tension, avec option email."""
+
+    permission_classes = [RoleBasedPermission]
+
+    def get(self, request, *args, **kwargs):
+        manifestation_id = request.query_params.get("manifestation")
+        lieu_id = request.query_params.get("lieu")
+        notify = str(request.query_params.get("notify", "")).lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+
+        alerts = self._build_alerts(
+            manifestation_id=int(manifestation_id)
+            if str(manifestation_id).isdigit()
+            else None,
+            lieu_id=int(lieu_id) if str(lieu_id).isdigit() else None,
+        )
+
+        email_sent = False
+        if notify and alerts:
+            email_sent = self._send_alert_email(alerts)
+
+        return Response(
+            {
+                "count": len(alerts),
+                "email_sent": email_sent,
+                "alerts": alerts,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def _build_alerts(self, manifestation_id=None, lieu_id=None):
+        scope_ids = None
+
+        if manifestation_id is not None or lieu_id is not None:
+            scoped_lines = LigneReservation.objects.select_related(
+                "reservation__prestation"
+            )
+
+            if manifestation_id is not None:
+                scoped_lines = scoped_lines.filter(
+                    reservation__prestation__manifestation_id=manifestation_id
+                )
+
+            if lieu_id is not None:
+                scoped_lines = scoped_lines.filter(
+                    reservation__prestation__lieux__id=lieu_id
+                )
+
+            scope_ids = set(scoped_lines.values_list("part_id", flat=True))
+
+        rentable_items = RentableItem.objects.select_related("part").all()
+
+        if scope_ids is not None:
+            rentable_items = rentable_items.filter(part_id__in=scope_ids)
+
+        alerts = []
+        now = timezone.now()
+
+        for rentable in rentable_items:
+            part = rentable.part
+            stock_available = self._safe_stock_available(part)
+            low = rentable.seuil_alerte_bas
+            high = rentable.seuil_alerte_haut
+
+            part_reasons = []
+
+            if rentable.consommable and low is not None and stock_available <= low:
+                part_reasons.append(
+                    {
+                        "type": "low_threshold",
+                        "message": f"Stock bas atteint ({stock_available} <= {low})",
+                    }
+                )
+
+            if high is not None and stock_available >= high:
+                part_reasons.append(
+                    {
+                        "type": "high_threshold",
+                        "message": f"Seuil haut atteint ({stock_available} >= {high})",
+                    }
+                )
+
+            projected = self._projected_tension(
+                part_id=part.pk,
+                total_stock=max(int(rentable.stock_total or 0), 1),
+                now=now,
+                manifestation_id=manifestation_id,
+                lieu_id=lieu_id,
+            )
+
+            if projected["occupation_rate"] >= 90:
+                part_reasons.append(
+                    {
+                        "type": "projected_tension",
+                        "message": (
+                            f"Tension projetée élevée "
+                            f"({projected['occupation_rate']:.1f}% >= 90%)"
+                        ),
+                    }
+                )
+
+            if not part_reasons:
+                continue
+
+            alerts.append(
+                {
+                    "part_id": part.pk,
+                    "part_name": getattr(part, "name", str(part)),
+                    "consommable": rentable.consommable,
+                    "stock_available": stock_available,
+                    "stock_total": int(rentable.stock_total or 0),
+                    "seuil_alerte_bas": low,
+                    "seuil_alerte_haut": high,
+                    "projected_reserved_quantity": projected["reserved_quantity"],
+                    "projected_occupation_rate": round(projected["occupation_rate"], 2),
+                    "reasons": part_reasons,
+                }
+            )
+
+        alerts.sort(key=lambda item: item["part_name"].lower())
+
+        return alerts
+
+    def _projected_tension(self, part_id, total_stock, now, manifestation_id=None, lieu_id=None):
+        end = now + timedelta(days=30)
+        lines = LigneReservation.objects.filter(
+            part_id=part_id,
+            reservation__statut__in={
+                "confirmée",
+                "livrée",
+                "retournée",
+                "validee",
+                "livree",
+                "retournee",
+            },
+            reservation__date_retrait_prevue__lte=end,
+            reservation__date_retour_prevue__gte=now,
+        )
+
+        if manifestation_id is not None:
+            lines = lines.filter(reservation__prestation__manifestation_id=manifestation_id)
+
+        if lieu_id is not None:
+            lines = lines.filter(reservation__prestation__lieux__id=lieu_id)
+
+        reserved = lines.aggregate(total=Sum("quantite_demandee"))["total"] or 0
+        occupation = (reserved / max(total_stock, 1)) * 100
+
+        return {
+            "reserved_quantity": int(reserved),
+            "occupation_rate": float(occupation),
+        }
+
+    def _safe_stock_available(self, part):
+        for attr in ("stock_available", "available_stock", "in_stock", "total_stock"):
+            value = getattr(part, attr, None)
+            if value is not None:
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    continue
+
+        return 0
+
+    def _send_alert_email(self, alerts):
+        cache_key = "inventree_location_stock_alert_email_last_sent"
+        last_sent = cache.get(cache_key)
+
+        if last_sent:
+            return False
+
+        recipients = list(
+            get_user_model()
+            .objects.filter(groups__name__in=["admin", "gestionnaire"], is_active=True)
+            .exclude(email="")
+            .values_list("email", flat=True)
+            .distinct()
+        )
+
+        if not recipients:
+            return False
+
+        lines = [
+            f"- {item['part_name']} (stock {item['stock_available']}/{item['stock_total']})"
+            for item in alerts
+        ]
+
+        subject = "[InvenTree Location] Alerte seuil stock"
+        body = "Objets en alerte:\n\n" + "\n".join(lines)
+
+        send_mail(
+            subject=subject,
+            message=body,
+            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@inventree.local"),
+            recipient_list=recipients,
+            fail_silently=True,
+        )
+        cache.set(cache_key, timezone.now().isoformat(), timeout=3600)
+        return True
 
 class CatalogPartListView(APIView):
     """List InvenTree parts with catalog filters."""
@@ -371,7 +587,7 @@ class CatalogPartListView(APIView):
         return paginator.get_paginated_response(serializer.data)
 
     def _parse_ids(self, ids):
-        """Parse une liste d'identifiants de Part séparés par des virgules."""
+        """Parse une liste d'identifiants de Part sÃ©parÃ©s par des virgules."""
 
         return [int(value) for value in str(ids).split(",") if value.strip().isdigit()]
 
@@ -433,9 +649,9 @@ class CatalogPartListView(APIView):
     def _filter_virtual(self, queryset, virtual):
         """Filtre optionnel sur le drapeau article virtuel de RentableItem.
 
-        - virtual absent : pas de filtre (matériel réel + virtuel).
+        - virtual absent : pas de filtre (matÃ©riel rÃ©el + virtuel).
         - virtual=true    : articles virtuels uniquement (ex: prestations).
-        - virtual=false   : matériel réel uniquement.
+        - virtual=false   : matÃ©riel rÃ©el uniquement.
         """
 
         virtual_value = self._parse_boolean(virtual)
@@ -452,7 +668,7 @@ class CatalogPartListView(APIView):
 
 
 class CatalogPartDetailView(APIView):
-    """Fiche détail d'un Part du catalogue."""
+    """Fiche dÃ©tail d'un Part du catalogue."""
 
     permission_classes = [CatalogPermission]
     serializer_class = CatalogPartSerializer
@@ -477,12 +693,12 @@ class CatalogPartDetailView(APIView):
 
 
 class RentableFlagBulkUpdateView(APIView):
-    """Met à jour en masse le drapeau louable / consommable de Part."""
+    """Met Ã  jour en masse le drapeau louable / consommable de Part."""
 
     permission_classes = [CatalogPermission]
 
     def patch(self, request, *args, **kwargs):
-        """Applique les drapeaux fournis à la liste de parts."""
+        """Applique les drapeaux fournis Ã  la liste de parts."""
 
         from part.models import Part
 
@@ -490,7 +706,7 @@ class RentableFlagBulkUpdateView(APIView):
 
         if not isinstance(part_ids, list) or not part_ids:
             return Response(
-                {"detail": "part_ids doit être une liste non vide."},
+                {"detail": "part_ids doit Ãªtre une liste non vide."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -575,7 +791,7 @@ class RentablePartDetailView(APIView):
         )
 
     def patch(self, request, pk, *args, **kwargs):
-        """Crée ou met à jour les drapeaux location du Part."""
+        """CrÃ©e ou met Ã  jour les drapeaux location du Part."""
 
         from part.models import Part
 
@@ -598,9 +814,9 @@ class RentablePartDetailView(APIView):
 
 
 class PrestationListView(generics.ListAPIView):
-    """Liste des prestations (lecture seule), pour le sélecteur événement.
+    """Liste des prestations (lecture seule), pour le sÃ©lecteur Ã©vÃ©nement.
 
-    Paramètre de filtre :
+    ParamÃ¨tre de filtre :
     - search : recherche sur le nom de la prestation ou de sa manifestation.
     """
 
@@ -609,7 +825,7 @@ class PrestationListView(generics.ListAPIView):
     pagination_class = LieuPagination
 
     def get_queryset(self):
-        """Retourne les prestations, filtrées par recherche texte."""
+        """Retourne les prestations, filtrÃ©es par recherche texte."""
 
         queryset = (
             Prestation.objects.select_related("manifestation")
@@ -629,10 +845,10 @@ class PrestationListView(generics.ListAPIView):
 
 
 class UserListView(generics.ListAPIView):
-    """Liste des utilisateurs actifs (lecture seule), pour le sélecteur demandeur.
+    """Liste des utilisateurs actifs (lecture seule), pour le sÃ©lecteur demandeur.
 
-    Paramètre de filtre :
-    - search : recherche sur username, prénom, nom ou email.
+    ParamÃ¨tre de filtre :
+    - search : recherche sur username, prÃ©nom, nom ou email.
     """
 
     permission_classes = [RoleBasedPermission]
@@ -640,7 +856,7 @@ class UserListView(generics.ListAPIView):
     pagination_class = CatalogPagination
 
     def get_queryset(self):
-        """Retourne les utilisateurs actifs, filtrés par recherche texte."""
+        """Retourne les utilisateurs actifs, filtrÃ©s par recherche texte."""
 
         queryset = get_user_model().objects.filter(is_active=True).order_by("username")
 
@@ -655,3 +871,4 @@ class UserListView(generics.ListAPIView):
             )
 
         return queryset
+

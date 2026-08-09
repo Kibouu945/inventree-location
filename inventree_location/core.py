@@ -81,6 +81,7 @@ class InvenTreeLocation(
             ReservationDetailView,
             ReservationListCreateView,
             ReservationTransitionView,
+            StockAlertListView,
             UserListView,
         )
 
@@ -135,6 +136,11 @@ class InvenTreeLocation(
                 "users/",
                 UserListView.as_view(),
                 name="user-list",
+            ),
+            path(
+                "alerts/stock/",
+                StockAlertListView.as_view(),
+                name="stock-alert-list",
             ),
         ]
 
@@ -244,6 +250,24 @@ class InvenTreeLocation(
                 "options": {
                     "width": 12,
                     "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-stock-alerts"):
+            items.append({
+                "key": "inventree-location-stock-alerts",
+                "title": "Alertes stock",
+                "description": "Seuils bas/hauts et tension projetée",
+                "icon": "ti:bell-ringing:outline",
+                "source": self.plugin_static_file(
+                    "Dashboard.js:renderInvenTreeLocationDashboardItem"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 6,
                 },
                 "context": {
                     "settings": self.get_settings_dict(),
