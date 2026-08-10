@@ -422,7 +422,7 @@ class RamassageSerializer(serializers.ModelSerializer):
         source="date_retour_prevue",
         read_only=True,
     )
-    lieux = serializers.SerializerMethodField()
+    lieu = serializers.SerializerMethodField()
     nb_objets = serializers.SerializerMethodField()
     quantite_totale = serializers.SerializerMethodField()
     recap_par_vehicule = serializers.SerializerMethodField()
@@ -443,7 +443,7 @@ class RamassageSerializer(serializers.ModelSerializer):
             "date_ramassage",
             "date_retrait_prevue",
             "date_retour_prevue",
-            "lieux",
+            "lieu",
             "nb_objets",
             "quantite_totale",
             "recap_par_vehicule",
@@ -454,23 +454,21 @@ class RamassageSerializer(serializers.ModelSerializer):
 
         return ReservationSerializer._user_label(obj.demandeur)
 
-    def get_lieux(self, obj):
-        """Lieux liés à la prestation."""
+    def get_lieu(self, obj):
+        """Lieu de la prestation, ou None (ORG-02 : un seul lieu, nullable)."""
 
-        lieux = []
+        lieu = obj.prestation.lieu
 
-        for lieu in obj.prestation.lieux.all():
-            lieux.append({
-                "id": lieu.id,
-                "nom": lieu.nom,
-                "adresse": lieu.adresse,
-                "latitude": str(lieu.latitude) if lieu.latitude is not None else None,
-                "longitude": str(lieu.longitude)
-                if lieu.longitude is not None
-                else None,
-            })
+        if lieu is None:
+            return None
 
-        return lieux
+        return {
+            "id": lieu.id,
+            "nom": lieu.nom,
+            "adresse": lieu.adresse,
+            "latitude": str(lieu.latitude) if lieu.latitude is not None else None,
+            "longitude": str(lieu.longitude) if lieu.longitude is not None else None,
+        }
 
     def get_nb_objets(self, obj):
         """Nombre de lignes à ramasser."""
