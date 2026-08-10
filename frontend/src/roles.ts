@@ -1,8 +1,4 @@
 // RBAC métier côté front — miroir de inventree_location/roles.py & permissions.py.
-//
-// La visibilité des actions (boutons créer / soumettre / éditer) est pilotée par
-// les 7 groupes métier, PAS par is_staff. Le backend reste la source d'autorité
-// (les endpoints renvoient 403) ; ce module ne fait que masquer l'UI en amont.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 
 export const ADMIN = 'admin';
@@ -12,17 +8,12 @@ export const LIVREUR = 'livreur';
 export const SAV = 'sav';
 export const ORGANISATEUR = 'organisateur';
 export const LECTEUR = 'lecteur';
+export const ACHETEUR = 'acheteur';
 
-// Rôles autorisés en écriture, alignés sur permissions.py.
 export const RESERVATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE, ORGANISATEUR];
 export const CATALOG_WRITE_ROLES = [ADMIN, GESTIONNAIRE];
+export const BACKOFFICE_ROLES = [ADMIN];
 
-/**
- * Rôles (noms de groupes) de l'utilisateur courant.
- *
- * `context.user` est le store InvenTree (`UserStateProps`) : les données sont
- * derrière `getUser()`, et `groups` est un tableau d'objets `{ pk, name }`.
- */
 export function userRoles(context: InvenTreePluginContext): string[] {
   const groups = context.user?.getUser?.()?.groups;
 
@@ -39,7 +30,6 @@ export function userRoles(context: InvenTreePluginContext): string[] {
     .filter(Boolean);
 }
 
-/** Vrai si l'utilisateur courant est superutilisateur. */
 export function isSuperuser(context: InvenTreePluginContext): boolean {
   if (context.user?.isSuperuser?.()) {
     return true;
@@ -48,7 +38,6 @@ export function isSuperuser(context: InvenTreePluginContext): boolean {
   return Boolean(context.user?.getUser?.()?.is_superuser);
 }
 
-/** Vrai si l'utilisateur possède au moins un des rôles fournis (superuser inclus). */
 export function hasAnyRole(
   context: InvenTreePluginContext,
   roles: string[]
@@ -58,15 +47,18 @@ export function hasAnyRole(
   }
 
   const owned = userRoles(context);
+
   return owned.some((role) => roles.includes(role));
 }
 
-/** Peut créer / éditer une réservation (admin, gestionnaire, organisateur). */
 export function canWriteReservations(context: InvenTreePluginContext): boolean {
   return hasAnyRole(context, RESERVATION_WRITE_ROLES);
 }
 
-/** Peut modifier les drapeaux du catalogue (admin, gestionnaire). */
 export function canWriteCatalog(context: InvenTreePluginContext): boolean {
   return hasAnyRole(context, CATALOG_WRITE_ROLES);
+}
+
+export function canManageBackOffice(context: InvenTreePluginContext): boolean {
+  return hasAnyRole(context, BACKOFFICE_ROLES);
 }

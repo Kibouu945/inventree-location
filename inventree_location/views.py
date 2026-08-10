@@ -7,6 +7,7 @@ from urllib.error import HTTPError, URLError
 
 from django.contrib.auth import get_user_model
 from django.db.models import Q
+from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
@@ -16,7 +17,13 @@ from .conflicts import (
     detect_reservation_conflicts,
     list_current_conflicts,
 )
-from .models import Lieu, Prestation, RentableItem, Reservation
+from .models import (
+    Lieu,
+    Prestation,
+    RentableItem,
+    Reservation,
+    StatutReservation,
+)
 from .permissions import (
     CatalogPermission,
     LieuPermission,
@@ -24,10 +31,12 @@ from .permissions import (
     RoleBasedPermission,
 )
 from .serializers import (
+    BonRamassageSerializer,
     CatalogPartSerializer,
     ExampleSerializer,
     LieuSerializer,
     PrestationSerializer,
+    RamassageSerializer,
     RentableItemSerializer,
     ReservationSerializer,
     ReservationTransitionSerializer,
@@ -153,19 +162,7 @@ class GeocodeAddressView(APIView):
 
 
 class ReservationListCreateView(generics.ListCreateAPIView):
-    """CRUD réservation — partie collection.
-
-    - GET  : liste les réservations, filtrables par statut et période.
-    - POST : crée une nouvelle réservation (lignes imbriquées supportées).
-
-    Paramètres de filtre :
-    - statut    : filtre exact sur le statut (répétable)
-    - date_from : réservations dont le retour prévu est >= à cette date
-    - date_to   : réservations dont le retrait prévu est <= à cette date
-    - search    : recherche sur le numéro, l'événement ou le demandeur
-
-    Tri par date de demande décroissante par défaut.
-    """
+    """CRUD réservation — partie collection."""
 
     serializer_class = ReservationSerializer
     permission_classes = [ReservationPermission]
@@ -219,22 +216,142 @@ class ReservationDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [ReservationPermission]
 
 
-class ReservationConflictCheckView(APIView):
-    """Détection des conflits de stock d'une réservation (US-03 / SCRUM-76).
+class RamassageListView(generics.ListAPIView):
+    """SCRUM-89 — Liste des ramassages à effectuer.
 
-    GET renvoie le détail des conflits de stock de la réservation :
-    - 200 s'il n'y a aucun conflit ;
-    - 409 si au moins un conflit est détecté.
+    Un ramassage correspond à une réservation avec une date de retour prévue.
+
+    Filtres disponibles :
+    - date_from : ramassages dont la date de retour prévue est >= à cette date
+    - date_to   : ramassages dont la date de retour prévue est <= à cette date
+    - lieu      : recherche sur le nom ou l'adresse du lieu
+    - statut    : filtre sur un ou plusieurs statuts
+    - search    : recherche sur numéro, prestation, manifestation ou demandeur
     """
+
+    serializer_class = RamassageSerializer
+    permission_classes = [ReservationPermission]
+    pagination_class = LieuPagination
+
+    def get_queryset(self):
+        """Retourne les réservations à ramasser."""
+
+        queryset = (
+            Reservation.objects.select_related(
+                "prestation",
+                "prestation__manifestation",
+                "demandeur",
+            )
+            .prefetch_related(
+                "lignes",
+                "prestation__lieux",
+            )
+            .filter(date_retour_prevue__isnull=False)
+            .exclude(
+                statut__in=[
+                    StatutReservation.ANNULEE,
+                    StatutReservation.REFUSEE,
+                    StatutReservation.CLOTUREE,
+                ]
+            )
+            .order_by("date_retour_prevue")
+        )
+
+        date_from = self.request.query_params.get("date_from")
+        date_to = self.request.query_params.get("date_to")
+        lieu = self.request.query_params.get("lieu")
+        search = self.request.query_params.get("search")
+        statuts = self.request.query_params.getlist("statut")
+
+        if not statuts:
+            statut_param = self.request.query_params.get("statut")
+
+            if statut_param:
+                statuts = [
+                    value.strip()
+                    for value in statut_param.split(",")
+                    if value.strip()
+                ]
+
+        if statuts:
+            queryset = queryset.filter(statut__in=statuts)
+
+        if date_from:
+            queryset = queryset.filter(date_retour_prevue__gte=date_from)
+
+        if date_to:
+            queryset = queryset.filter(date_retour_prevue__lte=date_to)
+
+        if lieu:
+            queryset = queryset.filter(
+                Q(prestation__lieux__nom__icontains=lieu)
+                | Q(prestation__lieux__adresse__icontains=lieu)
+            ).distinct()
+
+        if search:
+            queryset = queryset.filter(
+                Q(numero__icontains=search)
+                | Q(prestation__nom__icontains=search)
+                | Q(prestation__manifestation__nom__icontains=search)
+                | Q(demandeur__username__icontains=search)
+                | Q(demandeur__first_name__icontains=search)
+                | Q(demandeur__last_name__icontains=search)
+            )
+
+        return queryset
+
+
+class BonRamassageView(APIView):
+    """SCRUM-89 — Bon de ramassage imprimable."""
+
+    permission_classes = [ReservationPermission]
+    serializer_class = BonRamassageSerializer
+
+    def get(self, request, pk, *args, **kwargs):
+        """Retourne les données nécessaires pour imprimer un bon de ramassage."""
+
+        reservation = (
+            Reservation.objects.select_related(
+                "prestation",
+                "prestation__manifestation",
+                "demandeur",
+            )
+            .prefetch_related(
+                "lignes",
+                "lignes__part",
+                "prestation__lieux",
+            )
+            .filter(pk=pk)
+            .first()
+        )
+
+        if reservation is None:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = self.serializer_class(reservation)
+
+        return Response(
+            {
+                "titre": f"Bon de ramassage {reservation.numero}",
+                "generated_at": timezone.now(),
+                "reservation": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ReservationConflictCheckView(APIView):
+    """Détection des conflits de stock d'une réservation."""
 
     permission_classes = [ReservationPermission]
 
     def get(self, request, pk, *args, **kwargs):
         """Retourne les conflits de stock de la réservation."""
 
-        reservation = (
-            Reservation.objects.prefetch_related("lignes").filter(pk=pk).first()
-        )
+        reservation = Reservation.objects.prefetch_related("lignes").filter(pk=pk).first()
 
         if reservation is None:
             return Response(
@@ -326,11 +443,7 @@ class CatalogPartListView(APIView):
 
         from part.models import Part
 
-        queryset = (
-            Part.objects.select_related("category", "rentable_info")
-            .all()
-            .order_by("name")
-        )
+        queryset = Part.objects.select_related("category").all().order_by("name")
 
         search = request.query_params.get("search")
         category = request.query_params.get("category")
@@ -366,9 +479,21 @@ class CatalogPartListView(APIView):
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(queryset, request)
 
+        self._attach_rentable_items(page)
+
         serializer = self.serializer_class(page, many=True)
 
         return paginator.get_paginated_response(serializer.data)
+
+    def _attach_rentable_items(self, parts):
+        """Attache RentableItem aux objets Part sans utiliser de reverse relation fragile."""
+
+        part_ids = [part.id for part in parts]
+        rentable_items = RentableItem.objects.filter(part_id__in=part_ids)
+        rentable_by_part_id = {item.part_id: item for item in rentable_items}
+
+        for part in parts:
+            part._location_rentable_info = rentable_by_part_id.get(part.id)
 
     def _parse_ids(self, ids):
         """Parse une liste d'identifiants de Part séparés par des virgules."""
@@ -423,32 +548,35 @@ class CatalogPartListView(APIView):
         if rentable_value is None:
             rentable_value = True
 
-        if rentable_value:
-            return queryset.filter(
-                Q(rentable_info__is_rentable=True) | Q(rentable_info__isnull=True)
-            )
+        part_ids = RentableItem.objects.filter(
+            is_rentable=rentable_value
+        ).values_list("part_id", flat=True)
 
-        return queryset.filter(rentable_info__is_rentable=False)
+        if rentable_value:
+            return queryset.filter(Q(pk__in=part_ids) | ~Q(pk__in=RentableItem.objects.values_list("part_id", flat=True)))
+
+        return queryset.filter(pk__in=part_ids)
 
     def _filter_virtual(self, queryset, virtual):
-        """Filtre optionnel sur le drapeau article virtuel de RentableItem.
-
-        - virtual absent : pas de filtre (matériel réel + virtuel).
-        - virtual=true    : articles virtuels uniquement (ex: prestations).
-        - virtual=false   : matériel réel uniquement.
-        """
+        """Filtre optionnel sur le drapeau article virtuel de RentableItem."""
 
         virtual_value = self._parse_boolean(virtual)
 
         if virtual_value is None:
             return queryset
 
-        if virtual_value:
-            return queryset.filter(rentable_info__is_virtual=True)
+        part_ids = RentableItem.objects.filter(
+            is_virtual=virtual_value
+        ).values_list("part_id", flat=True)
 
-        return queryset.filter(
-            Q(rentable_info__is_virtual=False) | Q(rentable_info__isnull=True)
-        )
+        if virtual_value:
+            return queryset.filter(pk__in=part_ids)
+
+        virtual_part_ids = RentableItem.objects.filter(
+            is_virtual=True
+        ).values_list("part_id", flat=True)
+
+        return queryset.exclude(pk__in=virtual_part_ids)
 
 
 class CatalogPartDetailView(APIView):
@@ -458,13 +586,11 @@ class CatalogPartDetailView(APIView):
     serializer_class = CatalogPartSerializer
 
     def get(self, request, pk, *args, **kwargs):
+        """Retourne le détail d'un article du catalogue."""
+
         from part.models import Part
 
-        part = (
-            Part.objects.select_related("category", "rentable_info")
-            .filter(pk=pk)
-            .first()
-        )
+        part = Part.objects.select_related("category").filter(pk=pk).first()
 
         if part is None:
             return Response(
@@ -472,7 +598,10 @@ class CatalogPartDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        part._location_rentable_info = RentableItem.objects.filter(part_id=pk).first()
+
         serializer = self.serializer_class(part)
+
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
@@ -598,11 +727,7 @@ class RentablePartDetailView(APIView):
 
 
 class PrestationListView(generics.ListAPIView):
-    """Liste des prestations (lecture seule), pour le sélecteur événement.
-
-    Paramètre de filtre :
-    - search : recherche sur le nom de la prestation ou de sa manifestation.
-    """
+    """Liste des prestations, pour le sélecteur événement."""
 
     permission_classes = [RoleBasedPermission]
     serializer_class = PrestationSerializer
@@ -629,11 +754,7 @@ class PrestationListView(generics.ListAPIView):
 
 
 class UserListView(generics.ListAPIView):
-    """Liste des utilisateurs actifs (lecture seule), pour le sélecteur demandeur.
-
-    Paramètre de filtre :
-    - search : recherche sur username, prénom, nom ou email.
-    """
+    """Liste des utilisateurs actifs, pour le sélecteur demandeur."""
 
     permission_classes = [RoleBasedPermission]
     serializer_class = UserSerializer
