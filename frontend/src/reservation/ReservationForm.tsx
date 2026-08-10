@@ -203,6 +203,27 @@ export function ReservationForm({
     context.queryClient
   );
 
+  // La prestation choisie est chargée par son id, indépendamment de la
+  // recherche : Mantine recopie le label de l'option dans `searchValue`, et ce
+  // label ("nom — manifestation (dates)") ne correspond à aucun résultat côté
+  // serveur, qui ne cherche que sur nom / manifestation__nom. Sans cette
+  // requête dédiée, l'encart lieu et le tooltip dates disparaissaient dès la
+  // sélection. Couvre aussi l'édition, où la prestation peut être hors des 20
+  // premiers résultats.
+  const selectedPrestationQuery = useQuery<Prestation>(
+    {
+      queryKey: ['reservation-prestation', form.values.prestation],
+      enabled: form.values.prestation != null,
+      queryFn: async () => {
+        const response = await context.api.get(
+          `${PRESTATIONS_URL}${form.values.prestation}/`
+        );
+        return response.data as Prestation;
+      }
+    },
+    context.queryClient
+  );
+
   const usersQuery = useQuery<Page<UserOption>>(
     {
       queryKey: ['reservation-users', debouncedUserSearch],
@@ -248,10 +269,10 @@ export function ReservationForm({
 
   const selectedPrestation = useMemo(
     () =>
-      prestationsQuery.data?.results.find(
-        (prestation) => prestation.id === form.values.prestation
-      ) ?? null,
-    [prestationsQuery.data, form.values.prestation]
+      selectedPrestationQuery.data?.id === form.values.prestation
+        ? selectedPrestationQuery.data
+        : null,
+    [selectedPrestationQuery.data, form.values.prestation]
   );
 
   // Une réservation validée (ou au-delà) n'est plus modifiable : lecture seule.
@@ -320,14 +341,27 @@ export function ReservationForm({
     );
   }
 
+  const prestationOption = (prestation: Prestation) => ({
+    value: String(prestation.id),
+    label: `${prestation.nom} — ${prestation.manifestation_nom} (${shortDate(
+      prestation.date_debut
+    )}→${shortDate(prestation.date_fin)})`
+  });
+
   const prestationOptions = (prestationsQuery.data?.results ?? []).map(
-    (prestation) => ({
-      value: String(prestation.id),
-      label: `${prestation.nom} — ${prestation.manifestation_nom} (${shortDate(
-        prestation.date_debut
-      )}→${shortDate(prestation.date_fin)})`
-    })
+    prestationOption
   );
+
+  // La prestation choisie doit rester dans les options même quand la recherche
+  // courante ne la ramène pas, sinon le Select perd son libellé.
+  if (
+    selectedPrestation &&
+    !prestationOptions.some(
+      (option) => option.value === String(selectedPrestation.id)
+    )
+  ) {
+    prestationOptions.unshift(prestationOption(selectedPrestation));
+  }
 
   const userOptions = (usersQuery.data?.results ?? []).map((user) => ({
     value: String(user.id),
