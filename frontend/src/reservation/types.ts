@@ -13,6 +13,9 @@ export interface LieuSummary {
   id: number;
   nom: string;
   adresse: string;
+  // DRF sérialise les DecimalField en chaîne (cf. organisation/types.ts).
+  latitude: string | null;
+  longitude: string | null;
 }
 
 export interface Prestation {

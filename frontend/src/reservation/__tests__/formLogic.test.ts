@@ -27,7 +27,13 @@ const PRESTATION: Prestation = {
   manifestation: 1,
   manifestation_nom: 'Camp été 2026',
   lieu: 1,
-  lieu_detail: { id: 1, nom: 'Terrain central', adresse: '' }
+  lieu_detail: {
+    id: 1,
+    nom: 'Terrain central',
+    adresse: '',
+    latitude: null,
+    longitude: null
+  }
 };
 
 function values(

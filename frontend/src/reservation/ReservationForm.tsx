@@ -32,6 +32,7 @@ import {
 } from './formLogic';
 import { PartPicker } from './PartPicker';
 import type {
+  LieuSummary,
   Page,
   Prestation,
   Reservation,
@@ -55,6 +56,75 @@ function shortDate(iso: string): string {
     day: '2-digit',
     month: '2-digit'
   });
+}
+
+// US-20 : itinéraire vers le lieu de livraison. On privilégie les coordonnées
+// GPS quand elles sont renseignées, sinon on retombe sur l'adresse texte.
+function buildGoogleMapsUrl(
+  latitude: string | null,
+  longitude: string | null,
+  address: string
+): string {
+  if (latitude != null && longitude != null) {
+    return `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+  }
+
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+}
+
+function buildApplePlansUrl(
+  latitude: string | null,
+  longitude: string | null,
+  address: string
+): string {
+  if (latitude != null && longitude != null) {
+    return `https://maps.apple.com/?ll=${latitude},${longitude}&q=${encodeURIComponent(
+      address || 'Lieu de livraison'
+    )}`;
+  }
+
+  return `https://maps.apple.com/?q=${encodeURIComponent(address)}`;
+}
+
+/** Adresse du lieu de la prestation + raccourcis d'itinéraire (US-20). */
+function LieuMapLinks({ lieu }: { lieu: LieuSummary }) {
+  const mapSeed = `${lieu.nom} ${lieu.adresse}`.trim();
+  const googleUrl = buildGoogleMapsUrl(lieu.latitude, lieu.longitude, mapSeed);
+  const appleUrl = buildApplePlansUrl(lieu.latitude, lieu.longitude, mapSeed);
+
+  return (
+    <Group justify='space-between' align='center' mt='xs'>
+      <Stack gap={0}>
+        <Text size='sm'>{lieu.nom}</Text>
+        <Text size='xs' c='dimmed'>
+          {lieu.adresse || 'Adresse non renseignée'}
+        </Text>
+      </Stack>
+
+      <Group gap='xs'>
+        <Button
+          component='a'
+          href={googleUrl}
+          target='_blank'
+          rel='noopener noreferrer'
+          size='xs'
+          variant='light'
+        >
+          Google Maps
+        </Button>
+        <Button
+          component='a'
+          href={appleUrl}
+          target='_blank'
+          rel='noopener noreferrer'
+          size='xs'
+          variant='default'
+        >
+          Apple Plans
+        </Button>
+      </Group>
+    </Group>
+  );
 }
 
 function apiErrorFields(error: unknown): Record<string, string> {
@@ -342,11 +412,13 @@ export function ReservationForm({
       {selectedPrestation && (
         <Alert color='gray' title='Événement / Lieu'>
           <Text size='sm'>{selectedPrestation.manifestation_nom}</Text>
-          <Text size='sm' c='dimmed'>
-            {selectedPrestation.lieu_detail
-              ? selectedPrestation.lieu_detail.nom
-              : 'Aucun lieu associé à cette prestation.'}
-          </Text>
+          {selectedPrestation.lieu_detail ? (
+            <LieuMapLinks lieu={selectedPrestation.lieu_detail} />
+          ) : (
+            <Text size='sm' c='dimmed'>
+              Aucun lieu associé à cette prestation.
+            </Text>
+          )}
         </Alert>
       )}
 
