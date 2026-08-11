@@ -127,19 +127,65 @@ function LieuMapLinks({ lieu }: { lieu: LieuSummary }) {
   );
 }
 
+/**
+ * Clés d'erreur DRF qui ne correspondent à aucun champ du formulaire.
+ *
+ * `detail` porte les refus non liés à un champ (réservation déjà validée,
+ * conflit de stock, permission refusée) ; `conflicts` / `stock` portent les
+ * données structurées qui l'accompagnent. Les afficher comme erreurs de champ
+ * ne mène nulle part : aucun input ne les rend.
+ */
+const NON_FIELD_ERROR_KEYS = ['detail', 'non_field_errors'];
+const IGNORED_ERROR_KEYS = [...NON_FIELD_ERROR_KEYS, 'conflicts', 'stock'];
+
+function apiErrorData(error: unknown): Record<string, unknown> {
+  return (
+    (error as { response?: { data?: Record<string, unknown> } })?.response
+      ?.data ?? {}
+  );
+}
+
 function apiErrorFields(error: unknown): Record<string, string> {
-  const data =
-    (error as { response?: { data?: Record<string, string | string[]> } })
-      ?.response?.data ?? {};
   const flattened: Record<string, string> = {};
 
-  for (const [field, messages] of Object.entries(data)) {
-    flattened[field] = Array.isArray(messages)
-      ? messages.join(' ')
-      : String(messages);
+  for (const [field, messages] of Object.entries(apiErrorData(error))) {
+    if (IGNORED_ERROR_KEYS.includes(field)) {
+      continue;
+    }
+
+    if (typeof messages === 'string') {
+      flattened[field] = messages;
+    } else if (Array.isArray(messages)) {
+      flattened[field] = messages
+        .filter((m) => typeof m === 'string')
+        .join(' ');
+    }
   }
 
   return flattened;
+}
+
+/** Message d'erreur non lié à un champ, tel que renvoyé par le serveur. */
+function apiErrorMessage(error: unknown): string | null {
+  const data = apiErrorData(error);
+
+  for (const key of NON_FIELD_ERROR_KEYS) {
+    const value = data[key];
+
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      const joined = value.filter((m) => typeof m === 'string').join(' ');
+
+      if (joined.trim()) {
+        return joined;
+      }
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -172,6 +218,7 @@ export function ReservationForm({
   const [debouncedPrestationSearch] = useDebouncedValue(prestationSearch, 300);
   const [userSearch, setUserSearch] = useState('');
   const [debouncedUserSearch] = useDebouncedValue(userSearch, 300);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const existingQuery = useQuery<Reservation>(
     {
@@ -298,6 +345,7 @@ export function ReservationForm({
       },
       onSuccess: (data) => {
         form.clearErrors();
+        setSubmitError(null);
         context.queryClient.invalidateQueries({ queryKey: ['reservations'] });
         notifications.show({
           title: 'Enregistré',
@@ -308,9 +356,17 @@ export function ReservationForm({
       },
       onError: (error: unknown) => {
         form.setErrors(apiErrorFields(error));
+
+        // On préfère le motif renvoyé par le serveur au message générique :
+        // lui seul dit *pourquoi* (réservation déjà validée, conflit de stock,
+        // permission refusée). Conservé aussi dans un encart, la notification
+        // disparaissant au bout de quelques secondes.
+        const message = apiErrorMessage(error);
+
+        setSubmitError(message);
         notifications.show({
           title: 'Erreur',
-          message: "La réservation n'a pas pu être enregistrée.",
+          message: message ?? "La réservation n'a pas pu être enregistrée.",
           color: 'red'
         });
       }
@@ -384,6 +440,12 @@ export function ReservationForm({
           {locked
             ? 'Cette réservation est validée : elle n’est plus modifiable.'
             : 'Votre rôle ne permet pas de modifier cette réservation.'}
+        </Alert>
+      )}
+
+      {submitError && (
+        <Alert color='red' title='Enregistrement refusé'>
+          {submitError}
         </Alert>
       )}
 
