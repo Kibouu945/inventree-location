@@ -361,6 +361,25 @@ class ConflictsListView(APIView):
         return Response(list_current_conflicts(), status=status.HTTP_200_OK)
 
 
+def annotate_stock_available(parts, date_debut=None, date_fin=None):
+    """Attache `.stock_available` à chaque Part pour la sérialisation catalogue.
+
+    Sans `date_debut`/`date_fin`, la disponibilité est calculée pour la
+    journée courante (CAT-04). Les articles virtuels (services) restent à
+    `None`, exposés en 0 par le sérialiseur.
+    """
+
+    from .stock import compute_parts_availability
+
+    parts = list(parts)
+    availability = compute_parts_availability(
+        [part.pk for part in parts], date_debut, date_fin
+    )
+
+    for part in parts:
+        part.stock_available = availability.get(part.pk)
+
+
 class CatalogPartListView(APIView):
     """List InvenTree parts with catalog filters."""
 
@@ -412,6 +431,12 @@ class CatalogPartListView(APIView):
 
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(queryset, request)
+
+        annotate_stock_available(
+            page,
+            request.query_params.get("date_debut"),
+            request.query_params.get("date_fin"),
+        )
 
         serializer = self.serializer_class(page, many=True)
 
@@ -518,6 +543,12 @@ class CatalogPartDetailView(APIView):
                 {"detail": "Part introuvable."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+        annotate_stock_available(
+            [part],
+            request.query_params.get("date_debut"),
+            request.query_params.get("date_fin"),
+        )
 
         serializer = self.serializer_class(part)
         return Response(serializer.data, status=status.HTTP_200_OK)

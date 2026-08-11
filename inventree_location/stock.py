@@ -133,6 +133,45 @@ def compute_stock_availability(
     return {"has_shortage": has_shortage, "lines": result_lines}
 
 
+def compute_parts_availability(
+    part_ids,
+    date_debut=None,
+    date_fin=None,
+    exclude_prestation_id=None,
+) -> dict[int, int]:
+    """Disponibilité au jour d'un ensemble de parts, hors prestation existante.
+
+    Sert au catalogue (CAT-02) et au sélecteur de matériel d'une réservation :
+    on veut « combien de X reste-t-il de disponible pour telle période ? »
+    sans avoir à demander une quantité précise au préalable.
+
+    Sans période fournie, on utilise la journée courante (disponibilité
+    « à l'instant »). Les articles virtuels (pas de stock physique) sont
+    absents du résultat — l'appelant doit les traiter à part.
+    """
+
+    part_ids = [int(pid) for pid in part_ids]
+
+    if not part_ids:
+        return {}
+
+    if date_debut is None or date_fin is None:
+        today = date.today()
+        date_debut = date_debut or today
+        date_fin = date_fin or today
+
+    requested_lines = [{"part_id": pid, "quantite": 0} for pid in part_ids]
+
+    result = compute_stock_availability(
+        date_debut,
+        date_fin,
+        requested_lines,
+        exclude_prestation_id=exclude_prestation_id,
+    )
+
+    return {line["part_id"]: line["available"] for line in result["lines"]}
+
+
 def compute_prestation_stock(prestation) -> dict:
     """Disponibilité au jour des articles d'une prestation enregistrée.
 

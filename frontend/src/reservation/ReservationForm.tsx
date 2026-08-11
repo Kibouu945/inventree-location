@@ -520,6 +520,8 @@ export function ReservationForm({
           <PartPicker
             context={context}
             label='Ajouter un article'
+            dateDebut={selectedPrestation?.date_debut}
+            dateFin={selectedPrestation?.date_fin}
             onAdd={(ligne) =>
               form.setFieldValue(
                 'lignes',

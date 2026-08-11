@@ -17,6 +17,7 @@ from inventree_location.models import (
     RentableItem,
 )
 from inventree_location.stock import (
+    compute_parts_availability,
     compute_prestation_stock,
     compute_stock_availability,
     day_ranges_overlap,
@@ -154,3 +155,55 @@ class TestComputeStock:
         assert result["has_shortage"] is False
         assert result["lines"][0]["reserved"] == 0
         assert result["lines"][0]["available"] == 5
+
+
+@pytest.mark.django_db
+class TestComputePartsAvailability:
+    """CAT-04 : disponibilité du catalogue et du sélecteur de réservation."""
+
+    def test_empty_part_ids_returns_empty_dict(self):
+        assert compute_parts_availability([]) == {}
+
+    def test_available_for_given_period(self, base):
+        part = _make_part("Tente", stock=10)
+        result = compute_parts_availability(
+            [part.pk], base["now"], base["now"] + timedelta(hours=2)
+        )
+        assert result == {part.pk: 10}
+
+    def test_excludes_quantity_engaged_by_overlapping_prestation(self, base):
+        part = _make_part("Chaise", stock=10)
+        _prestation(base, day_offset_start=0, hours=3, part=part, qty=8, nom="Autre")
+
+        result = compute_parts_availability(
+            [part.pk], base["now"], base["now"] + timedelta(hours=2)
+        )
+        assert result == {part.pk: 2}
+
+    def test_defaults_to_today_when_no_period_given(self, base):
+        part = _make_part("Table", stock=10)
+        _prestation(base, day_offset_start=0, hours=3, part=part, qty=6, nom="Autre")
+
+        result = compute_parts_availability([part.pk])
+        assert result == {part.pk: 4}
+
+    def test_virtual_parts_are_absent_from_result(self, base):
+        part = _make_part("Nettoyage", stock=0, virtual=True)
+        result = compute_parts_availability(
+            [part.pk], base["now"], base["now"] + timedelta(hours=2)
+        )
+        assert result == {}
+
+    def test_can_exclude_a_prestation_from_the_computation(self, base):
+        part = _make_part("Barrière", stock=5)
+        presta = _prestation(
+            base, day_offset_start=0, hours=2, part=part, qty=5, nom="Cible"
+        )
+
+        result = compute_parts_availability(
+            [part.pk],
+            base["now"],
+            base["now"] + timedelta(hours=2),
+            exclude_prestation_id=presta.pk,
+        )
+        assert result == {part.pk: 5}

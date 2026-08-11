@@ -170,6 +170,7 @@ export function CatalogList({ context }: { context: InvenTreePluginContext }) {
               <Table.Th>Référence</Table.Th>
               <Table.Th>Catégorie</Table.Th>
               <Table.Th>Louable</Table.Th>
+              <Table.Th>Disponible aujourd'hui</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -189,6 +190,15 @@ export function CatalogList({ context }: { context: InvenTreePluginContext }) {
                     <Badge color='green'>Louable</Badge>
                   ) : (
                     <Badge color='gray'>Non-louable</Badge>
+                  )}
+                </Table.Td>
+                <Table.Td>
+                  {part.is_virtual ? (
+                    '—'
+                  ) : (
+                    <Badge color={part.stock_available > 0 ? 'blue' : 'red'} variant='light'>
+                      {part.stock_available}
+                    </Badge>
                   )}
                 </Table.Td>
               </Table.Tr>

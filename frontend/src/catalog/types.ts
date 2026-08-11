@@ -12,6 +12,7 @@ export interface CatalogPart {
   image_url: string | null;
   rentable: boolean;
   consommable: boolean;
+  is_virtual: boolean;
 }
 
 /** Réponse paginée DRF (PageNumberPagination). */

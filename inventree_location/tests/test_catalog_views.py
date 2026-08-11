@@ -7,13 +7,23 @@ câblage du drapeau louable sur RentableItem.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
-from inventree_location.models import RentableItem
+from inventree_location.models import (
+    Groupe,
+    LignePrestation,
+    Lieu,
+    Manifestation,
+    Prestation,
+    RentableItem,
+)
 from inventree_location.views import (
     CatalogPagination,
     CatalogPartDetailView,
@@ -292,3 +302,106 @@ class TestRentablePartDetail:
         assert response.status_code == status.HTTP_200_OK
         assert response.data["is_rentable"] is False
         assert RentableItem.objects.get(part=parts["tente"]).is_rentable is False
+
+
+class TestCatalogStockAvailable:
+    """CAT-04 : quantité disponible exposée dans le catalogue."""
+
+    @pytest.fixture
+    def presta_context(self, db):
+        now = timezone.now().replace(hour=8, minute=0, second=0, microsecond=0)
+        user = User.objects.create_user(username="carla", password="pwd12345")
+        groupe = Groupe.objects.create(nom="Jambville", code="JAM")
+        manifestation = Manifestation.objects.create(
+            nom="Camp",
+            date_debut=now,
+            date_fin=now + timedelta(days=10),
+            organisateur=user,
+            groupe=groupe,
+        )
+        lieu = Lieu.objects.create(nom="Terrain")
+        return {"now": now, "manifestation": manifestation, "lieu": lieu}
+
+    def _prestation(self, ctx, *, hours, part, qty):
+        presta = Prestation.objects.create(
+            manifestation=ctx["manifestation"],
+            lieu=ctx["lieu"],
+            nom="Autre",
+            date_debut=ctx["now"],
+            date_fin=ctx["now"] + timedelta(hours=hours),
+        )
+        LignePrestation.objects.create(prestation=presta, part=part, quantite=qty)
+        return presta
+
+    @pytest.mark.django_db
+    def test_list_exposes_stock_available_for_given_period(
+        self, factory, user, categorie, presta_context
+    ):
+        part = Part.objects.create(name="Tente", category=categorie)
+        RentableItem.objects.create(part=part, stock_total=10)
+        self._prestation(presta_context, hours=3, part=part, qty=6)
+
+        request = factory.get(
+            CATALOG_URL,
+            {
+                "date_debut": presta_context["now"].isoformat(),
+                "date_fin": (presta_context["now"] + timedelta(hours=2)).isoformat(),
+            },
+        )
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        by_name = {row["name"]: row for row in response.data["results"]}
+        assert by_name["Tente"]["stock_available"] == 4
+
+    @pytest.mark.django_db
+    def test_list_defaults_to_today_when_no_period_given(
+        self, factory, user, categorie, presta_context
+    ):
+        part = Part.objects.create(name="Table", category=categorie)
+        RentableItem.objects.create(part=part, stock_total=10)
+        self._prestation(presta_context, hours=3, part=part, qty=7)
+
+        request = factory.get(CATALOG_URL)
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        by_name = {row["name"]: row for row in response.data["results"]}
+        assert by_name["Table"]["stock_available"] == 3
+
+    @pytest.mark.django_db
+    def test_virtual_part_reports_zero_stock_available(
+        self, factory, user, categorie
+    ):
+        service = Part.objects.create(name="Nettoyage", category=categorie)
+        RentableItem.objects.create(part=service, is_virtual=True)
+
+        request = factory.get(CATALOG_URL, {"virtual": "true"})
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        assert response.data["results"][0]["stock_available"] == 0
+
+    @pytest.mark.django_db
+    def test_detail_exposes_stock_available(
+        self, factory, user, categorie, presta_context
+    ):
+        part = Part.objects.create(name="Barrière", category=categorie)
+        RentableItem.objects.create(part=part, stock_total=5)
+        self._prestation(presta_context, hours=3, part=part, qty=2)
+
+        request = factory.get(
+            f"/plugin/inventree-location/catalog/{part.pk}/",
+            {
+                "date_debut": presta_context["now"].isoformat(),
+                "date_fin": (presta_context["now"] + timedelta(hours=2)).isoformat(),
+            },
+        )
+        force_authenticate(request, user=user)
+
+        response = CatalogPartDetailView.as_view()(request, pk=part.pk)
+
+        assert response.data["stock_available"] == 3
