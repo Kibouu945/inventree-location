@@ -17,8 +17,10 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
+import { ownsKeys, syncOwnedParams } from '../urlState';
 import {
   buildCatalogQuery,
+  CATALOG_URL_KEYS,
   type CatalogFiltersState,
   DEFAULT_FILTERS,
   parseFilters,
@@ -29,14 +31,14 @@ import type { CatalogPage } from './types';
 
 const CATALOG_URL = '/plugin/inventree-location/catalog/';
 
+const ownsCatalogKey = ownsKeys(CATALOG_URL_KEYS);
+
 /** Reflète l'état des filtres dans la query string sans recharger la page. */
 function syncUrl(filters: CatalogFiltersState) {
-  if (typeof window === 'undefined' || !window.history?.replaceState) {
-    return;
-  }
-  const query = serializeFilters(filters);
-  const url = query ? `?${query}` : window.location.pathname;
-  window.history.replaceState(null, '', url);
+  syncOwnedParams(
+    ownsCatalogKey,
+    new URLSearchParams(serializeFilters(filters))
+  );
 }
 
 function initialFilters(): CatalogFiltersState {

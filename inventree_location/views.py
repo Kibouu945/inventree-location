@@ -179,6 +179,32 @@ class ReservationListCreateView(generics.ListCreateAPIView):
     serializer_class = ReservationSerializer
     permission_classes = [ReservationPermission]
 
+    @staticmethod
+    def _parse_csv_int_values(values):
+        """Parse les valeurs CSV / répétables en une liste d'entiers uniques."""
+
+        parsed = []
+        seen = set()
+
+        for value in values:
+            for chunk in value.split(","):
+                chunk = chunk.strip()
+                if not chunk:
+                    continue
+
+                try:
+                    candidate = int(chunk)
+                except ValueError:
+                    continue
+
+                if candidate in seen:
+                    continue
+
+                seen.add(candidate)
+                parsed.append(candidate)
+
+        return parsed
+
     def get_queryset(self):
         """Retourne les réservations, filtrées par statut, période et recherche."""
 
@@ -197,6 +223,15 @@ class ReservationListCreateView(generics.ListCreateAPIView):
 
         if statuts:
             queryset = queryset.filter(statut__in=statuts)
+
+        categories = self._parse_csv_int_values(
+            self.request.query_params.getlist("categories")
+        )
+
+        if categories:
+            queryset = queryset.filter(
+                lignes__part__category_id__in=categories
+            ).distinct()
 
         date_from = self.request.query_params.get("date_from")
         date_to = self.request.query_params.get("date_to")
