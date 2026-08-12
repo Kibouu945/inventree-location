@@ -48,7 +48,7 @@ from .serializers import (
     UserSerializer,
     geocode_candidates,
 )
-from .stock import compute_prestation_stock, compute_stock_availability
+from .stock import _as_date, compute_prestation_stock, compute_stock_availability
 from .services.workflow_service import (
     get_available_transitions,
     transition_reservation_status,
@@ -396,6 +396,47 @@ class ConflictsListView(APIView):
         return Response(list_current_conflicts(), status=status.HTTP_200_OK)
 
 
+def parse_optional_date_param(request, name):
+    """Lit un paramètre de date optionnel de la query string.
+
+    Absent ou vide vaut « non fourni » (l'appelant retombe alors sur la
+    journée courante). Une valeur malformée est une erreur du client : on
+    renvoie 400 plutôt que de laisser remonter la `ValueError` de `_as_date`
+    en 500 depuis un endpoint de liste public.
+    """
+
+    raw = request.query_params.get(name)
+
+    if raw is None or not raw.strip():
+        return None
+
+    try:
+        return _as_date(raw)
+    except ValueError:
+        raise ValidationError({
+            name: "Date invalide : format attendu AAAA-MM-JJ (ou ISO 8601)."
+        }) from None
+
+
+def annotate_stock_available(parts, date_debut=None, date_fin=None):
+    """Attache `.stock_available` à chaque Part pour la sérialisation catalogue.
+
+    Sans `date_debut`/`date_fin`, la disponibilité est calculée pour la
+    journée courante (CAT-04). Les articles virtuels (services) restent à
+    `None`, exposés en 0 par le sérialiseur.
+    """
+
+    from .stock import compute_parts_availability
+
+    parts = list(parts)
+    availability = compute_parts_availability(
+        [part.pk for part in parts], date_debut, date_fin
+    )
+
+    for part in parts:
+        part.stock_available = availability.get(part.pk)
+
+
 class CatalogPartListView(APIView):
     """List InvenTree parts with catalog filters."""
 
@@ -447,6 +488,12 @@ class CatalogPartListView(APIView):
 
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(queryset, request)
+
+        annotate_stock_available(
+            page,
+            parse_optional_date_param(request, "date_debut"),
+            parse_optional_date_param(request, "date_fin"),
+        )
 
         serializer = self.serializer_class(page, many=True)
 
@@ -553,6 +600,12 @@ class CatalogPartDetailView(APIView):
                 {"detail": "Part introuvable."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+        annotate_stock_available(
+            [part],
+            parse_optional_date_param(request, "date_debut"),
+            parse_optional_date_param(request, "date_fin"),
+        )
 
         serializer = self.serializer_class(part)
         return Response(serializer.data, status=status.HTTP_200_OK)
