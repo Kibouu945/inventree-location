@@ -55,7 +55,11 @@ export function PartPicker({
           params: {
             search: debouncedSearch || undefined,
             rentable: 'all',
-            virtual: virtualOnly ? 'true' : undefined,
+            // Les deux sélecteurs sont disjoints : « Matériel » ne doit pas
+            // proposer les articles virtuels (services sans stock physique),
+            // sinon ils échappent au garde-fou de quantité. Omettre le
+            // paramètre ne filtrait rien et les faisait apparaître ici.
+            virtual: virtualOnly ? 'true' : 'false',
             date_debut: dateDebut || undefined,
             date_fin: dateFin || undefined,
             page_size: 20
