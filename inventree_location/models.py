@@ -163,6 +163,9 @@ class RentableItem(TimestampedModel):
     seuil_alerte_bas = models.PositiveIntegerField(
         null=True, blank=True, verbose_name=_("seuil d'alerte bas")
     )
+    seuil_alerte_haut = models.PositiveIntegerField(
+        null=True, blank=True, verbose_name=_("seuil d'alerte haut")
+    )
 
     class Meta:
         app_label = "inventree_location"

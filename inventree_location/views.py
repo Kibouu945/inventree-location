@@ -1,12 +1,16 @@
 """API views for the InvenTreeLocation plugin."""
 
-from datetime import date
+from datetime import date, timedelta
 import random
 import string
 from urllib.error import HTTPError, URLError
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db.models import Q
+from django.core.cache import cache
+from django.core.mail import send_mail
+from django.db.models import Q, Sum
+from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
@@ -21,6 +25,7 @@ from . import roles
 from .models import (
     Groupe,
     Lieu,
+    LigneReservation,
     Manifestation,
     Prestation,
     RentableItem,
@@ -394,6 +399,221 @@ class ConflictsListView(APIView):
         """Retourne les réservations en conflit triées par date de retrait prévue."""
 
         return Response(list_current_conflicts(), status=status.HTTP_200_OK)
+
+
+class StockAlertListView(APIView):
+    """Liste les objets en alerte de seuil / tension, avec option email."""
+
+    permission_classes = [RoleBasedPermission]
+
+    def get(self, request, *args, **kwargs):
+        manifestation_id = request.query_params.get("manifestation")
+        lieu_id = request.query_params.get("lieu")
+        notify = str(request.query_params.get("notify", "")).lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+
+        alerts = self._build_alerts(
+            manifestation_id=int(manifestation_id)
+            if str(manifestation_id).isdigit()
+            else None,
+            lieu_id=int(lieu_id) if str(lieu_id).isdigit() else None,
+        )
+
+        email_sent = False
+        if notify and alerts:
+            email_sent = self._send_alert_email(alerts)
+
+        return Response(
+            {
+                "count": len(alerts),
+                "email_sent": email_sent,
+                "alerts": alerts,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def _build_alerts(self, manifestation_id=None, lieu_id=None):
+        scope_ids = None
+
+        if manifestation_id is not None or lieu_id is not None:
+            scoped_lines = LigneReservation.objects.select_related(
+                "reservation__prestation"
+            )
+
+            if manifestation_id is not None:
+                scoped_lines = scoped_lines.filter(
+                    reservation__prestation__manifestation_id=manifestation_id
+                )
+
+            if lieu_id is not None:
+                scoped_lines = scoped_lines.filter(
+                    reservation__prestation__lieu_id=lieu_id
+                )
+
+            scope_ids = set(scoped_lines.values_list("part_id", flat=True))
+
+        rentable_items = RentableItem.objects.select_related("part").all()
+
+        if scope_ids is not None:
+            rentable_items = rentable_items.filter(part_id__in=scope_ids)
+
+        alerts = []
+        now = timezone.now()
+
+        for rentable in rentable_items:
+            part = rentable.part
+            stock_available = self._safe_stock_available(part)
+            low = rentable.seuil_alerte_bas
+            high = rentable.seuil_alerte_haut
+
+            part_reasons = []
+
+            # Les messages nomment la grandeur comparée : les seuils portent sur
+            # le stock physique InvenTree, la tension sur la quantité louable.
+            # Sans le préciser, l'utilisateur voit deux nombres sans savoir
+            # lequel est lequel.
+            if rentable.consommable and low is not None and stock_available <= low:
+                part_reasons.append({
+                    "type": "low_threshold",
+                    "message": (
+                        f"Stock physique trop bas : {stock_available} en stock, "
+                        f"seuil bas fixé à {low}"
+                    ),
+                })
+
+            if high is not None and stock_available >= high:
+                part_reasons.append({
+                    "type": "high_threshold",
+                    "message": (
+                        f"Stock physique au-dessus du seuil haut : "
+                        f"{stock_available} en stock, seuil haut fixé à {high}"
+                    ),
+                })
+
+            projected = self._projected_tension(
+                part_id=part.pk,
+                total_stock=max(int(rentable.stock_total or 0), 1),
+                now=now,
+                manifestation_id=manifestation_id,
+                lieu_id=lieu_id,
+            )
+
+            if projected["occupation_rate"] >= 90:
+                part_reasons.append({
+                    "type": "projected_tension",
+                    "message": (
+                        f"Tension projetée {projected['occupation_rate']:.1f} % : "
+                        f"{projected['reserved_quantity']} réservé(s) sur "
+                        f"{int(rentable.stock_total or 0)} louable(s), "
+                        f"alerte au-delà de 90 %"
+                    ),
+                })
+
+            if not part_reasons:
+                continue
+
+            alerts.append({
+                "part_id": part.pk,
+                "part_name": getattr(part, "name", str(part)),
+                "consommable": rentable.consommable,
+                "stock_available": stock_available,
+                "stock_total": int(rentable.stock_total or 0),
+                "seuil_alerte_bas": low,
+                "seuil_alerte_haut": high,
+                "projected_reserved_quantity": projected["reserved_quantity"],
+                "projected_occupation_rate": round(projected["occupation_rate"], 2),
+                "reasons": part_reasons,
+            })
+
+        alerts.sort(key=lambda item: item["part_name"].lower())
+
+        return alerts
+
+    def _projected_tension(
+        self, part_id, total_stock, now, manifestation_id=None, lieu_id=None
+    ):
+        end = now + timedelta(days=30)
+        lines = LigneReservation.objects.filter(
+            part_id=part_id,
+            reservation__statut__in={
+                "confirmée",
+                "livrée",
+                "retournée",
+                "validee",
+                "livree",
+                "retournee",
+            },
+            reservation__date_retrait_prevue__lte=end,
+            reservation__date_retour_prevue__gte=now,
+        )
+
+        if manifestation_id is not None:
+            lines = lines.filter(
+                reservation__prestation__manifestation_id=manifestation_id
+            )
+
+        if lieu_id is not None:
+            lines = lines.filter(reservation__prestation__lieu_id=lieu_id)
+
+        reserved = lines.aggregate(total=Sum("quantite_demandee"))["total"] or 0
+        occupation = (reserved / max(total_stock, 1)) * 100
+
+        return {
+            "reserved_quantity": int(reserved),
+            "occupation_rate": float(occupation),
+        }
+
+    def _safe_stock_available(self, part):
+        for attr in ("stock_available", "available_stock", "in_stock", "total_stock"):
+            value = getattr(part, attr, None)
+            if value is not None:
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    continue
+
+        return 0
+
+    def _send_alert_email(self, alerts):
+        cache_key = "inventree_location_stock_alert_email_last_sent"
+        last_sent = cache.get(cache_key)
+
+        if last_sent:
+            return False
+
+        recipients = list(
+            get_user_model()
+            .objects.filter(groups__name__in=["admin", "gestionnaire"], is_active=True)
+            .exclude(email="")
+            .values_list("email", flat=True)
+            .distinct()
+        )
+
+        if not recipients:
+            return False
+
+        lines = [
+            f"- {item['part_name']} (stock {item['stock_available']}/{item['stock_total']})"
+            for item in alerts
+        ]
+
+        subject = "[InvenTree Location] Alerte seuil stock"
+        body = "Objets en alerte:\n\n" + "\n".join(lines)
+
+        send_mail(
+            subject=subject,
+            message=body,
+            from_email=getattr(
+                settings, "DEFAULT_FROM_EMAIL", "noreply@inventree.local"
+            ),
+            recipient_list=recipients,
+            fail_silently=True,
+        )
+        cache.set(cache_key, timezone.now().isoformat(), timeout=3600)
+        return True
 
 
 def parse_optional_date_param(request, name):

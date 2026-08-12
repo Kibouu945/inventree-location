@@ -418,6 +418,7 @@ class RentableItemSerializer(serializers.ModelSerializer):
             "caution",
             "valeur_remplacement",
             "seuil_alerte_bas",
+            "seuil_alerte_haut",
         ]
         read_only_fields = ["part"]
 
@@ -599,6 +600,8 @@ class CatalogPartSerializer(serializers.Serializer):
     consommable = serializers.SerializerMethodField()
     is_virtual = serializers.SerializerMethodField()
     stock_total = serializers.SerializerMethodField()
+    seuil_alerte_bas = serializers.SerializerMethodField()
+    seuil_alerte_haut = serializers.SerializerMethodField()
 
     def get_stock_available(self, obj):
         """Stock disponible de la part, exposé à 0 si non renseigné."""
@@ -658,6 +661,26 @@ class CatalogPartSerializer(serializers.Serializer):
             return 0
 
         return rentable_info.stock_total
+
+    def get_seuil_alerte_bas(self, obj):
+        """Seuil bas configurable du part (null par défaut)."""
+
+        rentable_info = getattr(obj, "rentable_info", None)
+
+        if rentable_info is None:
+            return None
+
+        return rentable_info.seuil_alerte_bas
+
+    def get_seuil_alerte_haut(self, obj):
+        """Seuil haut configurable du part (null par défaut)."""
+
+        rentable_info = getattr(obj, "rentable_info", None)
+
+        if rentable_info is None:
+            return None
+
+        return rentable_info.seuil_alerte_haut
 
 
 class GroupeSerializer(serializers.ModelSerializer):
