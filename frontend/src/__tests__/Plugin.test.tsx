@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
 describe('Settings module', () => {
-  it('exports renderPluginSettings', async () => {
-    const mod = await import('../Settings');
-    expect(mod.renderPluginSettings).toBeDefined();
-    expect(typeof mod.renderPluginSettings).toBe('function');
-  });
+  it(
+    'exports renderPluginSettings',
+    async () => {
+      const mod = await import('../Settings');
+      expect(mod.renderPluginSettings).toBeDefined();
+      expect(typeof mod.renderPluginSettings).toBe('function');
+    },
+    // Le graphe de dépendances transformé par Vitest a grossi (leaflet /
+    // react-leaflet pour la carte livreur) ; le délai par défaut de 5s
+    // devient trop juste pour cet import dynamique.
+    15000
+  );
 });
 
 describe('Plugin structure', () => {

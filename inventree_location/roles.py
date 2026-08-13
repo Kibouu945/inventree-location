@@ -92,8 +92,8 @@ def can_arbitrate_reservations(user) -> bool:
 
 #: Widgets dashboard visibles par rôle métier (RBAC, cf. cahier des charges —
 #: un filtrage sur les 7 groupes, PAS sur ``is_staff``). Les écrans propres à
-#: certains rôles (tournées livreur, retours magasinier, tickets SAV) arriveront
-#: aux sprints suivants ; on ne mappe ici que les widgets existants.
+#: certains rôles restants (retours magasinier, tickets SAV) arriveront aux
+#: sprints suivants ; on ne mappe ici que les widgets existants.
 DASHBOARD_WIDGET_ROLES: dict[str, set[str]] = {
     "inventree-location-organisation": {ADMIN, GESTIONNAIRE, ORGANISATEUR, LECTEUR},
     "inventree-location-catalog": {ADMIN, GESTIONNAIRE, MAGASINIER, LECTEUR},
@@ -106,6 +106,7 @@ DASHBOARD_WIDGET_ROLES: dict[str, set[str]] = {
         LECTEUR,
     },
     "inventree-location-conflicts": {ADMIN, GESTIONNAIRE, LECTEUR},
+    "inventree-location-deliveries": {ADMIN, GESTIONNAIRE, LIVREUR},
 }
 
 

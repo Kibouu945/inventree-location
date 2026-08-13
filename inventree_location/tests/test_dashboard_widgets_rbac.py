@@ -21,7 +21,11 @@ CATALOG = "inventree-location-catalog"
 RESERVATIONS = "inventree-location-reservations"
 CONFLICTS = "inventree-location-conflicts"
 ORGANISATION = "inventree-location-organisation"
-ALL_WIDGETS = {CATALOG, RESERVATIONS, CONFLICTS, ORGANISATION}
+DELIVERIES = "inventree-location-deliveries"
+ALL_WIDGETS = {CATALOG, RESERVATIONS, CONFLICTS, ORGANISATION, DELIVERIES}
+#: Widgets vus par un lecteur : tous sauf les tournées livreur (rôle non listé
+#: dans DASHBOARD_WIDGET_ROLES pour cette clé).
+LECTEUR_WIDGETS = ALL_WIDGETS - {DELIVERIES}
 
 
 def _make_user(username, role=None, *, is_staff=False, is_superuser=False):
@@ -63,10 +67,10 @@ class TestVisibleDashboardWidgetKeys:
         [
             (roles.ADMIN, ALL_WIDGETS),
             (roles.GESTIONNAIRE, ALL_WIDGETS),
-            (roles.LECTEUR, ALL_WIDGETS),
+            (roles.LECTEUR, LECTEUR_WIDGETS),
             (roles.MAGASINIER, {CATALOG, RESERVATIONS}),
             (roles.ORGANISATEUR, {RESERVATIONS, ORGANISATION}),
-            (roles.LIVREUR, {RESERVATIONS}),
+            (roles.LIVREUR, {RESERVATIONS, DELIVERIES}),
             (roles.SAV, set()),
         ],
     )
@@ -75,11 +79,12 @@ class TestVisibleDashboardWidgetKeys:
 
         assert roles.visible_dashboard_widget_keys(user) == expected
 
-    def test_livreur_sees_reservations_but_not_conflicts(self):
+    def test_livreur_sees_reservations_and_deliveries_but_not_conflicts(self):
         user = _make_user("livreur1", role=roles.LIVREUR)
 
         keys = roles.visible_dashboard_widget_keys(user)
 
         assert RESERVATIONS in keys
+        assert DELIVERIES in keys
         assert CONFLICTS not in keys
         assert CATALOG not in keys

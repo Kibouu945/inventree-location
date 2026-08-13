@@ -12,6 +12,7 @@ SAV arriveront avec leurs endpoints aux sprints suivants) :
 | Catalogue     | tous les rôles     | admin, gestionnaire               |
 | Lieux         | tous les rôles     | admin, gestionnaire               |
 | Réservations  | tous les rôles     | admin, gestionnaire, organisateur |
+| Livraisons    | tous les rôles     | admin, gestionnaire               |
 """
 
 from __future__ import annotations
@@ -70,3 +71,9 @@ class PrestationPermission(RoleBasedPermission):
     """Lecture pour tous ; gestion pour admin / gestionnaire / organisateur."""
 
     write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR)
+
+
+class DeliveryPermission(RoleBasedPermission):
+    """Lecture pour tous (dont livreur) ; aucune écriture ouverte cette itération."""
+
+    write_roles = (roles.ADMIN, roles.GESTIONNAIRE)

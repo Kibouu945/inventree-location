@@ -48,6 +48,7 @@ export default defineConfig({
         "./src/Catalog.tsx",
         "./src/Reservations.tsx",
         "./src/Conflicts.tsx",
+        "./src/Deliveries.tsx",
         "./src/Organisation.tsx",
         "./src/PartDetail.tsx",
       ],

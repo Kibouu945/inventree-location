@@ -18,6 +18,7 @@ from .models import (
     LigneReservation,
     Lieu,
     Manifestation,
+    Profile,
     Reservation,
     ReservationStatusLog,
     Prestation,
@@ -125,6 +126,34 @@ def _round_coord(value):
         text = text.rstrip("0").rstrip(".")
 
     return text
+
+
+def _user_label(user):
+    """Nom lisible d'un utilisateur : « Prénom Nom (username) », sinon username."""
+
+    if user is None:
+        return ""
+
+    full_name = f"{user.first_name} {user.last_name}".strip()
+
+    return f"{full_name} ({user.username})" if full_name else user.username
+
+
+def _user_phone(user):
+    """Téléphone de l'utilisateur (via son `Profile`), vide si non renseigné.
+
+    `Profile` n'est jamais auto-créé (pas de signal) : l'accès reverse
+    OneToOne lève `Profile.DoesNotExist`, pas une `AttributeError` — un
+    `getattr(user, "location_profile", None)` ne l'attraperait pas.
+    """
+
+    if user is None:
+        return ""
+
+    try:
+        return user.location_profile.telephone
+    except Profile.DoesNotExist:
+        return ""
 
 
 class LigneReservationSerializer(serializers.ModelSerializer):
@@ -238,12 +267,7 @@ class ReservationSerializer(serializers.ModelSerializer):
     def _user_label(user):
         """Nom lisible d'un utilisateur : « Prénom Nom (username) », sinon username."""
 
-        if user is None:
-            return ""
-
-        full_name = f"{user.first_name} {user.last_name}".strip()
-
-        return f"{full_name} ({user.username})" if full_name else user.username
+        return _user_label(user)
 
     def get_demandeur_nom(self, obj):
         """Nom lisible du demandeur."""
@@ -581,6 +605,79 @@ class LieuSerializer(serializers.ModelSerializer):
 
         validated_data["latitude"] = result.get("latitude")
         validated_data["longitude"] = result.get("longitude")
+
+
+class DeliveryLigneSerializer(serializers.ModelSerializer):
+    """Ligne de matériel d'une livraison, avec le nom de l'article (lecture seule)."""
+
+    part_name = serializers.CharField(source="part.name", read_only=True)
+
+    class Meta:
+        """Configuration du serializer DeliveryLigne."""
+
+        model = LigneReservation
+        fields = ["id", "part", "part_name", "quantite_demandee"]
+        read_only_fields = fields
+
+
+class DeliverySerializer(serializers.ModelSerializer):
+    """Vue « tournée livreur » d'une réservation validée (US livreur).
+
+    Réutilise `Reservation` en lecture seule, enrichi des informations dont
+    un livreur a besoin pour organiser sa tournée : lieu géolocalisé,
+    contact de l'organisateur, matériel et quantité totale. Sérialiseur
+    dédié (plutôt qu'extension de `ReservationSerializer`) pour ne pas
+    changer la forme du payload consommé par le formulaire de réservation.
+    """
+
+    prestation_nom = serializers.CharField(source="prestation.nom", read_only=True)
+    demandeur_nom = serializers.SerializerMethodField()
+    lieu_detail = LieuSerializer(source="prestation.lieu", read_only=True)
+    organisateur_nom = serializers.SerializerMethodField()
+    organisateur_telephone = serializers.SerializerMethodField()
+    lignes = DeliveryLigneSerializer(many=True, read_only=True)
+    quantite_totale = serializers.SerializerMethodField()
+
+    class Meta:
+        """Configuration du serializer Delivery."""
+
+        model = Reservation
+        fields = [
+            "id",
+            "numero",
+            "statut",
+            "prestation_nom",
+            "demandeur_nom",
+            "lieu_detail",
+            "organisateur_nom",
+            "organisateur_telephone",
+            "date_retrait_prevue",
+            "date_retour_prevue",
+            "commentaire",
+            "lignes",
+            "quantite_totale",
+        ]
+        read_only_fields = fields
+
+    def get_demandeur_nom(self, obj):
+        """Nom lisible du demandeur (gérant interne)."""
+
+        return _user_label(obj.demandeur)
+
+    def get_organisateur_nom(self, obj):
+        """Nom lisible de l'organisateur de la manifestation."""
+
+        return _user_label(obj.prestation.manifestation.organisateur)
+
+    def get_organisateur_telephone(self, obj):
+        """Téléphone de l'organisateur, vide si non renseigné."""
+
+        return _user_phone(obj.prestation.manifestation.organisateur)
+
+    def get_quantite_totale(self, obj):
+        """Somme des quantités demandées sur toutes les lignes (déjà prefetchées)."""
+
+        return sum(ligne.quantite_demandee for ligne in obj.lignes.all())
 
 
 class CatalogPartSerializer(serializers.Serializer):

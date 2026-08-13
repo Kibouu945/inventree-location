@@ -70,6 +70,7 @@ class InvenTreeLocation(
             CatalogPartDetailView,
             CatalogPartListView,
             ConflictsListView,
+            DeliveryListView,
             ExampleView,
             GeocodeAddressView,
             GroupeListView,
@@ -127,6 +128,7 @@ class InvenTreeLocation(
                 name="reservation-transition",
             ),
             path("conflicts/", ConflictsListView.as_view(), name="conflict-list"),
+            path("deliveries/", DeliveryListView.as_view(), name="delivery-list"),
             path(
                 "reservations/<int:pk>/conflicts/",
                 ReservationConflictCheckView.as_view(),
@@ -268,6 +270,24 @@ class InvenTreeLocation(
                     "Reservations.js:renderInvenTreeLocationReservations"
                 ),
                 # Liste dense (filtres + tableau + modale)
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-deliveries"):
+            items.append({
+                "key": "inventree-location-deliveries",
+                "title": "Tournées livreur",
+                "description": "Livraisons à effectuer, filtrables par date / lieu / statut",
+                "icon": "ti:truck-delivery:outline",
+                "source": self.plugin_static_file(
+                    "Deliveries.js:renderInvenTreeLocationDeliveries"
+                ),
                 "options": {
                     "width": 12,
                     "height": 8,

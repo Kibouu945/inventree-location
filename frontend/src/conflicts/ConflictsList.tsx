@@ -87,7 +87,7 @@ export function ConflictsList({
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Réservation</Table.Th>
-              <Table.Th>Demandeur</Table.Th>
+              <Table.Th>Gérant interne</Table.Th>
               <Table.Th>Événement</Table.Th>
               <Table.Th>Début</Table.Th>
               <Table.Th>Fin</Table.Th>
