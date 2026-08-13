@@ -11,12 +11,17 @@ from django.utils import timezone
 from inventree_location.models import (
     Groupe,
     LignePrestation,
+    LigneReservation,
     Lieu,
     Manifestation,
     Prestation,
     RentableItem,
+    Reservation,
+    StatutReservation,
 )
 from inventree_location.stock import (
+    compute_engaged_quantities,
+    compute_engagement_details,
     compute_parts_availability,
     compute_prestation_stock,
     compute_stock_availability,
@@ -39,7 +44,12 @@ def base(db):
         groupe=groupe,
     )
     lieu = Lieu.objects.create(nom="Terrain")
-    return {"now": now, "manifestation": manifestation, "lieu": lieu}
+    return {
+        "now": now,
+        "user": user,
+        "manifestation": manifestation,
+        "lieu": lieu,
+    }
 
 
 def _make_part(name, *, stock, virtual=False):
@@ -63,6 +73,32 @@ def _prestation(base, *, day_offset_start, hours, part=None, qty=0, nom="P"):
     if part is not None:
         LignePrestation.objects.create(prestation=presta, part=part, quantite=qty)
     return presta
+
+
+def _reservation(
+    base,
+    presta,
+    part,
+    qty,
+    *,
+    statut=StatutReservation.VALIDEE,
+    day_offset_start=0,
+    hours=4,
+):
+    """Réservation d'une prestation, avec une ligne matériel."""
+
+    debut = base["now"] + timedelta(days=day_offset_start)
+    resa = Reservation.objects.create(
+        prestation=presta,
+        demandeur=base["user"],
+        statut=statut,
+        date_retrait_prevue=debut,
+        date_retour_prevue=debut + timedelta(hours=hours),
+    )
+    LigneReservation.objects.create(
+        reservation=resa, part=part, quantite_demandee=qty
+    )
+    return resa
 
 
 class TestDayRangesOverlap:
@@ -207,3 +243,212 @@ class TestComputePartsAvailability:
             exclude_prestation_id=presta.pk,
         )
         assert result == {part.pk: 5}
+
+
+@pytest.mark.django_db
+class TestEngagedQuantities:
+    """Répartition d'un même article entre prévisionnel et réservations.
+
+    Le prévisionnel (`LignePrestation`) et le réalisé (`LigneReservation`)
+    décrivent le même besoin : on retient le plus grand des deux par
+    prestation, sans double comptage ni engagement invisible.
+    """
+
+    def _period(self, base, hours=2):
+        return base["now"], base["now"] + timedelta(hours=hours)
+
+    def test_reservations_are_counted_even_without_prestation_lines(self, base):
+        """Le défaut d'origine : deux réservations du même article, ignorées."""
+
+        part = _make_part("Tente", stock=10)
+        presta_a = _prestation(base, day_offset_start=0, hours=4, nom="A")
+        presta_b = _prestation(base, day_offset_start=0, hours=4, nom="B")
+        _reservation(base, presta_a, part, 4)
+        _reservation(base, presta_b, part, 4)
+
+        debut, fin = self._period(base)
+
+        assert compute_engaged_quantities([part.pk], debut, fin) == {part.pk: 8}
+        assert compute_parts_availability([part.pk], debut, fin) == {part.pk: 2}
+
+    def test_non_blocking_status_is_not_counted(self, base):
+        """Un brouillon ne retient rien : il n'engage pas le stock."""
+
+        part = _make_part("Tente", stock=10)
+        presta = _prestation(base, day_offset_start=0, hours=4, nom="A")
+        _reservation(base, presta, part, 4, statut=StatutReservation.BROUILLON)
+
+        debut, fin = self._period(base)
+
+        assert compute_engaged_quantities([part.pk], debut, fin) == {}
+
+    def test_reservation_on_another_day_is_not_counted(self, base):
+        part = _make_part("Tente", stock=10)
+        presta = _prestation(base, day_offset_start=3, hours=4, nom="A")
+        _reservation(base, presta, part, 4, day_offset_start=3)
+
+        debut, fin = self._period(base)
+
+        assert compute_engaged_quantities([part.pk], debut, fin) == {}
+
+    def test_reservation_fulfilling_its_prestation_is_not_double_counted(self, base):
+        """Prestation prévoyant 6 + sa réservation de 6 → 6 engagés, pas 12."""
+
+        part = _make_part("Chaise", stock=10)
+        presta = _prestation(
+            base, day_offset_start=0, hours=4, part=part, qty=6, nom="A"
+        )
+        _reservation(base, presta, part, 6)
+
+        debut, fin = self._period(base)
+
+        assert compute_engaged_quantities([part.pk], debut, fin) == {part.pk: 6}
+
+    def test_partially_reserved_prestation_keeps_its_forecast(self, base):
+        """Prévision 6, réservé 2 : la prestation retient toujours 6."""
+
+        part = _make_part("Chaise", stock=10)
+        presta = _prestation(
+            base, day_offset_start=0, hours=4, part=part, qty=6, nom="A"
+        )
+        _reservation(base, presta, part, 2)
+
+        debut, fin = self._period(base)
+
+        assert compute_engaged_quantities([part.pk], debut, fin) == {part.pk: 6}
+
+    def test_reservations_beyond_forecast_win_over_it(self, base):
+        """Prévision 6, réservé 4 + 5 : c'est le réalisé (9) qui fait foi."""
+
+        part = _make_part("Chaise", stock=20)
+        presta = _prestation(
+            base, day_offset_start=0, hours=4, part=part, qty=6, nom="A"
+        )
+        _reservation(base, presta, part, 4)
+        _reservation(base, presta, part, 5)
+
+        debut, fin = self._period(base)
+
+        assert compute_engaged_quantities([part.pk], debut, fin) == {part.pk: 9}
+
+    def test_engagements_of_several_prestations_add_up(self, base):
+        part = _make_part("Table", stock=20)
+        presta_a = _prestation(
+            base, day_offset_start=0, hours=4, part=part, qty=5, nom="A"
+        )
+        presta_b = _prestation(base, day_offset_start=0, hours=4, nom="B")
+        _reservation(base, presta_a, part, 2)  # sous le prévisionnel de A
+        _reservation(base, presta_b, part, 3)
+
+        debut, fin = self._period(base)
+
+        assert compute_engaged_quantities([part.pk], debut, fin) == {part.pk: 8}
+
+    def test_excluded_prestation_drops_its_lines_and_its_reservations(self, base):
+        """Une prestation ne se concurrence pas elle-même, réservations comprises."""
+
+        part = _make_part("Barrière", stock=10)
+        presta = _prestation(
+            base, day_offset_start=0, hours=4, part=part, qty=5, nom="Cible"
+        )
+        _reservation(base, presta, part, 5)
+
+        debut, fin = self._period(base)
+
+        assert (
+            compute_engaged_quantities(
+                [part.pk], debut, fin, exclude_prestation_id=presta.pk
+            )
+            == {}
+        )
+
+    def test_excluded_reservation_drops_its_prestation_forecast(self, base):
+        """En édition, la résa ne se heurte ni à elle-même ni à sa prévision."""
+
+        part = _make_part("Tente", stock=10)
+        presta = _prestation(
+            base, day_offset_start=0, hours=4, part=part, qty=6, nom="A"
+        )
+        resa = _reservation(base, presta, part, 6)
+
+        debut, fin = self._period(base)
+
+        assert (
+            compute_engaged_quantities(
+                [part.pk], debut, fin, exclude_reservation_id=resa.pk
+            )
+            == {}
+        )
+
+    def test_excluded_reservation_still_faces_its_siblings(self, base):
+        """Les autres réservations de la même prestation restent opposables."""
+
+        part = _make_part("Tente", stock=10)
+        presta = _prestation(
+            base, day_offset_start=0, hours=4, part=part, qty=6, nom="A"
+        )
+        resa = _reservation(base, presta, part, 6)
+        _reservation(base, presta, part, 3)
+
+        debut, fin = self._period(base)
+
+        assert compute_engaged_quantities(
+            [part.pk], debut, fin, exclude_reservation_id=resa.pk
+        ) == {part.pk: 3}
+
+    def test_availability_excludes_the_edited_reservation(self, base):
+        part = _make_part("Tente", stock=10)
+        presta = _prestation(base, day_offset_start=0, hours=4, nom="A")
+        resa = _reservation(base, presta, part, 4)
+
+        debut, fin = self._period(base)
+
+        assert compute_parts_availability([part.pk], debut, fin) == {part.pk: 6}
+        assert compute_parts_availability(
+            [part.pk], debut, fin, exclude_reservation_id=resa.pk
+        ) == {part.pk: 10}
+
+    def test_details_name_the_prestation_holding_the_stock(self, base):
+        """Le détail nomme le responsable, réservation ou simple prévision."""
+
+        part = _make_part("Table", stock=20)
+        prevu = _prestation(
+            base, day_offset_start=0, hours=4, part=part, qty=5, nom="Prévision"
+        )
+        reserve = _prestation(base, day_offset_start=0, hours=4, nom="Réservée")
+        resa = _reservation(base, reserve, part, 3)
+
+        debut, fin = self._period(base)
+        details = compute_engagement_details([part.pk], debut, fin)
+
+        par_nom = {entry["prestation_nom"]: entry for entry in details[part.pk]}
+        assert par_nom["Prévision"] == {
+            "prestation_id": prevu.pk,
+            "prestation_nom": "Prévision",
+            "quantite": 5,
+            "origine": "prevision",
+            "reservation_numeros": [],
+        }
+        assert par_nom["Réservée"] == {
+            "prestation_id": reserve.pk,
+            "prestation_nom": "Réservée",
+            "quantite": 3,
+            "origine": "reservations",
+            "reservation_numeros": [resa.numero],
+        }
+
+    def test_shortage_is_raised_by_reservations_alone(self, base):
+        part = _make_part("Tente", stock=5)
+        presta = _prestation(base, day_offset_start=0, hours=4, nom="A")
+        _reservation(base, presta, part, 4)
+
+        debut, fin = self._period(base)
+        result = compute_stock_availability(
+            debut, fin, [{"part_id": part.pk, "quantite": 2}]
+        )
+
+        assert result["has_shortage"] is True
+        line = result["lines"][0]
+        assert line["reserved"] == 4
+        assert line["available"] == 1
+        assert line["missing"] == 1

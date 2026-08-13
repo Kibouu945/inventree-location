@@ -18,6 +18,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .conflicts import (
+    CONFLICT_STATUSES,
     detect_reservation_conflicts,
     list_current_conflicts,
 )
@@ -538,14 +539,7 @@ class StockAlertListView(APIView):
         end = now + timedelta(days=30)
         lines = LigneReservation.objects.filter(
             part_id=part_id,
-            reservation__statut__in={
-                "confirmée",
-                "livrée",
-                "retournée",
-                "validee",
-                "livree",
-                "retournee",
-            },
+            reservation__statut__in=CONFLICT_STATUSES,
             reservation__date_retrait_prevue__lte=end,
             reservation__date_retour_prevue__gte=now,
         )
@@ -638,19 +632,43 @@ def parse_optional_date_param(request, name):
         }) from None
 
 
-def annotate_stock_available(parts, date_debut=None, date_fin=None):
+def parse_optional_int_param(request, name):
+    """Lit un paramètre entier optionnel de la query string (None si absent)."""
+
+    raw = request.query_params.get(name)
+
+    if raw is None or not str(raw).strip():
+        return None
+
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise ValidationError({
+            name: "Identifiant invalide : entier attendu."
+        }) from None
+
+
+def annotate_stock_available(
+    parts, date_debut=None, date_fin=None, exclude_reservation_id=None
+):
     """Attache `.stock_available` à chaque Part pour la sérialisation catalogue.
 
     Sans `date_debut`/`date_fin`, la disponibilité est calculée pour la
     journée courante (CAT-04). Les articles virtuels (services) restent à
     `None`, exposés en 0 par le sérialiseur.
+
+    `exclude_reservation_id` sert à l'édition d'une réservation : ses propres
+    quantités ne doivent pas être décomptées de ce qu'elle peut demander.
     """
 
     from .stock import compute_parts_availability
 
     parts = list(parts)
     availability = compute_parts_availability(
-        [part.pk for part in parts], date_debut, date_fin
+        [part.pk for part in parts],
+        date_debut,
+        date_fin,
+        exclude_reservation_id=exclude_reservation_id,
     )
 
     for part in parts:
@@ -713,6 +731,7 @@ class CatalogPartListView(APIView):
             page,
             parse_optional_date_param(request, "date_debut"),
             parse_optional_date_param(request, "date_fin"),
+            parse_optional_int_param(request, "exclude_reservation"),
         )
 
         serializer = self.serializer_class(page, many=True)
@@ -825,6 +844,7 @@ class CatalogPartDetailView(APIView):
             [part],
             parse_optional_date_param(request, "date_debut"),
             parse_optional_date_param(request, "date_fin"),
+            parse_optional_int_param(request, "exclude_reservation"),
         )
 
         serializer = self.serializer_class(part)

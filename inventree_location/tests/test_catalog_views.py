@@ -19,10 +19,13 @@ from django.utils import timezone
 from inventree_location.models import (
     Groupe,
     LignePrestation,
+    LigneReservation,
     Lieu,
     Manifestation,
     Prestation,
     RentableItem,
+    Reservation,
+    StatutReservation,
 )
 from inventree_location.views import (
     CatalogPagination,
@@ -320,9 +323,14 @@ class TestCatalogStockAvailable:
             groupe=groupe,
         )
         lieu = Lieu.objects.create(nom="Terrain")
-        return {"now": now, "manifestation": manifestation, "lieu": lieu}
+        return {
+            "now": now,
+            "user": user,
+            "manifestation": manifestation,
+            "lieu": lieu,
+        }
 
-    def _prestation(self, ctx, *, hours, part, qty):
+    def _prestation(self, ctx, *, hours, part=None, qty=0):
         presta = Prestation.objects.create(
             manifestation=ctx["manifestation"],
             lieu=ctx["lieu"],
@@ -330,8 +338,22 @@ class TestCatalogStockAvailable:
             date_debut=ctx["now"],
             date_fin=ctx["now"] + timedelta(hours=hours),
         )
-        LignePrestation.objects.create(prestation=presta, part=part, quantite=qty)
+        if part is not None:
+            LignePrestation.objects.create(prestation=presta, part=part, quantite=qty)
         return presta
+
+    def _reservation(self, ctx, presta, part, qty):
+        resa = Reservation.objects.create(
+            prestation=presta,
+            demandeur=ctx["user"],
+            statut=StatutReservation.VALIDEE,
+            date_retrait_prevue=ctx["now"],
+            date_retour_prevue=ctx["now"] + timedelta(hours=4),
+        )
+        LigneReservation.objects.create(
+            reservation=resa, part=part, quantite_demandee=qty
+        )
+        return resa
 
     @pytest.mark.django_db
     def test_list_exposes_stock_available_for_given_period(
@@ -444,3 +466,61 @@ class TestCatalogStockAvailable:
         response = CatalogPartDetailView.as_view()(request, pk=part.pk)
 
         assert response.data["stock_available"] == 3
+
+    @pytest.mark.django_db
+    def test_list_deducts_existing_reservations(
+        self, factory, user, categorie, presta_context
+    ):
+        """Deux réservations du même article se partagent bien le stock."""
+
+        part = Part.objects.create(name="Tente", category=categorie)
+        RentableItem.objects.create(part=part, stock_total=10)
+        presta = self._prestation(presta_context, hours=4)
+        self._reservation(presta_context, presta, part, 4)
+        self._reservation(presta_context, presta, part, 3)
+
+        request = factory.get(
+            CATALOG_URL,
+            {
+                "date_debut": presta_context["now"].isoformat(),
+                "date_fin": (presta_context["now"] + timedelta(hours=2)).isoformat(),
+            },
+        )
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        by_name = {row["name"]: row for row in response.data["results"]}
+        assert by_name["Tente"]["stock_available"] == 3
+
+    @pytest.mark.django_db
+    def test_list_can_exclude_the_reservation_being_edited(
+        self, factory, user, categorie, presta_context
+    ):
+        """`?exclude_reservation=` rend à l'édition ses propres quantités."""
+
+        part = Part.objects.create(name="Tente", category=categorie)
+        RentableItem.objects.create(part=part, stock_total=10)
+        presta = self._prestation(presta_context, hours=4)
+        resa = self._reservation(presta_context, presta, part, 4)
+
+        request = factory.get(CATALOG_URL, {"exclude_reservation": str(resa.pk)})
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        by_name = {row["name"]: row for row in response.data["results"]}
+        assert by_name["Tente"]["stock_available"] == 10
+
+    @pytest.mark.django_db
+    def test_list_rejects_malformed_exclude_reservation_with_400(
+        self, factory, user, categorie
+    ):
+        Part.objects.create(name="Chaise", category=categorie)
+
+        request = factory.get(CATALOG_URL, {"exclude_reservation": "abc"})
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        assert response.status_code == 400

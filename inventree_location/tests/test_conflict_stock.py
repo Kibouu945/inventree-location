@@ -22,6 +22,7 @@ from inventree_location.conflicts import (
 )
 from inventree_location.models import (
     Groupe,
+    LignePrestation,
     LigneReservation,
     Manifestation,
     Prestation,
@@ -170,6 +171,66 @@ def test_partial_conflict_when_requesting_more_than_available(stock_setup):
     assert conflict["total_stock"] == 3
     assert conflict["available_quantity"] == 2
     assert conflict["missing_quantity"] == 1
+
+
+@pytest.mark.django_db
+def test_other_prestation_forecast_is_counted(stock_setup):
+    """Le prévisionnel d'une autre prestation engage le stock, sans réservation.
+
+    Sans cela, la détection de conflit et le catalogue annonçaient deux
+    disponibilités différentes pour le même article à la même date.
+    """
+
+    now = stock_setup["now"]
+    part = stock_setup["part"]
+    RentableItem.objects.filter(part=part).update(stock_total=5)
+
+    autre = Prestation.objects.create(
+        manifestation=stock_setup["prestation"].manifestation,
+        nom="Autre",
+        date_debut=now,
+        date_fin=now + timedelta(days=5),
+    )
+    LignePrestation.objects.create(prestation=autre, part=part, quantite=3)
+
+    candidate = _make_candidate(stock_setup, qty=2)
+
+    result = detect_reservation_conflicts(candidate)
+
+    # 1 réservé par la résa existante + 3 prévus par l'autre prestation.
+    assert result["has_conflict"] is True
+    conflict = result["conflicts"][0]
+    assert conflict["already_reserved_quantity"] == 4
+    assert conflict["available_quantity"] == 1
+
+    # La prestation qui retient le stock sans réservation est nommée.
+    par_nom = {
+        entry["prestation_nom"]: entry
+        for entry in conflict["conflicting_prestations"]
+    }
+    assert par_nom["Autre"]["quantite"] == 3
+    assert par_nom["Autre"]["origine"] == "prevision"
+    assert par_nom["Autre"]["reservation_numeros"] == []
+    assert par_nom["P"]["origine"] == "reservations"
+    assert par_nom["P"]["reservation_numeros"] == [stock_setup["existing"].numero]
+
+
+@pytest.mark.django_db
+def test_own_prestation_forecast_does_not_block_its_reservation(stock_setup):
+    """Une réservation ne se heurte pas au prévisionnel qu'elle matérialise."""
+
+    part = stock_setup["part"]
+    RentableItem.objects.filter(part=part).update(stock_total=5)
+    LignePrestation.objects.create(
+        prestation=stock_setup["prestation"], part=part, quantite=4
+    )
+
+    candidate = _make_candidate(stock_setup, qty=4)
+
+    result = detect_reservation_conflicts(candidate)
+
+    # Seule la réservation existante (1) est opposable, pas les 4 prévus.
+    assert result["has_conflict"] is False
 
 
 @pytest.mark.django_db

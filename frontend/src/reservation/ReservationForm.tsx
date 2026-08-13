@@ -584,6 +584,7 @@ export function ReservationForm({
             label='Ajouter un article'
             dateDebut={selectedPrestation?.date_debut}
             dateFin={selectedPrestation?.date_fin}
+            excludeReservationId={reservationId}
             onAdd={(ligne) =>
               form.setFieldValue(
                 'lignes',
