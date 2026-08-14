@@ -19,6 +19,7 @@ from inventree_location.models import (
     Reservation,
     StatutReservation,
 )
+from inventree_location.tests.factories import mettre_en_stock
 from inventree_location.stock import (
     compute_engaged_quantities,
     compute_engagement_details,
@@ -58,7 +59,8 @@ def _make_part(name, *, stock, virtual=False):
     from part.models import Part
 
     part = Part.objects.create(name=name)
-    RentableItem.objects.create(part=part, stock_total=stock, is_virtual=virtual)
+    RentableItem.objects.create(part=part, is_virtual=virtual)
+    mettre_en_stock(part, stock)
     return part
 
 

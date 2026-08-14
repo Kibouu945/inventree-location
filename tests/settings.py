@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "part",
+    "stock",
     "inventree_location",
 ]
 

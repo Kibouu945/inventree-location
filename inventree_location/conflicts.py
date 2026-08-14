@@ -151,22 +151,40 @@ def tension_level(occupation_rate: float) -> str:
 RESERVATION_DIRECT_LINK = "/api/plugin/inventree-location/reservations/{pk}/"
 
 
-def get_part_total_stock(part, rentable_item=None) -> int:
-    """Retourne le stock total disponible pour une Part.
+#: Statuts InvenTree dont le stock est réellement louable.
+#:
+#: InvenTree considère « disponibles » les statuts OK, Attention, Endommagé et
+#: Retourné (`StockStatusGroups.AVAILABLE_CODES`). Le métier est plus strict :
+#: « un objet endommagé sort du stock réellement disponible ; seules les
+#: réservations suivantes ne voient que le stock réellement bon » (ticket
+#: ramassage / SAV). On écarte donc Endommagé et Attention, en plus des
+#: statuts qu'InvenTree exclut déjà (Détruit, Rejeté, Perdu, Quarantaine).
+RENTAL_STOCK_STATUSES = (
+    10,  # OK
+    85,  # Retourné (rentré de chez un client, de nouveau louable)
+)
 
-    Priorité :
-    1. ``RentableItem.stock_total`` s'il existe ;
-    2. attributs natifs InvenTree (total_stock, in_stock, …) ;
-    3. 0 par défaut.
+
+def get_part_total_stock(part, rentable_item=None) -> int:
+    """Retourne le stock physique louable d'une Part, selon InvenTree.
+
+    InvenTree est la source de vérité du « combien en avons-nous » : le plugin
+    somme les `StockItem` réellement en stock (`IN_STOCK_FILTER` natif) dont le
+    statut est louable (cf. `RENTAL_STOCK_STATUSES`). Le plugin n'entretient
+    plus de compteur parallèle : `RentableItem` ne porte que ce qu'InvenTree ne
+    sait pas dire (louable, consommable, virtuel, caution, seuils).
+
+    Hors container InvenTree (suite pytest sans app `stock`), on retombe sur
+    les attributs de stock exposés par l'objet, puis sur 0.
+
+    `rentable_item` n'est plus lu ; le paramètre subsiste pour les appelants
+    qui l'ont déjà sous la main et éviteraient une requête.
     """
 
-    from .models import RentableItem
+    quantity = _rental_stock_quantity(part)
 
-    if rentable_item is None:
-        rentable_item = RentableItem.objects.filter(part=part).first()
-
-    if rentable_item is not None:
-        return rentable_item.stock_total
+    if quantity is not None:
+        return quantity
 
     for attr in ("total_stock", "in_stock", "stock", "quantity"):
         value = getattr(part, attr, None)
@@ -186,6 +204,31 @@ def get_part_total_stock(part, rentable_item=None) -> int:
             return 0
 
     return 0
+
+
+def _rental_stock_quantity(part):
+    """Somme des exemplaires louables d'une Part, ou None si `stock` est absent."""
+
+    from django.db.models import Sum
+
+    try:
+        from stock.models import StockItem
+    except ImportError:  # pragma: no cover - dépend de l'environnement
+        return None
+
+    queryset = StockItem.objects.filter(part=part, status__in=RENTAL_STOCK_STATUSES)
+
+    # `IN_STOCK_FILTER` porte la définition InvenTree de « physiquement en
+    # stock » (ni vendu, ni consommé, ni chez un client, quantité > 0). On s'y
+    # adosse plutôt que de la réécrire, qui dériverait à la première évolution.
+    in_stock_filter = getattr(StockItem, "IN_STOCK_FILTER", None)
+
+    if in_stock_filter is not None:
+        queryset = queryset.filter(in_stock_filter)
+
+    total = queryset.aggregate(total=Sum("quantity"))["total"] or 0
+
+    return int(total)
 
 
 def detect_reservation_conflicts(reservation) -> dict:

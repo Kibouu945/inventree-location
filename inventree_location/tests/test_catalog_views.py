@@ -27,6 +27,7 @@ from inventree_location.models import (
     Reservation,
     StatutReservation,
 )
+from inventree_location.tests.factories import mettre_en_stock
 from inventree_location.views import (
     CatalogPagination,
     CatalogPartDetailView,
@@ -361,7 +362,8 @@ class TestCatalogStockAvailable:
         self, factory, user, categorie, presta_context
     ):
         part = Part.objects.create(name="Tente", category=categorie)
-        RentableItem.objects.create(part=part, stock_total=10)
+        RentableItem.objects.create(part=part)
+        mettre_en_stock(part, 10)
         self._prestation(presta_context, hours=3, part=part, qty=6)
 
         request = factory.get(
@@ -383,7 +385,8 @@ class TestCatalogStockAvailable:
         self, factory, user, categorie, presta_context
     ):
         part = Part.objects.create(name="Table", category=categorie)
-        RentableItem.objects.create(part=part, stock_total=10)
+        RentableItem.objects.create(part=part)
+        mettre_en_stock(part, 10)
         self._prestation(presta_context, hours=3, part=part, qty=7)
 
         request = factory.get(CATALOG_URL)
@@ -436,7 +439,8 @@ class TestCatalogStockAvailable:
         """`?date_debut=&date_fin=` équivaut à ne pas filtrer (et non à un 500)."""
 
         part = Part.objects.create(name="Tabouret", category=categorie)
-        RentableItem.objects.create(part=part, stock_total=4)
+        RentableItem.objects.create(part=part)
+        mettre_en_stock(part, 4)
 
         request = factory.get(CATALOG_URL, {"date_debut": "", "date_fin": ""})
         force_authenticate(request, user=user)
@@ -452,7 +456,8 @@ class TestCatalogStockAvailable:
         self, factory, user, categorie, presta_context
     ):
         part = Part.objects.create(name="Barrière", category=categorie)
-        RentableItem.objects.create(part=part, stock_total=5)
+        RentableItem.objects.create(part=part)
+        mettre_en_stock(part, 5)
         self._prestation(presta_context, hours=3, part=part, qty=2)
 
         request = factory.get(
@@ -475,7 +480,8 @@ class TestCatalogStockAvailable:
         """Deux réservations du même article se partagent bien le stock."""
 
         part = Part.objects.create(name="Tente", category=categorie)
-        RentableItem.objects.create(part=part, stock_total=10)
+        RentableItem.objects.create(part=part)
+        mettre_en_stock(part, 10)
         presta = self._prestation(presta_context, hours=4)
         self._reservation(presta_context, presta, part, 4)
         self._reservation(presta_context, presta, part, 3)
@@ -501,7 +507,8 @@ class TestCatalogStockAvailable:
         """`?exclude_reservation=` rend à l'édition ses propres quantités."""
 
         part = Part.objects.create(name="Tente", category=categorie)
-        RentableItem.objects.create(part=part, stock_total=10)
+        RentableItem.objects.create(part=part)
+        mettre_en_stock(part, 10)
         presta = self._prestation(presta_context, hours=4)
         resa = self._reservation(presta_context, presta, part, 4)
 

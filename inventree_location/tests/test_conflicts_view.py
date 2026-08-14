@@ -7,6 +7,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from django.contrib.auth import get_user_model
 
 from inventree_location.models import Reservation
+from inventree_location.tests.factories import fixer_stock, mettre_en_stock
 from inventree_location.views import ConflictsListView
 
 from part.models import Part, PartCategory
@@ -112,7 +113,7 @@ class TestConflictsListView:
         from inventree_location.models import RentableItem
 
         part_id = setup_conflicts["first"].lignes.first().part_id
-        RentableItem.objects.filter(part_id=part_id).update(stock_total=10)
+        fixer_stock(Part.objects.get(pk=part_id), 10)
 
         request = factory.get("/plugin/inventree-location/conflicts/")
         force_authenticate(request, user=user)
@@ -131,7 +132,7 @@ class TestConflictsListView:
         from inventree_location.models import RentableItem
 
         part_id = setup_conflicts["first"].lignes.first().part_id
-        RentableItem.objects.filter(part_id=part_id).update(stock_total=1)
+        fixer_stock(Part.objects.get(pk=part_id), 1)
 
         request = factory.get("/plugin/inventree-location/conflicts/")
         force_authenticate(request, user=user)
@@ -158,7 +159,7 @@ class TestConflictsListView:
 
         first = setup_conflicts["first"]
         part_id = first.lignes.first().part_id
-        RentableItem.objects.filter(part_id=part_id).update(stock_total=2)
+        fixer_stock(Part.objects.get(pk=part_id), 2)
 
         # Seule `first` subsiste, face à une autre prestation qui prévoit 2.
         Resa.objects.filter(pk=setup_conflicts["second"].pk).delete()

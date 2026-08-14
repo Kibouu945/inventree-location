@@ -20,6 +20,7 @@ from inventree_location.conflicts import (
     detect_reservation_conflicts,
     reservation_has_conflicts,
 )
+from inventree_location.tests.factories import fixer_stock, mettre_en_stock
 from inventree_location.models import (
     Groupe,
     LignePrestation,
@@ -51,7 +52,7 @@ def gestionnaire(db):
 
 @pytest.fixture
 def stock_setup(db):
-    """Un part avec stock_total=1 et une réservation validée qui le réserve."""
+    """Un part avec 1 exemplaire en stock et une réservation validée."""
 
     user = User.objects.create_user(username="bob", password="pwd12345")
     groupe = Groupe.objects.create(nom="Jambville", code="JAM")
@@ -70,7 +71,8 @@ def stock_setup(db):
         date_fin=now + timedelta(days=5),
     )
     part = Part.objects.create(name="Tente")
-    RentableItem.objects.create(part=part, is_rentable=True, stock_total=1)
+    RentableItem.objects.create(part=part, is_rentable=True)
+    mettre_en_stock(part, 1)
 
     existing = Reservation.objects.create(
         prestation=prestation,
@@ -160,7 +162,7 @@ def test_total_conflict_when_stock_exhausted(stock_setup):
 def test_partial_conflict_when_requesting_more_than_available(stock_setup):
     """Stock 3, déjà réservé 1 : une demande de 3 dépasse le dispo (2)."""
 
-    RentableItem.objects.filter(part=stock_setup["part"]).update(stock_total=3)
+    fixer_stock(stock_setup["part"], 3)
 
     candidate = _make_candidate(stock_setup, qty=3)
 
@@ -183,7 +185,7 @@ def test_other_prestation_forecast_is_counted(stock_setup):
 
     now = stock_setup["now"]
     part = stock_setup["part"]
-    RentableItem.objects.filter(part=part).update(stock_total=5)
+    fixer_stock(part, 5)
 
     autre = Prestation.objects.create(
         manifestation=stock_setup["prestation"].manifestation,
@@ -220,7 +222,7 @@ def test_own_prestation_forecast_does_not_block_its_reservation(stock_setup):
     """Une réservation ne se heurte pas au prévisionnel qu'elle matérialise."""
 
     part = stock_setup["part"]
-    RentableItem.objects.filter(part=part).update(stock_total=5)
+    fixer_stock(part, 5)
     LignePrestation.objects.create(
         prestation=stock_setup["prestation"], part=part, quantite=4
     )
@@ -240,7 +242,7 @@ def test_virtual_item_is_ignored(stock_setup):
     now = stock_setup["now"]
     virtual_part = Part.objects.create(name="Nettoyage")
     RentableItem.objects.create(
-        part=virtual_part, is_rentable=True, is_virtual=True, stock_total=0
+        part=virtual_part, is_rentable=True, is_virtual=True
     )
     candidate = Reservation.objects.create(
         prestation=stock_setup["prestation"],

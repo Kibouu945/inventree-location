@@ -403,7 +403,12 @@ class ReservationSerializer(serializers.ModelSerializer):
 
 
 class RentableItemSerializer(serializers.ModelSerializer):
-    """Drapeaux location d'un Part."""
+    """Drapeaux location d'un Part.
+
+    Le stock physique n'y figure pas : il appartient à InvenTree et se met à
+    jour par les `StockItem`, pas par ce formulaire. `stock_total` reste
+    exposé en lecture par `CatalogPartSerializer`, calculé depuis InvenTree.
+    """
 
     class Meta:
         """Configuration du serializer RentableItem."""
@@ -414,7 +419,6 @@ class RentableItemSerializer(serializers.ModelSerializer):
             "is_rentable",
             "consommable",
             "is_virtual",
-            "stock_total",
             "caution",
             "valeur_remplacement",
             "seuil_alerte_bas",
@@ -654,13 +658,11 @@ class CatalogPartSerializer(serializers.Serializer):
         return bool(rentable_info.is_virtual)
 
     def get_stock_total(self, obj):
-        """Stock total louable issu de RentableItem (0 par défaut)."""
-        rentable_info = getattr(obj, "rentable_info", None)
+        """Stock physique louable, tel qu'InvenTree le connaît."""
 
-        if rentable_info is None:
-            return 0
+        from .conflicts import get_part_total_stock
 
-        return rentable_info.stock_total
+        return get_part_total_stock(obj)
 
     def get_seuil_alerte_bas(self, obj):
         """Seuil bas configurable du part (null par défaut)."""
