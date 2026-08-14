@@ -312,7 +312,8 @@ class TestCatalogStockAvailable:
 
     @pytest.fixture
     def presta_context(self, db):
-        now = timezone.now().replace(hour=8, minute=0, second=0, microsecond=0)
+        # Heure locale : cf. la fixture `base` de test_stock.py.
+        now = timezone.localtime().replace(hour=8, minute=0, second=0, microsecond=0)
         user = User.objects.create_user(username="carla", password="pwd12345")
         groupe = Groupe.objects.create(nom="Jambville", code="JAM")
         manifestation = Manifestation.objects.create(

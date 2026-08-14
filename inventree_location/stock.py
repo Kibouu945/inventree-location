@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+from django.utils import timezone
+
 from .conflicts import CONFLICT_STATUSES, get_part_total_stock
 
 
@@ -300,9 +302,12 @@ def compute_parts_availability(
     on veut « combien de X reste-t-il de disponible pour telle période ? »
     sans avoir à demander une quantité précise au préalable.
 
-    Sans période fournie, on utilise la journée courante (disponibilité
-    « à l'instant »). Les articles virtuels (pas de stock physique) sont
-    absents du résultat — l'appelant doit les traiter à part.
+    Sans période fournie, on utilise la journée courante **du fuseau métier**
+    (`timezone.localdate()`, cf. INVENTREE_TIMEZONE) : `date.today()` suivait
+    le fuseau du processus, si bien qu'entre minuit UTC et minuit local la
+    disponibilité « du jour » portait sur la veille ou le lendemain. Les
+    articles virtuels (pas de stock physique) sont absents du résultat —
+    l'appelant doit les traiter à part.
 
     `exclude_reservation_id` sert à l'édition d'une réservation existante :
     sans lui, ses propres quantités se compteraient contre elle.
@@ -314,7 +319,7 @@ def compute_parts_availability(
         return {}
 
     if date_debut is None or date_fin is None:
-        today = date.today()
+        today = timezone.localdate()
         date_debut = date_debut or today
         date_fin = date_fin or today
 

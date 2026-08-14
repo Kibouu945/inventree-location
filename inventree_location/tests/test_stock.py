@@ -33,7 +33,9 @@ User = get_user_model()
 
 @pytest.fixture
 def base(db):
-    now = timezone.now().replace(hour=8, minute=0, second=0, microsecond=0)
+    # Heure locale, pas UTC : la disponibilité « du jour » se calcule dans le
+    # fuseau métier, et une fixture en UTC désignait la veille en soirée.
+    now = timezone.localtime().replace(hour=8, minute=0, second=0, microsecond=0)
     user = User.objects.create_user(username="bob", password="pwd12345")
     groupe = Groupe.objects.create(nom="Jambville", code="JAM")
     manifestation = Manifestation.objects.create(
