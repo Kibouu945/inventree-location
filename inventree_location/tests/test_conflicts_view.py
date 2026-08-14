@@ -33,6 +33,8 @@ def user(db):
 
 @pytest.fixture
 def setup_conflicts(db):
+    """Stock 0 et deux réservations d'1 : pénurie réelle (CON-01)."""
+
     from inventree_location.models import (
         Prestation,
         Manifestation,
@@ -96,3 +98,84 @@ class TestConflictsListView:
         assert len(response.data) == 1
         assert response.data[0]["id"] == setup_conflicts["first"].pk
         assert response.data[0]["conflict_count"] == 1
+
+    @pytest.mark.django_db
+    def test_overlap_without_shortage_is_not_a_conflict(
+        self, factory, user, setup_conflicts
+    ):
+        """CON-01 : le conflit se mesure aux quantités, pas au chevauchement.
+
+        Les deux réservations chevauchantes demandent 1 chacune ; avec 10 en
+        stock elles cohabitent sans se gêner.
+        """
+
+        from inventree_location.models import RentableItem
+
+        part_id = setup_conflicts["first"].lignes.first().part_id
+        RentableItem.objects.filter(part_id=part_id).update(stock_total=10)
+
+        request = factory.get("/plugin/inventree-location/conflicts/")
+        force_authenticate(request, user=user)
+
+        response = ConflictsListView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data == []
+
+    @pytest.mark.django_db
+    def test_shortage_details_the_missing_article(
+        self, factory, user, setup_conflicts
+    ):
+        """Le groupe dit quel article manque et de combien."""
+
+        from inventree_location.models import RentableItem
+
+        part_id = setup_conflicts["first"].lignes.first().part_id
+        RentableItem.objects.filter(part_id=part_id).update(stock_total=1)
+
+        request = factory.get("/plugin/inventree-location/conflicts/")
+        force_authenticate(request, user=user)
+
+        response = ConflictsListView.as_view()(request)
+
+        # Stock 1, chacune en demande 1 : il en manque 1.
+        assert len(response.data) == 1
+        assert response.data[0]["shortages"] == [
+            {"part_id": part_id, "part_name": "Part 1", "missing_quantity": 1}
+        ]
+
+    @pytest.mark.django_db
+    def test_prestation_forecast_alone_raises_a_conflict(
+        self, factory, user, setup_conflicts
+    ):
+        """Une pénurie peut venir du prévisionnel, sans réservation en face."""
+
+        from inventree_location.models import (
+            LignePrestation,
+            RentableItem,
+            Reservation as Resa,
+        )
+
+        first = setup_conflicts["first"]
+        part_id = first.lignes.first().part_id
+        RentableItem.objects.filter(part_id=part_id).update(stock_total=2)
+
+        # Seule `first` subsiste, face à une autre prestation qui prévoit 2.
+        Resa.objects.filter(pk=setup_conflicts["second"].pk).delete()
+
+        autre = first.prestation.manifestation.prestations.create(
+            nom="Autre prestation",
+            date_debut=first.prestation.date_debut,
+            date_fin=first.prestation.date_fin,
+        )
+        LignePrestation.objects.create(prestation=autre, part_id=part_id, quantite=2)
+
+        request = factory.get("/plugin/inventree-location/conflicts/")
+        force_authenticate(request, user=user)
+
+        response = ConflictsListView.as_view()(request)
+
+        assert len(response.data) == 1
+        assert response.data[0]["id"] == first.pk
+        assert response.data[0]["conflict_count"] == 0
+        assert response.data[0]["shortages"][0]["missing_quantity"] == 1

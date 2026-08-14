@@ -297,12 +297,21 @@ def reservation_has_conflicts(reservation) -> bool:
 
 
 def list_current_conflicts() -> List[dict]:
-    """Liste les réservations actuellement en conflit, regroupées.
+    """Liste les réservations actuellement en pénurie de stock, regroupées.
 
-    Chaque entrée représente un *groupe* de conflit : une réservation et
-    l'ensemble des réservations qui la chevauchent sur un même article. Les
+    Un conflit n'est **pas** un simple chevauchement : deux réservations
+    peuvent porter le même article aux mêmes dates sans se gêner tant que le
+    stock suffit (4 + 3 sur 10 en stock n'est pas un conflit). Ce sont les
+    quantités qui décident, via `detect_reservation_conflicts` — le même
+    moteur que le garde-fou de validation, pour que le widget et le formulaire
+    ne se contredisent pas.
+
+    Chaque entrée représente un *groupe* : une réservation en pénurie et les
+    réservations qui se partagent avec elle l'article manquant. Les
     réservations déjà rattachées à un groupe ne réapparaissent pas comme
-    entrées distinctes.
+    entrées distinctes. `shortages` détaille les articles en cause et la
+    quantité manquante ; une pénurie peut venir du seul prévisionnel d'une
+    prestation, auquel cas `conflict_count` vaut 0.
     """
 
     from .models import Reservation
@@ -325,24 +334,25 @@ def list_current_conflicts() -> List[dict]:
         if reservation.pk in processed_ids:
             continue
 
-        conflicting_ids = set()
+        result = detect_reservation_conflicts(reservation)
 
-        for ligne in reservation.lignes.all():
-            conflicts = compute_conflicts(
-                ligne.part_id,
-                ligne.quantite_demandee,
-                reservation.date_retrait_prevue,
-                reservation.date_retour_prevue,
-                exclude_resa_id=reservation.pk,
-            )
-
-            conflicting_ids.update(
-                conflict.pk for conflict in conflicts if conflict.pk != reservation.pk
-            )
-
-        if not conflicting_ids:
+        if not result["has_conflict"]:
             continue
 
+        conflicting_ids = set()
+        shortages = []
+
+        for conflict in result["conflicts"]:
+            conflicting_ids.update(
+                item["reservation_id"] for item in conflict["conflicting_reservations"]
+            )
+            shortages.append({
+                "part_id": conflict["part_id"],
+                "part_name": conflict["part_name"],
+                "missing_quantity": conflict["missing_quantity"],
+            })
+
+        conflicting_ids.discard(reservation.pk)
         processed_ids.update({reservation.pk, *conflicting_ids})
 
         payload.append({
@@ -357,6 +367,7 @@ def list_current_conflicts() -> List[dict]:
             ),
             "conflict_count": len(conflicting_ids),
             "conflicting_reservation_ids": sorted(conflicting_ids),
+            "shortages": shortages,
         })
 
     return payload
