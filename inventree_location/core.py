@@ -241,6 +241,13 @@ class InvenTreeLocation(
                 "source": self.plugin_static_file(
                     "Catalog.js:renderInvenTreeLocationCatalog"
                 ),
+                # Seul widget à ne pas déclarer sa taille, il retombait sur la
+                # boîte par défaut : un tableau de 5 colonnes y tenait dans une
+                # colonne, illisible. Même gabarit que les autres écrans.
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
                 "context": {
                     "settings": self.get_settings_dict(),
                 },
