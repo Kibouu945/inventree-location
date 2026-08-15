@@ -9,17 +9,21 @@ Pour un article donné :
 
     disponible = stock total louable − quantités déjà engagées
 
-où « déjà engagées » est la somme des quantités des lignes d'**autres**
-prestations dont la plage `[date_debut, date_fin]` (ramenée au jour) chevauche
-celle examinée. Les articles virtuels (services, ex. « nettoyage ») n'ont pas de
-stock physique et sont ignorés.
+où « déjà engagées » couvre les **deux** façons dont le matériel est retenu sur
+une période : le prévisionnel porté par les lignes de prestation (RES-09) et le
+réalisé porté par les lignes des réservations bloquantes (CON-04). Voir
+`compute_engaged_quantities` pour la règle de réconciliation entre les deux.
+Les articles virtuels (services, ex. « nettoyage ») n'ont pas de stock physique
+et sont ignorés.
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime
 
-from .conflicts import get_part_total_stock
+from django.utils import timezone
+
+from .conflicts import CONFLICT_STATUSES, get_part_total_stock
 
 
 def _as_date(value) -> date:
@@ -47,11 +51,175 @@ def day_ranges_overlap(start_a, end_a, start_b, end_b) -> bool:
     return _as_date(start_a) <= _as_date(end_b) and _as_date(end_a) >= _as_date(start_b)
 
 
+def compute_engagement_details(
+    part_ids,
+    date_debut,
+    date_fin,
+    *,
+    exclude_prestation_id=None,
+    exclude_reservation_id=None,
+) -> dict[int, list[dict]]:
+    """Détail, par article, des prestations qui l'engagent sur la période.
+
+    Même règle de réconciliation que `compute_engaged_quantities` (dont c'est
+    la version détaillée), mais on garde de quoi nommer le responsable d'une
+    pénurie : sans cela, un conflit causé par le seul prévisionnel d'une
+    prestation ne désignait rien à l'utilisateur.
+
+    Deux tables décrivent le même besoin matériel :
+
+    - `LignePrestation` — le **prévisionnel** : ce dont la prestation a besoin
+      (RES-09) ;
+    - `LigneReservation` — le **réalisé** : ce que les réservations au statut
+      bloquant (cf. `CONFLICT_STATUSES`) retiennent effectivement.
+
+    Les sommer double-compterait la réservation qui matérialise le
+    prévisionnel de sa propre prestation ; n'en lire qu'une seule rendait
+    invisible la moitié des engagements — c'est ce qui faussait la répartition
+    d'un même article entre plusieurs réservations. On retient donc, **par
+    prestation et par article**, le plus grand des deux : le prévisionnel tient
+    lieu de réservation tant qu'aucune n'est posée, et s'efface dès que les
+    réservations le dépassent.
+
+    Exclusions :
+
+    - `exclude_prestation_id` : ignore tout ce qui appartient à cette
+      prestation (ses lignes **et** ses réservations) — une prestation ne se
+      concurrence pas elle-même.
+    - `exclude_reservation_id` : ignore cette réservation, ainsi que le
+      prévisionnel de sa prestation dont elle est justement la
+      matérialisation. Les **autres** réservations de la même prestation
+      restent comptées.
+
+    Retourne ``{part_id: [{"prestation_id", "prestation_nom", "quantite",
+    "origine", "reservation_numeros"}]}`` où ``origine`` vaut ``"prevision"``
+    ou ``"reservations"`` selon celle des deux qui l'emporte.
+    """
+
+    from .models import LignePrestation, LigneReservation, Reservation
+
+    part_ids = [int(pid) for pid in part_ids]
+
+    if not part_ids:
+        return {}
+
+    excluded_forecast_id = None
+
+    if exclude_reservation_id is not None:
+        excluded_forecast_id = (
+            Reservation.objects.filter(pk=exclude_reservation_id)
+            .values_list("prestation_id", flat=True)
+            .first()
+        )
+
+    # Quantités indexées par (prestation, article) : la réconciliation
+    # prévisionnel/réalisé se fait prestation par prestation.
+    forecast: dict[tuple[int, int], int] = {}
+    booked: dict[tuple[int, int], int] = {}
+    noms: dict[int, str] = {}
+    numeros: dict[tuple[int, int], list[str]] = {}
+
+    lignes_prestation = LignePrestation.objects.filter(
+        part_id__in=part_ids
+    ).select_related("prestation")
+
+    for excluded in (exclude_prestation_id, excluded_forecast_id):
+        if excluded is not None:
+            lignes_prestation = lignes_prestation.exclude(prestation_id=excluded)
+
+    for ligne in lignes_prestation:
+        prestation = ligne.prestation
+
+        if day_ranges_overlap(
+            date_debut, date_fin, prestation.date_debut, prestation.date_fin
+        ):
+            key = (prestation.pk, ligne.part_id)
+            forecast[key] = forecast.get(key, 0) + ligne.quantite
+            noms[prestation.pk] = prestation.nom
+
+    lignes_reservation = LigneReservation.objects.filter(
+        part_id__in=part_ids,
+        reservation__statut__in=CONFLICT_STATUSES,
+        reservation__date_retrait_prevue__isnull=False,
+        reservation__date_retour_prevue__isnull=False,
+    ).select_related("reservation__prestation")
+
+    if exclude_prestation_id is not None:
+        lignes_reservation = lignes_reservation.exclude(
+            reservation__prestation_id=exclude_prestation_id
+        )
+
+    if exclude_reservation_id is not None:
+        lignes_reservation = lignes_reservation.exclude(
+            reservation_id=exclude_reservation_id
+        )
+
+    for ligne in lignes_reservation:
+        reservation = ligne.reservation
+
+        if day_ranges_overlap(
+            date_debut,
+            date_fin,
+            reservation.date_retrait_prevue,
+            reservation.date_retour_prevue,
+        ):
+            key = (reservation.prestation_id, ligne.part_id)
+            booked[key] = booked.get(key, 0) + ligne.quantite_demandee
+            noms[reservation.prestation_id] = reservation.prestation.nom
+            numeros.setdefault(key, []).append(reservation.numero)
+
+    details: dict[int, list[dict]] = {}
+
+    for key in sorted(set(forecast) | set(booked)):
+        prestation_id, part_id = key
+        prevu = forecast.get(key, 0)
+        reserve = booked.get(key, 0)
+
+        details.setdefault(part_id, []).append({
+            "prestation_id": prestation_id,
+            "prestation_nom": noms.get(prestation_id, ""),
+            "quantite": max(prevu, reserve),
+            "origine": "reservations" if reserve >= prevu else "prevision",
+            "reservation_numeros": sorted(numeros.get(key, [])),
+        })
+
+    return details
+
+
+def compute_engaged_quantities(
+    part_ids,
+    date_debut,
+    date_fin,
+    *,
+    exclude_prestation_id=None,
+    exclude_reservation_id=None,
+) -> dict[int, int]:
+    """Quantités déjà engagées par article sur la période, au jour entier.
+
+    Vue agrégée de `compute_engagement_details`, dont la docstring porte la
+    règle de réconciliation prévisionnel / réalisé et le sens des exclusions.
+    """
+
+    details = compute_engagement_details(
+        part_ids,
+        date_debut,
+        date_fin,
+        exclude_prestation_id=exclude_prestation_id,
+        exclude_reservation_id=exclude_reservation_id,
+    )
+
+    return {
+        part_id: sum(entry["quantite"] for entry in entries)
+        for part_id, entries in details.items()
+    }
+
+
 def compute_stock_availability(
     date_debut,
     date_fin,
     requested_lines,
     exclude_prestation_id=None,
+    exclude_reservation_id=None,
 ) -> dict:
     """Disponibilité au jour de chaque article demandé.
 
@@ -63,7 +231,7 @@ def compute_stock_availability(
 
     from part.models import Part
 
-    from .models import LignePrestation, RentableItem
+    from .models import RentableItem
 
     normalized = [
         {"part_id": int(line["part_id"]), "quantite": int(line["quantite"])}
@@ -78,25 +246,13 @@ def compute_stock_availability(
     }
     parts = {part.pk: part for part in Part.objects.filter(pk__in=part_ids)}
 
-    # Une seule requête pour toutes les lignes concurrentes, regroupées ensuite.
-    others = LignePrestation.objects.filter(part_id__in=part_ids).select_related(
-        "prestation"
+    reserved_by_part = compute_engaged_quantities(
+        part_ids,
+        date_debut,
+        date_fin,
+        exclude_prestation_id=exclude_prestation_id,
+        exclude_reservation_id=exclude_reservation_id,
     )
-
-    if exclude_prestation_id is not None:
-        others = others.exclude(prestation_id=exclude_prestation_id)
-
-    reserved_by_part: dict[int, int] = {}
-
-    for ligne in others:
-        prestation = ligne.prestation
-
-        if day_ranges_overlap(
-            date_debut, date_fin, prestation.date_debut, prestation.date_fin
-        ):
-            reserved_by_part[ligne.part_id] = (
-                reserved_by_part.get(ligne.part_id, 0) + ligne.quantite
-            )
 
     result_lines = []
     has_shortage = False
@@ -138,6 +294,7 @@ def compute_parts_availability(
     date_debut=None,
     date_fin=None,
     exclude_prestation_id=None,
+    exclude_reservation_id=None,
 ) -> dict[int, int]:
     """Disponibilité au jour d'un ensemble de parts, hors prestation existante.
 
@@ -145,9 +302,15 @@ def compute_parts_availability(
     on veut « combien de X reste-t-il de disponible pour telle période ? »
     sans avoir à demander une quantité précise au préalable.
 
-    Sans période fournie, on utilise la journée courante (disponibilité
-    « à l'instant »). Les articles virtuels (pas de stock physique) sont
-    absents du résultat — l'appelant doit les traiter à part.
+    Sans période fournie, on utilise la journée courante **du fuseau métier**
+    (`timezone.localdate()`, cf. INVENTREE_TIMEZONE) : `date.today()` suivait
+    le fuseau du processus, si bien qu'entre minuit UTC et minuit local la
+    disponibilité « du jour » portait sur la veille ou le lendemain. Les
+    articles virtuels (pas de stock physique) sont absents du résultat —
+    l'appelant doit les traiter à part.
+
+    `exclude_reservation_id` sert à l'édition d'une réservation existante :
+    sans lui, ses propres quantités se compteraient contre elle.
     """
 
     part_ids = [int(pid) for pid in part_ids]
@@ -156,7 +319,7 @@ def compute_parts_availability(
         return {}
 
     if date_debut is None or date_fin is None:
-        today = date.today()
+        today = timezone.localdate()
         date_debut = date_debut or today
         date_fin = date_fin or today
 
@@ -167,6 +330,7 @@ def compute_parts_availability(
         date_fin,
         requested_lines,
         exclude_prestation_id=exclude_prestation_id,
+        exclude_reservation_id=exclude_reservation_id,
     )
 
     return {line["part_id"]: line["available"] for line in result["lines"]}

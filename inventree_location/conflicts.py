@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 from typing import Iterable, List, Optional, Union
 
-from django.db.models import Sum
 from django.utils import timezone
 
 DateOrDateTime = Union[date, datetime]
@@ -141,151 +140,6 @@ def tension_level(occupation_rate: float) -> str:
     return "green"
 
 
-def compute_part_availability(
-    part,
-    requested_quantity: int,
-    start: DateOrDateTime,
-    end: DateOrDateTime,
-    *,
-    exclude_resa_id: Optional[int] = None,
-) -> dict:
-    """Calcule la disponibilité et la tension prévisionnelle d'un article."""
-
-    from .models import LigneReservation, RentableItem
-
-    rentable_item = RentableItem.objects.filter(part=part).first()
-
-    if rentable_item is not None and rentable_item.is_virtual:
-        return {
-            "is_virtual": True,
-            "total_stock": 0,
-            "already_reserved_quantity": 0,
-            "available_quantity": 0,
-            "missing_quantity": 0,
-            "has_conflict": False,
-            "occupation_rate": 0.0,
-            "tension_level": "green",
-            "conflicting_reservations": [],
-        }
-
-    total_stock = get_part_total_stock(part, rentable_item=rentable_item)
-    overlapping = compute_conflicts(
-        part.pk,
-        requested_quantity,
-        start,
-        end,
-        exclude_resa_id=exclude_resa_id,
-    )
-
-    reserved = (
-        LigneReservation.objects.filter(
-            part=part,
-            reservation__in=overlapping,
-        ).aggregate(total=Sum("quantite_demandee"))["total"]
-        or 0
-    )
-
-    available = total_stock - reserved
-    missing = max(requested_quantity - available, 0)
-    base = max(total_stock, 1)
-    occupation_rate = ((reserved + requested_quantity) / base) * 100
-
-    return {
-        "is_virtual": False,
-        "total_stock": total_stock,
-        "already_reserved_quantity": reserved,
-        "available_quantity": available,
-        "missing_quantity": missing,
-        "has_conflict": missing > 0,
-        "occupation_rate": occupation_rate,
-        "tension_level": tension_level(occupation_rate),
-        "conflicting_reservations": overlapping,
-    }
-
-
-def build_part_availability_histogram(
-    part,
-    *,
-    scale: str = "week",
-    anchor: Optional[DateOrDateTime] = None,
-    manifestation_id: Optional[int] = None,
-    lieu_id: Optional[int] = None,
-) -> dict:
-    """Construit un histogramme jour par jour de disponibilité pour un article."""
-
-    from .models import LigneReservation, RentableItem
-
-    horizon = {"week": 7, "month": 31, "quarter": 92}.get(scale, 7)
-    start_anchor = normalize_to_datetime(anchor or timezone.now())
-    start_day = datetime.combine(
-        start_anchor.date(),
-        time.min,
-        tzinfo=start_anchor.tzinfo,
-    )
-
-    rentable_item = RentableItem.objects.filter(part=part).first()
-    total_stock = get_part_total_stock(part, rentable_item=rentable_item)
-
-    rows = []
-
-    for offset in range(horizon):
-        day_start = start_day + timedelta(days=offset)
-        day_end = datetime.combine(
-            day_start.date(),
-            time.max,
-            tzinfo=day_start.tzinfo,
-        )
-
-        overlapping = compute_conflicts(
-            part.pk,
-            0,
-            day_start,
-            day_end,
-        )
-
-        if manifestation_id is not None:
-            overlapping = [
-                resa
-                for resa in overlapping
-                if resa.prestation.manifestation_id == manifestation_id
-            ]
-
-        if lieu_id is not None:
-            # ORG-01 : une prestation référence un lieu unique (Prestation.lieu),
-            # là où la relation était auparavant inverse (Lieu.prestation).
-            overlapping = [
-                resa for resa in overlapping if resa.prestation.lieu_id == lieu_id
-            ]
-
-        reserved = (
-            LigneReservation.objects.filter(
-                part=part,
-                reservation__in=overlapping,
-            ).aggregate(total=Sum("quantite_demandee"))["total"]
-            or 0
-        )
-
-        available = total_stock - reserved
-        occupation_rate = (reserved / max(total_stock, 1)) * 100
-
-        rows.append({
-            "date": day_start.date().isoformat(),
-            "total_quantity": total_stock,
-            "reserved_quantity": reserved,
-            "available_quantity": available,
-            "occupation_rate": occupation_rate,
-            "tension_level": tension_level(occupation_rate),
-            "reservation_numbers": [resa.numero for resa in overlapping],
-        })
-
-    return {
-        "part_id": part.pk,
-        "part_name": getattr(part, "name", str(part)),
-        "scale": scale,
-        "days": rows,
-    }
-
-
 # ---------------------------------------------------------------------------
 # Détection de conflits basée sur le stock (US-03 / SCRUM-76)
 #
@@ -297,22 +151,40 @@ def build_part_availability_histogram(
 RESERVATION_DIRECT_LINK = "/api/plugin/inventree-location/reservations/{pk}/"
 
 
-def get_part_total_stock(part, rentable_item=None) -> int:
-    """Retourne le stock total disponible pour une Part.
+#: Statuts InvenTree dont le stock est réellement louable.
+#:
+#: InvenTree considère « disponibles » les statuts OK, Attention, Endommagé et
+#: Retourné (`StockStatusGroups.AVAILABLE_CODES`). Le métier est plus strict :
+#: « un objet endommagé sort du stock réellement disponible ; seules les
+#: réservations suivantes ne voient que le stock réellement bon » (ticket
+#: ramassage / SAV). On écarte donc Endommagé et Attention, en plus des
+#: statuts qu'InvenTree exclut déjà (Détruit, Rejeté, Perdu, Quarantaine).
+RENTAL_STOCK_STATUSES = (
+    10,  # OK
+    85,  # Retourné (rentré de chez un client, de nouveau louable)
+)
 
-    Priorité :
-    1. ``RentableItem.stock_total`` s'il existe ;
-    2. attributs natifs InvenTree (total_stock, in_stock, …) ;
-    3. 0 par défaut.
+
+def get_part_total_stock(part, rentable_item=None) -> int:
+    """Retourne le stock physique louable d'une Part, selon InvenTree.
+
+    InvenTree est la source de vérité du « combien en avons-nous » : le plugin
+    somme les `StockItem` réellement en stock (`IN_STOCK_FILTER` natif) dont le
+    statut est louable (cf. `RENTAL_STOCK_STATUSES`). Le plugin n'entretient
+    plus de compteur parallèle : `RentableItem` ne porte que ce qu'InvenTree ne
+    sait pas dire (louable, consommable, virtuel, caution, seuils).
+
+    Hors container InvenTree (suite pytest sans app `stock`), on retombe sur
+    les attributs de stock exposés par l'objet, puis sur 0.
+
+    `rentable_item` n'est plus lu ; le paramètre subsiste pour les appelants
+    qui l'ont déjà sous la main et éviteraient une requête.
     """
 
-    from .models import RentableItem
+    quantity = _rental_stock_quantity(part)
 
-    if rentable_item is None:
-        rentable_item = RentableItem.objects.filter(part=part).first()
-
-    if rentable_item is not None:
-        return rentable_item.stock_total
+    if quantity is not None:
+        return quantity
 
     for attr in ("total_stock", "in_stock", "stock", "quantity"):
         value = getattr(part, attr, None)
@@ -334,6 +206,31 @@ def get_part_total_stock(part, rentable_item=None) -> int:
     return 0
 
 
+def _rental_stock_quantity(part):
+    """Somme des exemplaires louables d'une Part, ou None si `stock` est absent."""
+
+    from django.db.models import Sum
+
+    try:
+        from stock.models import StockItem
+    except ImportError:  # pragma: no cover - dépend de l'environnement
+        return None
+
+    queryset = StockItem.objects.filter(part=part, status__in=RENTAL_STOCK_STATUSES)
+
+    # `IN_STOCK_FILTER` porte la définition InvenTree de « physiquement en
+    # stock » (ni vendu, ni consommé, ni chez un client, quantité > 0). On s'y
+    # adosse plutôt que de la réécrire, qui dériverait à la première évolution.
+    in_stock_filter = getattr(StockItem, "IN_STOCK_FILTER", None)
+
+    if in_stock_filter is not None:
+        queryset = queryset.filter(in_stock_filter)
+
+    total = queryset.aggregate(total=Sum("quantity"))["total"] or 0
+
+    return int(total)
+
+
 def detect_reservation_conflicts(reservation) -> dict:
     """Détecte les conflits de stock d'une réservation, ligne par ligne.
 
@@ -348,9 +245,8 @@ def detect_reservation_conflicts(reservation) -> dict:
     Retourne ``{"has_conflict": bool, "reservation": pk, "conflicts": [...]}``.
     """
 
-    from django.db.models import Sum
-
-    from .models import LigneReservation, RentableItem
+    from .models import RentableItem
+    from .stock import compute_engagement_details
 
     empty = {"has_conflict": False, "reservation": reservation.pk, "conflicts": []}
 
@@ -385,14 +281,18 @@ def detect_reservation_conflicts(reservation) -> dict:
             exclude_resa_id=reservation.pk,
         )
 
-        reserved = (
-            LigneReservation.objects.filter(
-                part=part,
-                reservation__in=overlapping,
-            ).aggregate(total=Sum("quantite_demandee"))["total"]
-            or 0
-        )
+        # Même moteur d'engagement que le catalogue et la fiche prestation :
+        # sommer ici les seules lignes de réservation ignorait le prévisionnel
+        # des prestations et donnait deux disponibilités différentes pour un
+        # même article à la même date.
+        engagements = compute_engagement_details(
+            [part.pk],
+            start,
+            end,
+            exclude_reservation_id=reservation.pk,
+        ).get(part.pk, [])
 
+        reserved = sum(entry["quantite"] for entry in engagements)
         available = total_stock - reserved
 
         if requested > available:
@@ -415,6 +315,10 @@ def detect_reservation_conflicts(reservation) -> dict:
                     }
                     for resa in overlapping
                 ],
+                # Le stock peut être retenu par le seul prévisionnel d'une
+                # prestation, sans aucune réservation à montrer : sans ce
+                # détail, la pénurie n'aurait aucun responsable à désigner.
+                "conflicting_prestations": engagements,
                 "suggestions": [
                     f"Réduire la quantité demandée à {safe_available}.",
                     "Choisir une autre période de réservation.",
@@ -436,12 +340,21 @@ def reservation_has_conflicts(reservation) -> bool:
 
 
 def list_current_conflicts() -> List[dict]:
-    """Liste les réservations actuellement en conflit, regroupées.
+    """Liste les réservations actuellement en pénurie de stock, regroupées.
 
-    Chaque entrée représente un *groupe* de conflit : une réservation et
-    l'ensemble des réservations qui la chevauchent sur un même article. Les
+    Un conflit n'est **pas** un simple chevauchement : deux réservations
+    peuvent porter le même article aux mêmes dates sans se gêner tant que le
+    stock suffit (4 + 3 sur 10 en stock n'est pas un conflit). Ce sont les
+    quantités qui décident, via `detect_reservation_conflicts` — le même
+    moteur que le garde-fou de validation, pour que le widget et le formulaire
+    ne se contredisent pas.
+
+    Chaque entrée représente un *groupe* : une réservation en pénurie et les
+    réservations qui se partagent avec elle l'article manquant. Les
     réservations déjà rattachées à un groupe ne réapparaissent pas comme
-    entrées distinctes.
+    entrées distinctes. `shortages` détaille les articles en cause et la
+    quantité manquante ; une pénurie peut venir du seul prévisionnel d'une
+    prestation, auquel cas `conflict_count` vaut 0.
     """
 
     from .models import Reservation
@@ -464,24 +377,25 @@ def list_current_conflicts() -> List[dict]:
         if reservation.pk in processed_ids:
             continue
 
-        conflicting_ids = set()
+        result = detect_reservation_conflicts(reservation)
 
-        for ligne in reservation.lignes.all():
-            conflicts = compute_conflicts(
-                ligne.part_id,
-                ligne.quantite_demandee,
-                reservation.date_retrait_prevue,
-                reservation.date_retour_prevue,
-                exclude_resa_id=reservation.pk,
-            )
-
-            conflicting_ids.update(
-                conflict.pk for conflict in conflicts if conflict.pk != reservation.pk
-            )
-
-        if not conflicting_ids:
+        if not result["has_conflict"]:
             continue
 
+        conflicting_ids = set()
+        shortages = []
+
+        for conflict in result["conflicts"]:
+            conflicting_ids.update(
+                item["reservation_id"] for item in conflict["conflicting_reservations"]
+            )
+            shortages.append({
+                "part_id": conflict["part_id"],
+                "part_name": conflict["part_name"],
+                "missing_quantity": conflict["missing_quantity"],
+            })
+
+        conflicting_ids.discard(reservation.pk)
         processed_ids.update({reservation.pk, *conflicting_ids})
 
         payload.append({
@@ -496,6 +410,7 @@ def list_current_conflicts() -> List[dict]:
             ),
             "conflict_count": len(conflicting_ids),
             "conflicting_reservation_ids": sorted(conflicting_ids),
+            "shortages": shortages,
         })
 
     return payload

@@ -23,6 +23,7 @@ export function PartPicker({
   virtualOnly = false,
   dateDebut,
   dateFin,
+  excludeReservationId,
   onAdd
 }: {
   context: InvenTreePluginContext;
@@ -31,6 +32,11 @@ export function PartPicker({
   /** Période de la prestation ciblée : la disponibilité en tient compte. */
   dateDebut?: string | null;
   dateFin?: string | null;
+  /**
+   * Réservation en cours d'édition : ses propres quantités ne doivent pas
+   * être décomptées de ce qu'elle peut demander.
+   */
+  excludeReservationId?: number | null;
   onAdd: (ligne: LigneReservationLine) => void;
 }) {
   const [search, setSearch] = useState('');
@@ -48,7 +54,8 @@ export function PartPicker({
         debouncedSearch,
         virtualOnly,
         dateDebut,
-        dateFin
+        dateFin,
+        excludeReservationId
       ],
       queryFn: async () => {
         const response = await context.api.get(CATALOG_URL, {
@@ -62,6 +69,7 @@ export function PartPicker({
             virtual: virtualOnly ? 'true' : 'false',
             date_debut: dateDebut || undefined,
             date_fin: dateFin || undefined,
+            exclude_reservation: excludeReservationId ?? undefined,
             page_size: 20
           }
         });

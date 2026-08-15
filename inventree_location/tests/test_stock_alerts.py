@@ -16,6 +16,7 @@ from inventree_location.models import (
     RentableItem,
     Reservation,
 )
+from inventree_location.tests.factories import mettre_en_stock
 from inventree_location.views import StockAlertListView
 
 from part.models import Part, PartCategory
@@ -76,10 +77,11 @@ def alert_setup(db):
         part=part,
         is_rentable=True,
         consommable=True,
-        stock_total=100,
         seuil_alerte_bas=20,
         seuil_alerte_haut=95,
     )
+    # 100 en stock côté InvenTree : 95 réservés → 95 % de tension.
+    mettre_en_stock(part, 100)
 
     reservation = Reservation.objects.create(
         prestation=prestation,
@@ -94,6 +96,7 @@ def alert_setup(db):
         "manifestation": manifestation,
         "lieu": lieu,
         "part": part,
+        "reservation": reservation,
     }
 
 
@@ -151,3 +154,29 @@ def test_stock_alerts_notify_sends_email(manager, alert_setup, monkeypatch):
 
     assert response.status_code == status.HTTP_200_OK
     assert sent["count"] == 1
+
+
+@pytest.mark.django_db
+def test_virtual_article_never_raises_a_stock_alert(manager, alert_setup):
+    """Un service n'a pas de stock physique : ni seuil, ni tension.
+
+    Sans ce filtre il remontait en tension à 200 % de « 0 louable(s) ».
+    """
+
+    service = Part.objects.create(name="Prestation nettoyage")
+    RentableItem.objects.create(
+        part=service,
+        is_rentable=True,
+        is_virtual=True,
+        seuil_alerte_haut=1,
+    )
+    alert_setup["reservation"].lignes.create(part=service, quantite_demandee=2)
+
+    factory = APIRequestFactory()
+    request = factory.get("/plugin/inventree-location/alerts/stock/")
+    force_authenticate(request, user=manager)
+
+    response = StockAlertListView.as_view()(request)
+
+    part_ids = [alert["part_id"] for alert in response.data["alerts"]]
+    assert service.pk not in part_ids

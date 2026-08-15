@@ -15,6 +15,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from inventree_location.tests.factories import mettre_en_stock
 from inventree_location.models import (
     Groupe,
     LignePrestation,
@@ -84,7 +85,8 @@ def _make_part(name, *, stock=0, virtual=False):
     from part.models import Part
 
     part = Part.objects.create(name=name)
-    RentableItem.objects.create(part=part, stock_total=stock, is_virtual=virtual)
+    RentableItem.objects.create(part=part, is_virtual=virtual)
+    mettre_en_stock(part, stock)
     return part
 
 

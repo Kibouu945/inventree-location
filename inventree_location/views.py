@@ -18,6 +18,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .conflicts import (
+    CONFLICT_STATUSES,
     detect_reservation_conflicts,
     list_current_conflicts,
 )
@@ -455,47 +456,63 @@ class StockAlertListView(APIView):
 
             scope_ids = set(scoped_lines.values_list("part_id", flat=True))
 
-        rentable_items = RentableItem.objects.select_related("part").all()
+        # Les articles virtuels (services, ex. « nettoyage ») n'ont pas de stock
+        # physique : ni seuil, ni tension n'ont de sens pour eux. Sans ce filtre
+        # ils remontaient en alerte à 200 % de « 0 louable(s) ».
+        rentable_items = (
+            RentableItem.objects.select_related("part").filter(is_virtual=False).all()
+        )
 
         if scope_ids is not None:
             rentable_items = rentable_items.filter(part_id__in=scope_ids)
 
+        from .conflicts import get_part_total_stock
+        from .stock import compute_parts_availability
+
+        rentable_items = list(rentable_items)
         alerts = []
         now = timezone.now()
 
+        # Une seule passe pour la disponibilité du jour de tous les articles.
+        availability = compute_parts_availability([
+            rentable.part_id for rentable in rentable_items
+        ])
+
         for rentable in rentable_items:
             part = rentable.part
-            stock_available = self._safe_stock_available(part)
+            # Deux grandeurs distinctes, une seule source : ce qu'on possède de
+            # louable (InvenTree) et ce qu'il en reste de libre aujourd'hui.
+            stock_total = get_part_total_stock(part, rentable_item=rentable)
+            stock_available = availability.get(part.pk, stock_total)
             low = rentable.seuil_alerte_bas
             high = rentable.seuil_alerte_haut
 
             part_reasons = []
 
-            # Les messages nomment la grandeur comparée : les seuils portent sur
-            # le stock physique InvenTree, la tension sur la quantité louable.
-            # Sans le préciser, l'utilisateur voit deux nombres sans savoir
-            # lequel est lequel.
-            if rentable.consommable and low is not None and stock_available <= low:
+            # Les seuils portent sur ce qu'on possède, pas sur ce qui est libre
+            # à l'instant : réapprovisionner se décide sur le parc, pas sur le
+            # calendrier des réservations.
+            if rentable.consommable and low is not None and stock_total <= low:
                 part_reasons.append({
                     "type": "low_threshold",
                     "message": (
-                        f"Stock physique trop bas : {stock_available} en stock, "
+                        f"Stock trop bas : {stock_total} en stock, "
                         f"seuil bas fixé à {low}"
                     ),
                 })
 
-            if high is not None and stock_available >= high:
+            if high is not None and stock_total >= high:
                 part_reasons.append({
                     "type": "high_threshold",
                     "message": (
-                        f"Stock physique au-dessus du seuil haut : "
-                        f"{stock_available} en stock, seuil haut fixé à {high}"
+                        f"Stock au-dessus du seuil haut : "
+                        f"{stock_total} en stock, seuil haut fixé à {high}"
                     ),
                 })
 
             projected = self._projected_tension(
                 part_id=part.pk,
-                total_stock=max(int(rentable.stock_total or 0), 1),
+                total_stock=max(stock_total, 1),
                 now=now,
                 manifestation_id=manifestation_id,
                 lieu_id=lieu_id,
@@ -507,7 +524,7 @@ class StockAlertListView(APIView):
                     "message": (
                         f"Tension projetée {projected['occupation_rate']:.1f} % : "
                         f"{projected['reserved_quantity']} réservé(s) sur "
-                        f"{int(rentable.stock_total or 0)} louable(s), "
+                        f"{stock_total} louable(s), "
                         f"alerte au-delà de 90 %"
                     ),
                 })
@@ -520,7 +537,7 @@ class StockAlertListView(APIView):
                 "part_name": getattr(part, "name", str(part)),
                 "consommable": rentable.consommable,
                 "stock_available": stock_available,
-                "stock_total": int(rentable.stock_total or 0),
+                "stock_total": stock_total,
                 "seuil_alerte_bas": low,
                 "seuil_alerte_haut": high,
                 "projected_reserved_quantity": projected["reserved_quantity"],
@@ -538,14 +555,7 @@ class StockAlertListView(APIView):
         end = now + timedelta(days=30)
         lines = LigneReservation.objects.filter(
             part_id=part_id,
-            reservation__statut__in={
-                "confirmée",
-                "livrée",
-                "retournée",
-                "validee",
-                "livree",
-                "retournee",
-            },
+            reservation__statut__in=CONFLICT_STATUSES,
             reservation__date_retrait_prevue__lte=end,
             reservation__date_retour_prevue__gte=now,
         )
@@ -565,17 +575,6 @@ class StockAlertListView(APIView):
             "reserved_quantity": int(reserved),
             "occupation_rate": float(occupation),
         }
-
-    def _safe_stock_available(self, part):
-        for attr in ("stock_available", "available_stock", "in_stock", "total_stock"):
-            value = getattr(part, attr, None)
-            if value is not None:
-                try:
-                    return int(value)
-                except (TypeError, ValueError):
-                    continue
-
-        return 0
 
     def _send_alert_email(self, alerts):
         cache_key = "inventree_location_stock_alert_email_last_sent"
@@ -638,19 +637,43 @@ def parse_optional_date_param(request, name):
         }) from None
 
 
-def annotate_stock_available(parts, date_debut=None, date_fin=None):
+def parse_optional_int_param(request, name):
+    """Lit un paramètre entier optionnel de la query string (None si absent)."""
+
+    raw = request.query_params.get(name)
+
+    if raw is None or not str(raw).strip():
+        return None
+
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise ValidationError({
+            name: "Identifiant invalide : entier attendu."
+        }) from None
+
+
+def annotate_stock_available(
+    parts, date_debut=None, date_fin=None, exclude_reservation_id=None
+):
     """Attache `.stock_available` à chaque Part pour la sérialisation catalogue.
 
     Sans `date_debut`/`date_fin`, la disponibilité est calculée pour la
     journée courante (CAT-04). Les articles virtuels (services) restent à
     `None`, exposés en 0 par le sérialiseur.
+
+    `exclude_reservation_id` sert à l'édition d'une réservation : ses propres
+    quantités ne doivent pas être décomptées de ce qu'elle peut demander.
     """
 
     from .stock import compute_parts_availability
 
     parts = list(parts)
     availability = compute_parts_availability(
-        [part.pk for part in parts], date_debut, date_fin
+        [part.pk for part in parts],
+        date_debut,
+        date_fin,
+        exclude_reservation_id=exclude_reservation_id,
     )
 
     for part in parts:
@@ -713,6 +736,7 @@ class CatalogPartListView(APIView):
             page,
             parse_optional_date_param(request, "date_debut"),
             parse_optional_date_param(request, "date_fin"),
+            parse_optional_int_param(request, "exclude_reservation"),
         )
 
         serializer = self.serializer_class(page, many=True)
@@ -825,6 +849,7 @@ class CatalogPartDetailView(APIView):
             [part],
             parse_optional_date_param(request, "date_debut"),
             parse_optional_date_param(request, "date_fin"),
+            parse_optional_int_param(request, "exclude_reservation"),
         )
 
         serializer = self.serializer_class(part)
@@ -860,15 +885,24 @@ class RentableFlagBulkUpdateView(APIView):
         if "is_virtual" in request.data:
             defaults["is_virtual"] = bool(request.data.get("is_virtual"))
 
+        # Le stock ne se règle pas ici : il appartient à InvenTree et se met à
+        # jour par les StockItem (cf. conflicts.get_part_total_stock).
         if "stock_total" in request.data:
-            defaults["stock_total"] = int(request.data.get("stock_total"))
+            return Response(
+                {
+                    "stock_total": (
+                        "Le stock est celui d'InvenTree : mettez l'article en "
+                        "stock (StockItem) plutôt que de saisir une quantité ici."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if not defaults:
             return Response(
                 {
                     "detail": (
-                        "Fournir au moins is_rentable, consommable, "
-                        "is_virtual ou stock_total."
+                        "Fournir au moins is_rentable, consommable ou is_virtual."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -916,7 +950,6 @@ class RentablePartDetailView(APIView):
                     "is_rentable": True,
                     "consommable": False,
                     "is_virtual": False,
-                    "stock_total": 0,
                     "caution": None,
                     "valeur_remplacement": None,
                     "seuil_alerte_bas": None,

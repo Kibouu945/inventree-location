@@ -20,8 +20,10 @@ from inventree_location.conflicts import (
     detect_reservation_conflicts,
     reservation_has_conflicts,
 )
+from inventree_location.tests.factories import fixer_stock, mettre_en_stock
 from inventree_location.models import (
     Groupe,
+    LignePrestation,
     LigneReservation,
     Manifestation,
     Prestation,
@@ -50,7 +52,7 @@ def gestionnaire(db):
 
 @pytest.fixture
 def stock_setup(db):
-    """Un part avec stock_total=1 et une réservation validée qui le réserve."""
+    """Un part avec 1 exemplaire en stock et une réservation validée."""
 
     user = User.objects.create_user(username="bob", password="pwd12345")
     groupe = Groupe.objects.create(nom="Jambville", code="JAM")
@@ -69,7 +71,8 @@ def stock_setup(db):
         date_fin=now + timedelta(days=5),
     )
     part = Part.objects.create(name="Tente")
-    RentableItem.objects.create(part=part, is_rentable=True, stock_total=1)
+    RentableItem.objects.create(part=part, is_rentable=True)
+    mettre_en_stock(part, 1)
 
     existing = Reservation.objects.create(
         prestation=prestation,
@@ -159,7 +162,7 @@ def test_total_conflict_when_stock_exhausted(stock_setup):
 def test_partial_conflict_when_requesting_more_than_available(stock_setup):
     """Stock 3, déjà réservé 1 : une demande de 3 dépasse le dispo (2)."""
 
-    RentableItem.objects.filter(part=stock_setup["part"]).update(stock_total=3)
+    fixer_stock(stock_setup["part"], 3)
 
     candidate = _make_candidate(stock_setup, qty=3)
 
@@ -173,13 +176,73 @@ def test_partial_conflict_when_requesting_more_than_available(stock_setup):
 
 
 @pytest.mark.django_db
+def test_other_prestation_forecast_is_counted(stock_setup):
+    """Le prévisionnel d'une autre prestation engage le stock, sans réservation.
+
+    Sans cela, la détection de conflit et le catalogue annonçaient deux
+    disponibilités différentes pour le même article à la même date.
+    """
+
+    now = stock_setup["now"]
+    part = stock_setup["part"]
+    fixer_stock(part, 5)
+
+    autre = Prestation.objects.create(
+        manifestation=stock_setup["prestation"].manifestation,
+        nom="Autre",
+        date_debut=now,
+        date_fin=now + timedelta(days=5),
+    )
+    LignePrestation.objects.create(prestation=autre, part=part, quantite=3)
+
+    candidate = _make_candidate(stock_setup, qty=2)
+
+    result = detect_reservation_conflicts(candidate)
+
+    # 1 réservé par la résa existante + 3 prévus par l'autre prestation.
+    assert result["has_conflict"] is True
+    conflict = result["conflicts"][0]
+    assert conflict["already_reserved_quantity"] == 4
+    assert conflict["available_quantity"] == 1
+
+    # La prestation qui retient le stock sans réservation est nommée.
+    par_nom = {
+        entry["prestation_nom"]: entry
+        for entry in conflict["conflicting_prestations"]
+    }
+    assert par_nom["Autre"]["quantite"] == 3
+    assert par_nom["Autre"]["origine"] == "prevision"
+    assert par_nom["Autre"]["reservation_numeros"] == []
+    assert par_nom["P"]["origine"] == "reservations"
+    assert par_nom["P"]["reservation_numeros"] == [stock_setup["existing"].numero]
+
+
+@pytest.mark.django_db
+def test_own_prestation_forecast_does_not_block_its_reservation(stock_setup):
+    """Une réservation ne se heurte pas au prévisionnel qu'elle matérialise."""
+
+    part = stock_setup["part"]
+    fixer_stock(part, 5)
+    LignePrestation.objects.create(
+        prestation=stock_setup["prestation"], part=part, quantite=4
+    )
+
+    candidate = _make_candidate(stock_setup, qty=4)
+
+    result = detect_reservation_conflicts(candidate)
+
+    # Seule la réservation existante (1) est opposable, pas les 4 prévus.
+    assert result["has_conflict"] is False
+
+
+@pytest.mark.django_db
 def test_virtual_item_is_ignored(stock_setup):
     """Un article virtuel (service) n'entraîne jamais de conflit de stock."""
 
     now = stock_setup["now"]
     virtual_part = Part.objects.create(name="Nettoyage")
     RentableItem.objects.create(
-        part=virtual_part, is_rentable=True, is_virtual=True, stock_total=0
+        part=virtual_part, is_rentable=True, is_virtual=True
     )
     candidate = Reservation.objects.create(
         prestation=stock_setup["prestation"],
