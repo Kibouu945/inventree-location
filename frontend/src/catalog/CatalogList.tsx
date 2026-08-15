@@ -27,6 +27,7 @@ import {
   serializeFilters,
   totalPages
 } from './catalogParams';
+import { PartKindBadge } from './PartKindBadge';
 import type { CatalogPage } from './types';
 
 const CATALOG_URL = '/plugin/inventree-location/catalog/';
@@ -171,7 +172,9 @@ export function CatalogList({ context }: { context: InvenTreePluginContext }) {
               <Table.Th>Nom</Table.Th>
               <Table.Th>Référence</Table.Th>
               <Table.Th>Catégorie</Table.Th>
-              <Table.Th>Louable</Table.Th>
+              {/* La colonne dit la nature de l'article, pas seulement s'il est
+                  louable : service, consommable ou matériel. */}
+              <Table.Th>Nature</Table.Th>
               <Table.Th>Disponible aujourd'hui</Table.Th>
             </Table.Tr>
           </Table.Thead>
@@ -186,13 +189,11 @@ export function CatalogList({ context }: { context: InvenTreePluginContext }) {
                 <Table.Td>{part.IPN || '—'}</Table.Td>
                 <Table.Td>{part.category_name || '—'}</Table.Td>
                 <Table.Td>
-                  {part.consommable ? (
-                    <Badge color='orange'>Consommable</Badge>
-                  ) : part.rentable ? (
-                    <Badge color='green'>Louable</Badge>
-                  ) : (
-                    <Badge color='gray'>Non-louable</Badge>
-                  )}
+                  <PartKindBadge
+                    isVirtual={part.is_virtual}
+                    consommable={part.consommable}
+                    rentable={part.rentable}
+                  />
                 </Table.Td>
                 <Table.Td>
                   {part.is_virtual ? (
