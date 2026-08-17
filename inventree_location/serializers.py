@@ -19,6 +19,7 @@ from .models import (
     RentableItem,
     StatutReservation,
 )
+from .sav import get_real_available_stock
 
 
 def geocode_address(address):
@@ -72,6 +73,11 @@ class LigneReservationSerializer(serializers.ModelSerializer):
             "quantite_demandee",
             "quantite_livree",
             "quantite_retournee",
+            "quantite_ramassee",
+            "quantite_sav",
+            "quantite_detruite",
+            "quantite_manquante",
+            "facturer_client",
             "etat_retour",
             "commentaire",
         ]
@@ -452,6 +458,7 @@ class BonRamassageSerializer(RamassageSerializer):
 
         for ligne in obj.lignes.select_related("part").all():
             lignes.append({
+                "id": ligne.id,
                 "part": ligne.part_id,
                 "part_nom": ligne.part.name,
                 "quantite_demandee": ligne.quantite_demandee,
@@ -459,6 +466,11 @@ class BonRamassageSerializer(RamassageSerializer):
                 "quantite_a_ramasser": ligne.quantite_livree
                 or ligne.quantite_demandee,
                 "quantite_retournee": ligne.quantite_retournee,
+                "quantite_ramassee": ligne.quantite_ramassee,
+                "quantite_sav": ligne.quantite_sav,
+                "quantite_detruite": ligne.quantite_detruite,
+                "quantite_manquante": ligne.quantite_manquante,
+                "facturer_client": ligne.facturer_client,
                 "etat_retour": ligne.etat_retour,
                 "commentaire": ligne.commentaire,
             })
@@ -625,6 +637,7 @@ class CatalogPartSerializer(serializers.Serializer):
     category = serializers.IntegerField(source="category_id", read_only=True)
     category_name = serializers.CharField(source="category.name", read_only=True)
     stock_available = serializers.SerializerMethodField()
+    stock_reel_disponible = serializers.SerializerMethodField()
     image_url = serializers.SerializerMethodField()
     rentable = serializers.SerializerMethodField()
     consommable = serializers.SerializerMethodField()
@@ -645,18 +658,14 @@ class CatalogPartSerializer(serializers.Serializer):
             return None
 
     def get_stock_available(self, obj):
-        """Stock disponible de la Part, exposé à 0 si non renseigné."""
+        """Stock réellement disponible pour les réservations futures."""
 
-        for attr in ["stock_available", "available_stock"]:
-            value = getattr(obj, attr, None)
+        return get_real_available_stock(obj.id)
 
-            if value is not None:
-                try:
-                    return float(value)
-                except (ValueError, TypeError):
-                    return 0
+    def get_stock_reel_disponible(self, obj):
+        """Alias explicite pour SCRUM-112."""
 
-        return 0
+        return get_real_available_stock(obj.id)
 
     def get_image_url(self, obj):
         """URL de l'image principale si le modèle en expose une."""
@@ -703,7 +712,7 @@ class CatalogPartSerializer(serializers.Serializer):
         return bool(rentable_info.is_virtual)
 
     def get_stock_total(self, obj):
-        """Stock total louable issu de RentableItem."""
+        """Stock total théorique issu de RentableItem."""
 
         rentable_info = self._rentable_info(obj)
 

@@ -21,12 +21,20 @@ export interface RecapVehicule {
 }
 
 export interface LigneBonRamassage {
+  id: number;
   part: number;
   part_nom: string;
   quantite_demandee: number;
   quantite_livree: number;
   quantite_a_ramasser: number;
   quantite_retournee: number;
+
+  quantite_ramassee: number;
+  quantite_sav: number;
+  quantite_detruite: number;
+  quantite_manquante: number;
+  facturer_client: boolean;
+
   etat_retour: string;
   commentaire: string;
 }
@@ -56,4 +64,36 @@ export interface BonRamassageResponse {
     lignes: LigneBonRamassage[];
     commentaire: string;
   };
+}
+
+export interface RetourRamassageLignePayload {
+  ligne: number;
+  quantite_ramassee: number;
+  quantite_sav: number;
+  quantite_detruite: number;
+  quantite_manquante: number;
+  facturer_client: boolean;
+  commentaire: string;
+}
+
+export interface RetourRamassagePayload {
+  commentaire: string;
+  lignes: RetourRamassageLignePayload[];
+}
+
+export interface RetourRamassageResponse {
+  reservation: number;
+  numero: string;
+  statut: string;
+  updated_lines: Array<{
+    id: number;
+    part: number;
+    quantite_ramassee: number;
+    quantite_sav: number;
+    quantite_detruite: number;
+    quantite_manquante: number;
+    facturer_client: boolean;
+    etat_retour: string;
+  }>;
+  sav_tickets: number[];
 }
