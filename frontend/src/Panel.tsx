@@ -9,6 +9,7 @@ import {
   Button,
   Group,
   Loader,
+  NumberInput,
   Stack,
   Switch,
   Text,
@@ -18,17 +19,15 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
+import { canWriteCatalog } from './roles';
+
 interface RentableFlags {
   part: number;
   is_rentable: boolean;
   consommable: boolean;
-}
-
-const MANAGER_ROLES = ['admin', 'gestionnaire'];
-
-function userRoles(context: InvenTreePluginContext): string[] {
-  const groups = (context.user as { groups?: unknown })?.groups;
-  return Array.isArray(groups) ? groups.map((group) => String(group)) : [];
+  stock_total?: number;
+  seuil_alerte_bas?: number | null;
+  seuil_alerte_haut?: number | null;
 }
 
 /**
@@ -42,13 +41,7 @@ function InvenTreeLocationPanel({
 }) {
   const partId = useMemo(() => context.id ?? null, [context.id]);
 
-  const canManage = useMemo(() => {
-    const roles = userRoles(context);
-    return (
-      Boolean((context.user as { is_superuser?: boolean })?.is_superuser) ||
-      roles.some((role) => MANAGER_ROLES.includes(role))
-    );
-  }, [context]);
+  const canManage = useMemo(() => canWriteCatalog(context), [context]);
 
   const rentableUrl = `/plugin/inventree-location/catalog/${partId}/rentable/`;
 
@@ -138,6 +131,28 @@ function InvenTreeLocationPanel({
         onChange={(event) =>
           mutation.mutate({ consommable: event.currentTarget.checked })
         }
+      />
+
+      <NumberInput
+        label='Seuil d’alerte bas'
+        min={0}
+        value={flags?.seuil_alerte_bas ?? ''}
+        disabled={!canManage || mutation.isPending}
+        onChange={(value) => {
+          const numeric = typeof value === 'number' ? value : null;
+          mutation.mutate({ seuil_alerte_bas: numeric });
+        }}
+      />
+
+      <NumberInput
+        label='Seuil d’alerte haut'
+        min={0}
+        value={flags?.seuil_alerte_haut ?? ''}
+        disabled={!canManage || mutation.isPending}
+        onChange={(value) => {
+          const numeric = typeof value === 'number' ? value : null;
+          mutation.mutate({ seuil_alerte_haut: numeric });
+        }}
       />
 
       {!canManage && (

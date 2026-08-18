@@ -58,3 +58,15 @@ class ReservationPermission(RoleBasedPermission):
     """Lecture pour tous ; écriture pour admin / gestionnaire / organisateur."""
 
     write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR)
+
+
+class ManifestationPermission(RoleBasedPermission):
+    """Lecture pour tous ; gestion pour admin / gestionnaire / organisateur."""
+
+    write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR)
+
+
+class PrestationPermission(RoleBasedPermission):
+    """Lecture pour tous ; gestion pour admin / gestionnaire / organisateur."""
+
+    write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR)

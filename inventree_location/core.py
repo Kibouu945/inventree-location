@@ -10,7 +10,7 @@ from plugin.mixins import (
     UserInterfaceMixin,
 )
 
-from . import PLUGIN_VERSION
+from . import PLUGIN_VERSION, roles
 
 
 class InvenTreeLocation(
@@ -67,15 +67,28 @@ class InvenTreeLocation(
         from django.urls import path
 
         from .views import (
+            CatalogPartDetailView,
             CatalogPartListView,
+            ConflictsListView,
             ExampleView,
             GeocodeAddressView,
+            GroupeListView,
             LieuDetailView,
             LieuListCreateView,
+            ManifestationDetailView,
+            ManifestationListCreateView,
+            PrestationDetailView,
+            PrestationListCreateView,
+            PrestationStockPreviewView,
+            PrestationStockView,
             RentableFlagBulkUpdateView,
             RentablePartDetailView,
+            ReservationConflictCheckView,
             ReservationDetailView,
             ReservationListCreateView,
+            ReservationTransitionView,
+            StockAlertListView,
+            UserListView,
         )
 
         return [
@@ -88,6 +101,11 @@ class InvenTreeLocation(
                 "catalog/rentable/",
                 RentableFlagBulkUpdateView.as_view(),
                 name="catalog-rentable-bulk-update",
+            ),
+            path(
+                "catalog/<int:pk>/",
+                CatalogPartDetailView.as_view(),
+                name="catalog-part-detail",
             ),
             path(
                 "catalog/<int:pk>/rentable/",
@@ -103,6 +121,62 @@ class InvenTreeLocation(
                 "reservations/<int:pk>/",
                 ReservationDetailView.as_view(),
                 name="reservation-detail",
+            ),
+            path(
+                "reservations/<int:pk>/transition/",
+                ReservationTransitionView.as_view(),
+                name="reservation-transition",
+            ),
+            path("conflicts/", ConflictsListView.as_view(), name="conflict-list"),
+            path(
+                "reservations/<int:pk>/conflicts/",
+                ReservationConflictCheckView.as_view(),
+                name="reservation-conflict-check",
+            ),
+            path(
+                "manifestations/",
+                ManifestationListCreateView.as_view(),
+                name="manifestation-list-create",
+            ),
+            path(
+                "manifestations/<int:pk>/",
+                ManifestationDetailView.as_view(),
+                name="manifestation-detail",
+            ),
+            path(
+                "prestations/",
+                PrestationListCreateView.as_view(),
+                name="prestation-list-create",
+            ),
+            path(
+                "prestations/stock-preview/",
+                PrestationStockPreviewView.as_view(),
+                name="prestation-stock-preview",
+            ),
+            path(
+                "prestations/<int:pk>/",
+                PrestationDetailView.as_view(),
+                name="prestation-detail",
+            ),
+            path(
+                "prestations/<int:pk>/stock/",
+                PrestationStockView.as_view(),
+                name="prestation-stock",
+            ),
+            path(
+                "groupes/",
+                GroupeListView.as_view(),
+                name="groupe-list",
+            ),
+            path(
+                "users/",
+                UserListView.as_view(),
+                name="user-list",
+            ),
+            path(
+                "alerts/stock/",
+                StockAlertListView.as_view(),
+                name="stock-alert-list",
             ),
         ]
 
@@ -129,42 +203,137 @@ class InvenTreeLocation(
                 },
             })
 
+            panels.append({
+                "key": "inventree-location-part-detail",
+                "title": "Fiche location",
+                "description": "Fiche détail location de l'article",
+                "icon": "ti:file-description:outline",
+                "source": self.plugin_static_file(
+                    "PartDetail.js:renderInvenTreeLocationPartDetail"
+                ),
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
         return panels
 
     def get_ui_dashboard_items(self, request, context: dict, **kwargs):
         """Return a list of custom dashboard items to be rendered in the InvenTree user interface."""
 
-        if not request.user or not request.user.is_staff:
+        # Filtrage RBAC métier basé sur les 7 groupes (cf. roles.py)
+        visible_keys = roles.visible_dashboard_widget_keys(request.user)
+
+        if not visible_keys:
             return []
+
+        def visible(key):
+            return key in visible_keys
 
         items = []
 
-        items.append({
-            "key": "inventree-location-dashboard",
-            "title": "InvenTree Location Dashboard Item",
-            "description": "Custom dashboard item",
-            "icon": "ti:dashboard:outline",
-            "source": self.plugin_static_file(
-                "Dashboard.js:renderInvenTreeLocationDashboardItem"
-            ),
-            "context": {
-                "settings": self.get_settings_dict(),
-                "bar": "foo",
-            },
-        })
+        if visible("inventree-location-catalog"):
+            items.append({
+                "key": "inventree-location-catalog",
+                "title": "Catalogue du matériel",
+                "description": "Liste filtrable du matériel louable",
+                "icon": "ti:list-search:outline",
+                "source": self.plugin_static_file(
+                    "Catalog.js:renderInvenTreeLocationCatalog"
+                ),
+                # Seul widget à ne pas déclarer sa taille, il retombait sur la
+                # boîte par défaut : un tableau de 5 colonnes y tenait dans une
+                # colonne, illisible. Même gabarit que les autres écrans.
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
 
-        items.append({
-            "key": "inventree-location-catalog",
-            "title": "Catalogue du matériel",
-            "description": "Liste filtrable du matériel louable",
-            "icon": "ti:list-search:outline",
-            "source": self.plugin_static_file(
-                "Catalog.js:renderInvenTreeLocationCatalog"
-            ),
-            "context": {
-                "settings": self.get_settings_dict(),
-            },
-        })
+        if visible("inventree-location-organisation"):
+            items.append({
+                "key": "inventree-location-organisation",
+                "title": "Organisation",
+                "description": ("Gestion des manifestations, prestations et lieux"),
+                "icon": "ti:calendar-cog:outline",
+                "source": self.plugin_static_file(
+                    "Organisation.js:renderInvenTreeLocationOrganisation"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-reservations"):
+            items.append({
+                "key": "inventree-location-reservations",
+                "title": "Réservations",
+                "description": "Création et suivi des réservations de matériel",
+                "icon": "ti:calendar-event:outline",
+                "source": self.plugin_static_file(
+                    "Reservations.js:renderInvenTreeLocationReservations"
+                ),
+                # Liste dense (filtres + tableau + modale)
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-conflicts"):
+            conflicts_count = 0
+
+            try:
+                from .conflicts import count_current_conflicts
+
+                conflicts_count = count_current_conflicts()
+            except Exception:
+                conflicts_count = 0
+
+            items.append({
+                "key": "inventree-location-conflicts",
+                "title": f"Conflits actuels ({conflicts_count})",
+                "description": "Liste des réservations actuellement en conflit",
+                "icon": "ti:alert-triangle:outline",
+                "source": self.plugin_static_file(
+                    "Conflicts.js:renderInvenTreeLocationConflicts"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-stock-alerts"):
+            items.append({
+                "key": "inventree-location-stock-alerts",
+                "title": "Alertes stock",
+                "description": "Seuils bas/hauts et tension projetée",
+                "icon": "ti:bell-ringing:outline",
+                "source": self.plugin_static_file(
+                    "Dashboard.js:renderInvenTreeLocationDashboardItem"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 6,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
 
         return items
 

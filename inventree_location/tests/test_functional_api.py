@@ -183,6 +183,47 @@ def test_reservation_list_filter_by_statut(prestation):
     assert [row["id"] for row in response.data] == [validee.pk]
 
 
+def test_livreur_only_sees_validated_reservations(prestation):
+    # Un livreur pur ne voit que les réservations validées.
+    gestionnaire = User.objects.create_user(username="gest2", password="pwd12345")
+    for statut in ("brouillon", "soumise", "livree", "cloturee"):
+        Reservation.objects.create(
+            prestation=prestation,
+            demandeur=gestionnaire,
+            date_demande=timezone.now(),
+            statut=statut,
+        )
+    validee = Reservation.objects.create(
+        prestation=prestation,
+        demandeur=gestionnaire,
+        date_demande=timezone.now(),
+        statut="validee",
+    )
+
+    client, _ = client_for(roles.LIVREUR, username="livreur_view")
+    response = client.get(f"{BASE}/reservations/")
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row["id"] for row in response.data] == [validee.pk]
+
+
+def test_gestionnaire_sees_all_reservation_statuses(prestation):
+    # Contre-exemple : un rôle de gestion garde la visibilité totale.
+    client, user = client_for(roles.GESTIONNAIRE, username="gest3")
+    for statut in ("brouillon", "soumise", "validee", "livree"):
+        Reservation.objects.create(
+            prestation=prestation,
+            demandeur=user,
+            date_demande=timezone.now(),
+            statut=statut,
+        )
+
+    response = client.get(f"{BASE}/reservations/")
+
+    assert response.status_code == status.HTTP_200_OK
+    assert len(response.data) == 4
+
+
 def test_magasinier_cannot_create_reservation(prestation):
     client, user = client_for(roles.MAGASINIER, username="mag")
     payload = {
@@ -203,3 +244,43 @@ def test_superuser_can_write_without_role(prestation):
     }
     response = client.post(f"{BASE}/reservations/", payload, format="json")
     assert response.status_code == status.HTTP_201_CREATED
+
+
+def test_validated_reservation_not_editable(prestation):
+    client, user = client_for(roles.GESTIONNAIRE, username="gest_edit")
+    reservation = Reservation.objects.create(
+        prestation=prestation,
+        demandeur=user,
+        date_demande=timezone.now(),
+        statut="validee",
+    )
+    response = client.patch(
+        f"{BASE}/reservations/{reservation.pk}/",
+        {"commentaire": "modif"},
+        format="json",
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "detail" in response.data
+
+
+def test_only_brouillon_is_deletable(prestation):
+    client, user = client_for(roles.GESTIONNAIRE, username="gest_del")
+
+    validee = Reservation.objects.create(
+        prestation=prestation,
+        demandeur=user,
+        date_demande=timezone.now(),
+        statut="validee",
+    )
+    response = client.delete(f"{BASE}/reservations/{validee.pk}/")
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert Reservation.objects.filter(pk=validee.pk).exists()
+
+    brouillon = Reservation.objects.create(
+        prestation=prestation,
+        demandeur=user,
+        date_demande=timezone.now(),
+        statut="brouillon",
+    )
+    response = client.delete(f"{BASE}/reservations/{brouillon.pk}/")
+    assert response.status_code == status.HTTP_204_NO_CONTENT

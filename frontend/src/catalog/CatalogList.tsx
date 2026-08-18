@@ -17,26 +17,29 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
+import { ownsKeys, syncOwnedParams } from '../urlState';
 import {
   buildCatalogQuery,
+  CATALOG_URL_KEYS,
   type CatalogFiltersState,
   DEFAULT_FILTERS,
   parseFilters,
   serializeFilters,
   totalPages
 } from './catalogParams';
+import { PartKindBadge } from './PartKindBadge';
 import type { CatalogPage } from './types';
 
 const CATALOG_URL = '/plugin/inventree-location/catalog/';
 
+const ownsCatalogKey = ownsKeys(CATALOG_URL_KEYS);
+
 /** Reflète l'état des filtres dans la query string sans recharger la page. */
 function syncUrl(filters: CatalogFiltersState) {
-  if (typeof window === 'undefined' || !window.history?.replaceState) {
-    return;
-  }
-  const query = serializeFilters(filters);
-  const url = query ? `?${query}` : window.location.pathname;
-  window.history.replaceState(null, '', url);
+  syncOwnedParams(
+    ownsCatalogKey,
+    new URLSearchParams(serializeFilters(filters))
+  );
 }
 
 function initialFilters(): CatalogFiltersState {
@@ -169,7 +172,10 @@ export function CatalogList({ context }: { context: InvenTreePluginContext }) {
               <Table.Th>Nom</Table.Th>
               <Table.Th>Référence</Table.Th>
               <Table.Th>Catégorie</Table.Th>
-              <Table.Th>Louable</Table.Th>
+              {/* La colonne dit la nature de l'article, pas seulement s'il est
+                  louable : service, consommable ou matériel. */}
+              <Table.Th>Nature</Table.Th>
+              <Table.Th>Disponible aujourd'hui</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -183,12 +189,22 @@ export function CatalogList({ context }: { context: InvenTreePluginContext }) {
                 <Table.Td>{part.IPN || '—'}</Table.Td>
                 <Table.Td>{part.category_name || '—'}</Table.Td>
                 <Table.Td>
-                  {part.consommable ? (
-                    <Badge color='orange'>Consommable</Badge>
-                  ) : part.rentable ? (
-                    <Badge color='green'>Louable</Badge>
+                  <PartKindBadge
+                    isVirtual={part.is_virtual}
+                    consommable={part.consommable}
+                    rentable={part.rentable}
+                  />
+                </Table.Td>
+                <Table.Td>
+                  {part.is_virtual ? (
+                    '—'
                   ) : (
-                    <Badge color='gray'>Non-louable</Badge>
+                    <Badge
+                      color={part.stock_available > 0 ? 'blue' : 'red'}
+                      variant='light'
+                    >
+                      {part.stock_available}
+                    </Badge>
                   )}
                 </Table.Td>
               </Table.Tr>

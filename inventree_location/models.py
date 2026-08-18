@@ -6,7 +6,8 @@ recrée pas ici. Le plugin se limite à 8 tables propres :
 
 1. Groupe — Organisation scoute propriétaire (mono-tenant MVP)
 2. Profile — Extension OneToOne du User Django
-3. RentableItem — Extension OneToOne de `part.Part` (drapeau louable + champs location)
+3. RentableItem — Extension OneToOne de `part.Part` (drapeau louable + champs
+   location) ; le stock physique reste celui d'InvenTree (`StockItem`)
 4. Manifestation — Événement (camp, formation, week-end)
 5. Prestation — Sous-événement / besoin matériel d'une Manifestation
 6. Lieu — Localisation physique rattachée à une Prestation
@@ -15,7 +16,8 @@ recrée pas ici. Le plugin se limite à 8 tables propres :
 """
 
 from django.conf import settings
-from django.db import models
+from django.db import IntegrityError, models, transaction
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 
@@ -37,6 +39,7 @@ class StatutReservation(models.TextChoices):
     SOUMISE = "soumise", _("Soumise")
     VALIDEE = "validee", _("Validée")
     REFUSEE = "refusee", _("Refusée")
+    ANNULEE = "annulee", _("Annulée")
     LIVREE = "livree", _("Livrée")
     RETOURNEE = "retournee", _("Retournée")
     CLOTUREE = "cloturee", _("Clôturée")
@@ -138,6 +141,11 @@ class RentableItem(TimestampedModel):
     )
     is_rentable = models.BooleanField(default=True, verbose_name=_("louable"))
     consommable = models.BooleanField(default=False, verbose_name=_("consommable"))
+    is_virtual = models.BooleanField(default=False, verbose_name=_("article virtuel"))
+    # Pas de champ « stock total » ici : le stock physique appartient à
+    # InvenTree (`StockItem`). Un compteur parallèle divergeait en silence dès
+    # qu'une casse, un achat ou un inventaire était saisi côté InvenTree.
+    # Cf. `conflicts.get_part_total_stock`.
     caution = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -154,6 +162,9 @@ class RentableItem(TimestampedModel):
     )
     seuil_alerte_bas = models.PositiveIntegerField(
         null=True, blank=True, verbose_name=_("seuil d'alerte bas")
+    )
+    seuil_alerte_haut = models.PositiveIntegerField(
+        null=True, blank=True, verbose_name=_("seuil d'alerte haut")
     )
 
     class Meta:
@@ -209,6 +220,38 @@ class Manifestation(TimestampedModel):
     def __str__(self):
         return self.nom
 
+    #: Statuts où l'on peut encore ajouter des prestations.
+    STATUTS_MODIFIABLES = (
+        StatutManifestation.BROUILLON,
+        StatutManifestation.PLANIFIEE,
+    )
+
+    @property
+    def statut_effectif(self):
+        """Statut réel : brouillon/annulée explicites, en_cours/terminée dérivés
+        des dates dès qu'elle est planifiée."""
+
+        if self.statut in (
+            StatutManifestation.BROUILLON,
+            StatutManifestation.ANNULEE,
+        ):
+            return self.statut
+
+        now = timezone.now()
+
+        if now > self.date_fin:
+            return StatutManifestation.TERMINEE
+        if now >= self.date_debut:
+            return StatutManifestation.EN_COURS
+
+        return StatutManifestation.PLANIFIEE
+
+    @property
+    def accepte_nouvelles_prestations(self) -> bool:
+        """Vrai tant que la manif n'a pas démarré."""
+
+        return self.statut_effectif in self.STATUTS_MODIFIABLES
+
 
 class Prestation(TimestampedModel):
     """Créneau / service interne à une manifestation."""
@@ -218,6 +261,17 @@ class Prestation(TimestampedModel):
         on_delete=models.PROTECT,
         related_name="prestations",
         verbose_name=_("manifestation"),
+    )
+    # ORG-02 : une prestation se déroule sur un seul lieu (géolocalisé), qu'un
+    # même lieu peut porter pour plusieurs prestations (base de CON-06).
+    # Nullable pour autoriser les brouillons de prestation.
+    lieu = models.ForeignKey(
+        "Lieu",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="prestations",
+        verbose_name=_("lieu"),
     )
     nom = models.CharField(max_length=200, verbose_name=_("nom"))
     date_debut = models.DateTimeField(verbose_name=_("date de début"))
@@ -237,14 +291,14 @@ class Prestation(TimestampedModel):
 
 
 class Lieu(TimestampedModel):
-    """Site physique rattaché à une prestation."""
+    """Site physique géolocalisé, réutilisable par plusieurs prestations.
 
-    prestation = models.ForeignKey(
-        Prestation,
-        on_delete=models.PROTECT,
-        related_name="lieux",
-        verbose_name=_("prestation"),
-    )
+    Autonome (ORG-01/ORG-02) : le lieu porte adresse et coordonnées GPS et
+    n'appartient plus à une prestation. C'est la prestation qui référence son
+    lieu unique (``Prestation.lieu``), un même lieu pouvant servir à plusieurs
+    prestations — socle de la détection de conflit de lieu (CON-06).
+    """
+
     nom = models.CharField(max_length=200, verbose_name=_("nom"))
     adresse = models.TextField(blank=True, default="", verbose_name=_("adresse"))
     latitude = models.DecimalField(
@@ -275,14 +329,85 @@ class Lieu(TimestampedModel):
         return self.nom
 
 
+class LignePrestation(TimestampedModel):
+    """Article (Part natif) et quantité nécessaires à une prestation (RES-09).
+
+    Chaque prestation porte sa propre liste de matériel + quantités. Ces lignes
+    alimentent le calcul de stock disponible au jour (STK-01) et la détection
+    des conflits de stock.
+    """
+
+    prestation = models.ForeignKey(
+        Prestation,
+        on_delete=models.CASCADE,
+        related_name="lignes_prestation",
+        verbose_name=_("prestation"),
+    )
+    part = models.ForeignKey(
+        "part.Part",
+        on_delete=models.PROTECT,
+        related_name="lignes_prestation",
+        verbose_name=_("part"),
+    )
+    quantite = models.PositiveIntegerField(verbose_name=_("quantité"))
+    commentaire = models.TextField(
+        blank=True, default="", verbose_name=_("commentaire")
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["prestation", "part"]
+        verbose_name = _("ligne de prestation")
+        verbose_name_plural = _("lignes de prestation")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["prestation", "part"],
+                name="unique_prestation_part",
+            ),
+        ]
+
+    def __str__(self):
+        return f"part#{self.part_id} x{self.quantite}"
+
+
 # ---------------------------------------------------------------------------
 # 4. Réservations
 # ---------------------------------------------------------------------------
 
 
+def _generate_reservation_numero(year: int) -> str:
+    """Calcule le prochain numéro `RES-{année}-{NNNN}` pour l'année donnée."""
+
+    prefix = f"RES-{year}-"
+    last_numero = (
+        Reservation.objects.filter(numero__startswith=prefix)
+        .order_by("-numero")
+        .values_list("numero", flat=True)
+        .first()
+    )
+
+    next_seq = 1
+
+    if last_numero:
+        try:
+            next_seq = int(last_numero.rsplit("-", 1)[-1]) + 1
+        except ValueError:
+            next_seq = 1
+
+    return f"{prefix}{next_seq:04d}"
+
+
 class Reservation(TimestampedModel):
     """Demande de matériel liée à une prestation."""
 
+    numero = models.CharField(
+        max_length=20,
+        unique=True,
+        editable=False,
+        blank=True,
+        default="",
+        verbose_name=_("numéro"),
+    )
     prestation = models.ForeignKey(
         Prestation,
         on_delete=models.PROTECT,
@@ -311,7 +436,9 @@ class Reservation(TimestampedModel):
     )
     # CON-01 : confirmée malgré conflit de dispo détecté à la création
     forced = models.BooleanField(default=False, verbose_name=_("forcée"))
-    date_demande = models.DateTimeField(verbose_name=_("date de demande"))
+    date_demande = models.DateTimeField(
+        default=timezone.now, verbose_name=_("date de demande")
+    )
     date_retrait_prevue = models.DateTimeField(
         null=True, blank=True, verbose_name=_("date de retrait prévue")
     )
@@ -342,6 +469,29 @@ class Reservation(TimestampedModel):
 
     def __str__(self):
         return f"Réservation #{self.pk} — {self.get_statut_display()}"
+
+    def save(self, *args, **kwargs):
+        """Génère le numéro `RES-AAAA-NNNN` à la première sauvegarde."""
+
+        if self.numero:
+            super().save(*args, **kwargs)
+            return
+
+        year = (self.date_demande or timezone.now()).year
+        attempts = 5
+
+        for _attempt in range(attempts):
+            self.numero = _generate_reservation_numero(year)
+
+            try:
+                with transaction.atomic():
+                    super().save(*args, **kwargs)
+                return
+            except IntegrityError:
+                self.numero = ""
+                continue
+
+        raise IntegrityError("Impossible de générer un numéro de réservation unique.")
 
 
 class LigneReservation(TimestampedModel):
@@ -388,3 +538,54 @@ class LigneReservation(TimestampedModel):
 
     def __str__(self):
         return f"part#{self.part_id} x{self.quantite_demandee}"
+
+
+class ReservationStatusLog(TimestampedModel):
+    """Journal des transitions de statut d'une réservation."""
+
+    reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.CASCADE,
+        related_name="status_logs",
+        verbose_name=_("réservation"),
+    )
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reservation_status_changes",
+        verbose_name=_("modifié par"),
+    )
+    from_status = models.CharField(
+        max_length=20,
+        choices=StatutReservation.choices,
+        verbose_name=_("ancien statut"),
+    )
+    to_status = models.CharField(
+        max_length=20,
+        choices=StatutReservation.choices,
+        verbose_name=_("nouveau statut"),
+    )
+    comment = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("commentaire"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-created_at"]
+        verbose_name = _("log de statut de réservation")
+        verbose_name_plural = _("logs de statut de réservation")
+        indexes = [
+            models.Index(
+                fields=["reservation", "created_at"],
+                name="resa_status_log_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Réservation #{self.reservation_id}: {self.from_status} → {self.to_status}"
+        )
