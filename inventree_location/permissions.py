@@ -60,6 +60,12 @@ class ReservationPermission(RoleBasedPermission):
     write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR)
 
 
+class ReturnCheckinPermission(RoleBasedPermission):
+    """Lecture pour tous ; check-in retour réservé au magasinier (+ admin/gestionnaire)."""
+
+    write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.MAGASINIER)
+
+
 class ManifestationPermission(RoleBasedPermission):
     """Lecture pour tous ; gestion pour admin / gestionnaire / organisateur."""
 
