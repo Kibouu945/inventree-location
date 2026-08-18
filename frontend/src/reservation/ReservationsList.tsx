@@ -25,6 +25,7 @@ import { canArbitrateReservations, canWriteReservations } from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
 import { canArbitrateReservation, transitionErrorMessage } from './formLogic';
 import { ReservationForm } from './ReservationForm';
+import { RetourForm } from './RetourForm';
 import {
   buildReservationQuery,
   DEFAULT_RESERVATION_FILTERS,
@@ -63,6 +64,11 @@ interface ModalState {
   reservationId?: number;
 }
 
+interface RetourModalState {
+  open: boolean;
+  reservationId?: number;
+}
+
 interface CategoryResponseItem {
   id?: number;
   pk?: number;
@@ -95,6 +101,9 @@ export function ReservationsList({
   context: InvenTreePluginContext;
 }) {
   const [modalState, setModalState] = useState<ModalState>({ open: false });
+  const [retourModal, setRetourModal] = useState<RetourModalState>({
+    open: false
+  });
   const [filters, setFilters] =
     useState<ReservationFiltersState>(initialFilters);
   const [debouncedSearch] = useDebouncedValue(filters.search, 300);
@@ -216,6 +225,10 @@ export function ReservationsList({
 
   function closeModal() {
     setModalState({ open: false });
+  }
+
+  function closeRetourModal() {
+    setRetourModal({ open: false });
   }
 
   return (
@@ -360,6 +373,21 @@ export function ReservationsList({
                     onClick={(event) => event.stopPropagation()}
                     style={{ cursor: 'default' }}
                   >
+                    {(reservation.statut === 'livree' ||
+                      reservation.statut === 'retournee') && (
+                      <Button
+                        size='xs'
+                        color='grape'
+                        onClick={() =>
+                          setRetourModal({
+                            open: true,
+                            reservationId: reservation.id
+                          })
+                        }
+                      >
+                        Déclarer le retour
+                      </Button>
+                    )}
                     {canArbitrateReservation(reservation.statut) ? (
                       <Group gap='xs' wrap='nowrap'>
                         <Button
@@ -433,6 +461,21 @@ export function ReservationsList({
           readOnly={!canWrite}
           onSaved={closeModal}
         />
+      </Modal>
+
+      <Modal
+        opened={retourModal.open}
+        onClose={closeRetourModal}
+        size='xl'
+        title='Déclaration du retour'
+      >
+        {retourModal.reservationId && (
+          <RetourForm
+            context={context}
+            reservationId={retourModal.reservationId}
+            onSaved={closeRetourModal}
+          />
+        )}
       </Modal>
     </Stack>
   );
