@@ -70,3 +70,8 @@ class PrestationPermission(RoleBasedPermission):
     """Lecture pour tous ; gestion pour admin / gestionnaire / organisateur."""
 
     write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR)
+
+class MissingItemPermission(RoleBasedPermission):
+    """Déclaration des manquants au retour et facturation client : rôle magasinier."""
+
+    write_roles = (roles.ADMIN, roles.MAGASINIER)
