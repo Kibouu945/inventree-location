@@ -70,3 +70,9 @@ class PrestationPermission(RoleBasedPermission):
     """Lecture pour tous ; gestion pour admin / gestionnaire / organisateur."""
 
     write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR)
+
+
+class PrestationRetourPermission(RoleBasedPermission):
+    """Déclaration du retour d'une prestation (SCRUM-95) : rôle magasinier."""
+
+    write_roles = (roles.ADMIN, roles.MAGASINIER)
