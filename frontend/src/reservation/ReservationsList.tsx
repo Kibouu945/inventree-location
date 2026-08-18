@@ -23,6 +23,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { canArbitrateReservations, canWriteReservations } from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
+import { CheckinForm } from './CheckinForm';
 import { canArbitrateReservation, transitionErrorMessage } from './formLogic';
 import { ReservationForm } from './ReservationForm';
 import {
@@ -63,6 +64,11 @@ interface ModalState {
   reservationId?: number;
 }
 
+interface CheckinModalState {
+  open: boolean;
+  reservationId?: number;
+}
+
 interface CategoryResponseItem {
   id?: number;
   pk?: number;
@@ -95,6 +101,9 @@ export function ReservationsList({
   context: InvenTreePluginContext;
 }) {
   const [modalState, setModalState] = useState<ModalState>({ open: false });
+  const [checkinModal, setCheckinModal] = useState<CheckinModalState>({
+    open: false
+  });
   const [filters, setFilters] =
     useState<ReservationFiltersState>(initialFilters);
   const [debouncedSearch] = useDebouncedValue(filters.search, 300);
@@ -216,6 +225,10 @@ export function ReservationsList({
 
   function closeModal() {
     setModalState({ open: false });
+  }
+
+  function closeCheckinModal() {
+    setCheckinModal({ open: false });
   }
 
   return (
@@ -360,6 +373,20 @@ export function ReservationsList({
                     onClick={(event) => event.stopPropagation()}
                     style={{ cursor: 'default' }}
                   >
+                    {reservation.statut === 'livree' && (
+                      <Button
+                        size='xs'
+                        color='teal'
+                        onClick={() =>
+                          setCheckinModal({
+                            open: true,
+                            reservationId: reservation.id
+                          })
+                        }
+                      >
+                        Check-in retour
+                      </Button>
+                    )}
                     {canArbitrateReservation(reservation.statut) ? (
                       <Group gap='xs' wrap='nowrap'>
                         <Button
@@ -433,6 +460,21 @@ export function ReservationsList({
           readOnly={!canWrite}
           onSaved={closeModal}
         />
+      </Modal>
+
+      <Modal
+        opened={checkinModal.open}
+        onClose={closeCheckinModal}
+        size='xl'
+        title='Check-in retour'
+      >
+        {checkinModal.reservationId && (
+          <CheckinForm
+            context={context}
+            reservationId={checkinModal.reservationId}
+            onSaved={closeCheckinModal}
+          />
+        )}
       </Modal>
     </Stack>
   );
