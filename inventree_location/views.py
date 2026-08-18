@@ -39,6 +39,7 @@ from .permissions import (
     ManifestationPermission,
     PrestationPermission,
     ReservationPermission,
+    ReturnCheckinPermission,
     RoleBasedPermission,
 )
 from .serializers import (
@@ -49,6 +50,7 @@ from .serializers import (
     ManifestationSerializer,
     PrestationSerializer,
     RentableItemSerializer,
+    ReservationCheckinSerializer,
     ReservationSerializer,
     ReservationTransitionSerializer,
     UserSerializer,
@@ -389,6 +391,188 @@ class ReservationTransitionView(APIView):
         )
 
         return Response(result, status=status.HTTP_200_OK)
+
+
+class ReservationCheckinView(APIView):
+    """Check-in retour ligne par ligne (SCRUM-94) : OK / manquant / casse.
+
+    - GET  : accessible uniquement quand la reservation est au statut
+      livree ; renvoie les lignes a pointer.
+    - POST : valide que somme(ok + manquant + casse) == quantite demandee
+      pour chaque ligne, journalise les incidents, puis cloture la
+      reservation (livree -> retournee -> cloturee).
+    """
+
+    permission_classes = [ReturnCheckinPermission]
+    serializer_class = ReservationCheckinSerializer
+
+    def _get_reservation(self, pk):
+        return (
+            Reservation.objects.prefetch_related("lignes", "lignes__part")
+            .filter(pk=pk)
+            .first()
+        )
+
+    def get(self, request, pk, *args, **kwargs):
+        """Retourne la reservation et ses lignes si elle est livree."""
+
+        reservation = self._get_reservation(pk)
+
+        if reservation is None:
+            return Response(
+                {"detail": "Reservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if reservation.statut != StatutReservation.LIVREE:
+            return Response(
+                {
+                    "detail": (
+                        "Le check-in retour n'est accessible que pour une "
+                        "reservation livree."
+                    ),
+                    "current_status": reservation.statut,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        return Response(
+            {
+                "reservation": reservation.pk,
+                "numero": reservation.numero,
+                "statut": reservation.statut,
+                "lignes": [
+                    {
+                        "id": ligne.pk,
+                        "part": ligne.part_id,
+                        "part_name": getattr(ligne.part, "name", str(ligne.part)),
+                        "quantite_demandee": ligne.quantite_demandee,
+                        "quantite_retour_ok": ligne.quantite_retour_ok,
+                        "quantite_retour_manquant": ligne.quantite_retour_manquant,
+                        "quantite_retour_casse": ligne.quantite_retour_casse,
+                        "commentaire": ligne.commentaire,
+                    }
+                    for ligne in reservation.lignes.all()
+                ],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request, pk, *args, **kwargs):
+        """Enregistre le check-in retour et cloture la reservation."""
+
+        reservation = self._get_reservation(pk)
+
+        if reservation is None:
+            return Response(
+                {"detail": "Reservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if reservation.statut != StatutReservation.LIVREE:
+            return Response(
+                {
+                    "detail": (
+                        "Le check-in retour n'est accessible que pour une "
+                        "reservation livree."
+                    ),
+                    "current_status": reservation.statut,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        lignes_by_id = {ligne.pk: ligne for ligne in reservation.lignes.all()}
+        payload_lignes = serializer.validated_data["lignes"]
+        errors = {}
+
+        for entry in payload_lignes:
+            ligne = lignes_by_id.get(entry["id"])
+
+            if ligne is None:
+                errors[str(entry["id"])] = (
+                    "Cette ligne n'appartient pas a la reservation."
+                )
+                continue
+
+            total = entry["ok"] + entry["manquant"] + entry["casse"]
+
+            if total != ligne.quantite_demandee:
+                errors[str(entry["id"])] = (
+                    "La somme OK + manquant + casse (" + str(total) + ") doit "
+                    "egaler la quantite demandee (" + str(ligne.quantite_demandee) + ")."
+                )
+
+        if errors:
+            return Response({"lignes": errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        incidents = []
+
+        for entry in payload_lignes:
+            ligne = lignes_by_id[entry["id"]]
+            ligne.quantite_retour_ok = entry["ok"]
+            ligne.quantite_retour_manquant = entry["manquant"]
+            ligne.quantite_retour_casse = entry["casse"]
+            ligne.quantite_retournee = entry["ok"] + entry["casse"]
+            ligne.commentaire = entry.get("commentaire", "")
+
+            if entry["casse"] > 0:
+                ligne.etat_retour = "casse"
+            elif entry["manquant"] > 0:
+                ligne.etat_retour = "manquant"
+            else:
+                ligne.etat_retour = "ok"
+
+            ligne.save(
+                update_fields=[
+                    "quantite_retour_ok",
+                    "quantite_retour_manquant",
+                    "quantite_retour_casse",
+                    "quantite_retournee",
+                    "commentaire",
+                    "etat_retour",
+                    "updated_at",
+                ]
+            )
+
+            if entry["manquant"] > 0 or entry["casse"] > 0:
+                incidents.append(
+                    str(getattr(ligne.part, "name", ligne.part_id)) + ": "
+                    + str(entry["manquant"]) + " manquant(s), "
+                    + str(entry["casse"]) + " casse(s)"
+                )
+
+        incident_comment = (
+            "Incidents check-in : " + "; ".join(incidents)
+            if incidents
+            else "Check-in retour sans incident."
+        )
+
+        transition_reservation_status(
+            reservation=reservation,
+            new_status=StatutReservation.RETOURNEE,
+            user=request.user,
+            comment=incident_comment,
+        )
+        transition_reservation_status(
+            reservation=reservation,
+            new_status=StatutReservation.CLOTUREE,
+            user=request.user,
+            comment="Cloturee automatiquement apres check-in retour.",
+        )
+
+        reservation.refresh_from_db()
+
+        return Response(
+            {
+                "reservation": reservation.pk,
+                "statut": reservation.statut,
+                "incidents": incidents,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class ConflictsListView(APIView):
