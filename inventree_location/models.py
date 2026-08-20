@@ -589,3 +589,55 @@ class ReservationStatusLog(TimestampedModel):
         return (
             f"Réservation #{self.reservation_id}: {self.from_status} → {self.to_status}"
         )
+
+
+class ReturnIncidentType(models.TextChoices):
+    MISSING = "missing", _("Manquant")
+    BROKEN = "broken", _("Cassé")
+
+
+class ReturnIncident(TimestampedModel):
+    """Tracer les incidents de retour (manquant / cassé)."""
+
+    line = models.ForeignKey(
+        LigneReservation,
+        on_delete=models.CASCADE,
+        related_name="incidents",
+        verbose_name=_("ligne de réservation"),
+    )
+    type = models.CharField(
+        max_length=20,
+        choices=ReturnIncidentType.choices,
+        verbose_name=_("type d'incident"),
+    )
+    qty = models.PositiveIntegerField(verbose_name=_("quantité"))
+    comment = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("commentaire"),
+    )
+    reported_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name=_("date de signalement"),
+    )
+    reported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reported_incidents",
+        verbose_name=_("signalé par"),
+    )
+    bill_client = models.BooleanField(
+        default=False,
+        verbose_name=_("facturer au client"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-reported_at"]
+        verbose_name = _("incident de retour")
+        verbose_name_plural = _("incidents de retour")
+
+    def __str__(self):
+        return f"Incident #{self.pk} ({self.type}) — Ligne#{self.line_id}"
