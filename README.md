@@ -15,11 +15,11 @@ make up
 
 Au premier lancement, les migrations Django s'exécutent automatiquement et un utilisateur admin est créé.
 
-| Service | URL | Description |
-|---------|-----|-------------|
-| InvenTree | http://localhost:8000 | Interface principale (identifiants admin dans `.env`) |
-| Frontend dev | http://localhost:5174 | Serveur Vite pour le hot-reload du plugin |
-| PostgreSQL | localhost:5432 | Base de données |
+| Service      | URL                   | Description                                           |
+| ------------ | --------------------- | ----------------------------------------------------- |
+| InvenTree    | http://localhost:8000 | Interface principale (identifiants admin dans `.env`) |
+| Frontend dev | http://localhost:5174 | Serveur Vite pour le hot-reload du plugin             |
+| PostgreSQL   | localhost:5432        | Base de données                                       |
 
 ## Commandes disponibles
 
@@ -81,6 +81,33 @@ curl -H "Authorization: Token <TOKEN>" \
 
 Une requête sans token reçoit `401 Unauthorized`. La déconnexion (révocation
 du token) se fait via l'UI ou l'API d'InvenTree.
+
+## Manquants au retour
+
+Le magasinier (ou l'admin) peut marquer les objets manquants au retour depuis
+le détail d'une réservation (bouton **Manquant** par ligne) :
+
+- **Bouton « manquant » par ligne** : ouvre une modale de déclaration
+  d'incident (manquant ou cassé).
+- **Champ commentaire libre** : à renseigner par le magasinier.
+- **Option « facturer au client » (oui/non) par ligne** : interrupteur
+  dédié dans la modale.
+- **Mise à jour automatique du rapport de pertes** : chaque déclaration met
+  à jour l'état de la ligne (`etat_retour`) et alimente le rapport de pertes
+  agrégé (manquants / cassés / facturé au client).
+
+### Endpoints
+
+| Méthode          | URL                                                  | Description                              |
+| ---------------- | ---------------------------------------------------- | ---------------------------------------- |
+| GET/POST         | `/plugin/inventree-location/returns/incidents/`      | Liste / création des incidents de retour |
+| GET/PATCH/DELETE | `/plugin/inventree-location/returns/incidents/<id>/` | Détail d'un incident                     |
+| GET              | `/plugin/inventree-location/returns/loss-report/`    | Rapport de pertes agrégé                 |
+
+Filtres de la liste : `reservation`, `type` (`missing` / `broken`),
+`bill_client` (`true` / `false`).
+
+Autorisé aux rôles `magasinier` et `admin` (lecture comme écriture).
 
 ## Client Python `InvenTreeClient`
 
