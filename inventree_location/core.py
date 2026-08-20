@@ -336,17 +336,3 @@ class InvenTreeLocation(
             })
 
         return items
-
-    def get_ui_spotlight_actions(self, request, context, **kwargs):
-        """Return a list of custom spotlight actions to be made available."""
-        return [
-            {
-                "key": "sample-spotlight-action",
-                "title": "Hello Action",
-                "description": "Hello from InvenTreeLocation",
-                "icon": "ti:heart-handshake:outline",
-                "source": self.plugin_static_file(
-                    "Spotlight.js:InvenTreeLocationSpotlightAction"
-                ),
-            }
-        ]
