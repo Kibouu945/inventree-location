@@ -31,6 +31,7 @@ from .models import (
     Prestation,
     RentableItem,
     Reservation,
+    ReturnIncident,
     StatutReservation,
 )
 from .permissions import (
@@ -39,6 +40,7 @@ from .permissions import (
     ManifestationPermission,
     PrestationPermission,
     ReservationPermission,
+    ReturnCheckinPermission,
     RoleBasedPermission,
 )
 from .serializers import (
@@ -51,6 +53,7 @@ from .serializers import (
     RentableItemSerializer,
     ReservationSerializer,
     ReservationTransitionSerializer,
+    ReturnIncidentSerializer,
     UserSerializer,
     geocode_candidates,
 )
@@ -327,6 +330,131 @@ class ReservationConflictCheckView(APIView):
         )
 
         return Response(conflict_result, status=response_status)
+
+
+class ReturnIncidentListCreateView(generics.ListCreateAPIView):
+    """Liste et crée les incidents de retour (manquant / cassé).
+    """
+
+    permission_classes = [ReturnCheckinPermission]
+    serializer_class = ReturnIncidentSerializer
+
+    def get_queryset(self):
+        """Retourne les incidents, filtrés par réservation, type et facturation."""
+
+        queryset = (
+            ReturnIncident.objects.select_related(
+                "line__part", "line__reservation", "reported_by"
+            )
+            .all()
+            .order_by("-reported_at")
+        )
+
+        reservation_id = self.request.query_params.get("reservation")
+
+        if reservation_id:
+            queryset = queryset.filter(line__reservation_id=reservation_id)
+
+        incident_type = self.request.query_params.get("type")
+
+        if incident_type:
+            queryset = queryset.filter(type=incident_type)
+
+        bill_client = self.request.query_params.get("bill_client")
+
+        if bill_client is not None:
+            bill_value = str(bill_client).lower() in {"1", "true", "yes"}
+            queryset = queryset.filter(bill_client=bill_value)
+
+        return queryset
+
+
+class ReturnIncidentDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Détail, mise à jour et suppression d'un incident de retour."""
+
+    permission_classes = [ReturnCheckinPermission]
+    serializer_class = ReturnIncidentSerializer
+    queryset = ReturnIncident.objects.select_related(
+        "line__part", "line__reservation", "reported_by"
+    )
+
+
+class ReturnLossReportView(APIView):
+
+    permission_classes = [ReturnCheckinPermission]
+
+    def get(self, request, *args, **kwargs):
+        """Retourne le rapport de pertes agrégé."""
+
+        reservation_id = request.query_params.get("reservation")
+
+        incidents = ReturnIncident.objects.select_related(
+            "line__part", "line__reservation"
+        )
+
+        if reservation_id:
+            incidents = incidents.filter(line__reservation_id=reservation_id)
+
+        incidents = list(incidents)
+
+        total_missing = sum(
+            incident.qty for incident in incidents if incident.type == "missing"
+        )
+        total_broken = sum(
+            incident.qty for incident in incidents if incident.type == "broken"
+        )
+        total_billed = sum(
+            incident.qty
+            for incident in incidents
+            if incident.type == "missing" and incident.bill_client
+        )
+
+        by_part = {}
+        by_reservation = {}
+
+        for incident in incidents:
+            part_id = incident.line.part_id
+            part_name = incident.line.part.name
+
+            part_entry = by_part.setdefault(part_id, {
+                "part_id": part_id,
+                "part_name": part_name,
+                "missing": 0,
+                "broken": 0,
+                "billed": 0,
+            })
+            part_entry[incident.type] += incident.qty
+            if incident.bill_client:
+                part_entry["billed"] += incident.qty
+
+            reservation_id_key = incident.line.reservation_id
+            reservation_entry = by_reservation.setdefault(reservation_id_key, {
+                "reservation_id": reservation_id_key,
+                "reservation_numero": incident.line.reservation.numero,
+                "missing": 0,
+                "broken": 0,
+                "billed": 0,
+            })
+            reservation_entry[incident.type] += incident.qty
+            if incident.bill_client:
+                reservation_entry["billed"] += incident.qty
+
+        return Response(
+            {
+                "count": len(incidents),
+                "total_missing": total_missing,
+                "total_broken": total_broken,
+                "total_billed": total_billed,
+                "by_part": sorted(
+                    by_part.values(), key=lambda item: item["part_name"].lower()
+                ),
+                "by_reservation": sorted(
+                    by_reservation.values(),
+                    key=lambda item: item["reservation_numero"],
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class ReservationTransitionView(APIView):
