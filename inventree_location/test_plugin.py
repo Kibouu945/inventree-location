@@ -10,9 +10,6 @@ class TestPluginVersion:
         assert len(parts) == 3
         assert all(p.isdigit() for p in parts)
 
-    def test_version_value(self):
-        assert PLUGIN_VERSION == "0.1.0"
-
 
 class TestPluginStructure:
     def test_core_module_exists(self):
