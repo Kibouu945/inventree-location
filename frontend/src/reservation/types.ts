@@ -38,7 +38,7 @@ export interface Page<T> {
   results: T[];
 }
 
-export type ReservationStatut = 'brouillon' | 'soumise';
+export type ReservationStatut = "brouillon" | "soumise";
 
 /** Ligne de matériel telle que manipulée par le formulaire (avant envoi API). */
 export interface LigneReservationLine {
@@ -92,4 +92,55 @@ export interface Reservation {
   }>;
   created_at: string;
   updated_at: string;
+}
+
+/** Incident de retour (manquant / cassé) — SCRUM-96. */
+export type ReturnIncidentType = "missing" | "broken";
+
+/** Incident de retour tel que renvoyé par l'API (`ReturnIncidentSerializer`). */
+export interface ReturnIncident {
+  id: number;
+  line: number;
+  line_part_name: string;
+  line_reservation_numero: string;
+  type: ReturnIncidentType;
+  qty: number;
+  comment: string;
+  bill_client: boolean;
+  reported_at: string;
+  reported_by: number | null;
+  reported_by_username: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Payload envoyé à l'API pour créer un incident de retour. */
+export interface ReturnIncidentPayload {
+  line: number;
+  type: ReturnIncidentType;
+  qty: number;
+  comment: string;
+  bill_client: boolean;
+}
+
+/** Rapport de pertes agrégé (`ReturnLossReportView`). */
+export interface ReturnLossReport {
+  count: number;
+  total_missing: number;
+  total_broken: number;
+  total_billed: number;
+  by_part: Array<{
+    part_id: number;
+    part_name: string;
+    missing: number;
+    broken: number;
+    billed: number;
+  }>;
+  by_reservation: Array<{
+    reservation_id: number;
+    reservation_numero: string;
+    missing: number;
+    broken: number;
+    billed: number;
+  }>;
 }

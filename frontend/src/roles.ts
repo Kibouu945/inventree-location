@@ -3,15 +3,15 @@
 // La visibilité des actions (boutons créer / soumettre / éditer) est pilotée par
 // les 7 groupes métier, PAS par is_staff. Le backend reste la source d'autorité
 // (les endpoints renvoient 403) ; ce module ne fait que masquer l'UI en amont.
-import type { InvenTreePluginContext } from '@inventreedb/ui';
+import type { InvenTreePluginContext } from "@inventreedb/ui";
 
-export const ADMIN = 'admin';
-export const GESTIONNAIRE = 'gestionnaire';
-export const MAGASINIER = 'magasinier';
-export const LIVREUR = 'livreur';
-export const SAV = 'sav';
-export const ORGANISATEUR = 'organisateur';
-export const LECTEUR = 'lecteur';
+export const ADMIN = "admin";
+export const GESTIONNAIRE = "gestionnaire";
+export const MAGASINIER = "magasinier";
+export const LIVREUR = "livreur";
+export const SAV = "sav";
+export const ORGANISATEUR = "organisateur";
+export const LECTEUR = "lecteur";
 
 // Rôles autorisés en écriture, alignés sur permissions.py.
 export const RESERVATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE, ORGANISATEUR];
@@ -19,6 +19,8 @@ export const CATALOG_WRITE_ROLES = [ADMIN, GESTIONNAIRE];
 export const ORGANISATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE, ORGANISATEUR];
 // Arbitrage (valider / refuser) : gestionnaire + admin seulement.
 export const RESERVATION_ARBITRAGE_ROLES = [ADMIN, GESTIONNAIRE];
+// Check-in retour (manquant / cassé) : magasinier + admin (SCRUM-96).
+export const RETURN_CHECKIN_ROLES = [ADMIN, MAGASINIER];
 
 /**
  * Rôles (noms de groupes) de l'utilisateur courant.
@@ -35,9 +37,9 @@ export function userRoles(context: InvenTreePluginContext): string[] {
 
   return groups
     .map((group) =>
-      typeof group === 'string'
+      typeof group === "string"
         ? group
-        : String((group as { name?: unknown })?.name ?? '')
+        : String((group as { name?: unknown })?.name ?? ""),
     )
     .filter(Boolean);
 }
@@ -54,7 +56,7 @@ export function isSuperuser(context: InvenTreePluginContext): boolean {
 /** Vrai si l'utilisateur possède au moins un des rôles fournis (superuser inclus). */
 export function hasAnyRole(
   context: InvenTreePluginContext,
-  roles: string[]
+  roles: string[],
 ): boolean {
   if (isSuperuser(context)) {
     return true;
@@ -71,7 +73,7 @@ export function canWriteReservations(context: InvenTreePluginContext): boolean {
 
 /** Peut valider / refuser une réservation (admin, gestionnaire). */
 export function canArbitrateReservations(
-  context: InvenTreePluginContext
+  context: InvenTreePluginContext,
 ): boolean {
   return hasAnyRole(context, RESERVATION_ARBITRAGE_ROLES);
 }
@@ -84,4 +86,9 @@ export function canWriteCatalog(context: InvenTreePluginContext): boolean {
 /** Peut gérer manifestations / prestations / lieux (admin, gestionnaire, organisateur). */
 export function canWriteOrganisation(context: InvenTreePluginContext): boolean {
   return hasAnyRole(context, ORGANISATION_WRITE_ROLES);
+}
+
+/** Peut déclarer un retour (manquant / cassé) : magasinier + admin (SCRUM-96). */
+export function canCheckinReturns(context: InvenTreePluginContext): boolean {
+  return hasAnyRole(context, RETURN_CHECKIN_ROLES);
 }

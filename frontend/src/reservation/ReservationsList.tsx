@@ -21,10 +21,15 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
-import { canArbitrateReservations, canWriteReservations } from '../roles';
+import {
+  canArbitrateReservations,
+  canCheckinReturns,
+  canWriteReservations
+} from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
 import { canArbitrateReservation, transitionErrorMessage } from './formLogic';
 import { ReservationForm } from './ReservationForm';
+import { ReturnCheckin } from './ReturnCheckin';
 import {
   buildReservationQuery,
   DEFAULT_RESERVATION_FILTERS,
@@ -147,6 +152,23 @@ export function ReservationsList({
   // Livreur / magasinier / sav / lecteur : lecture seule (cf. permissions.py).
   const canWrite = canWriteReservations(context);
   const canArbitrate = canArbitrateReservations(context);
+  // SCRUM-96 : le magasinier déclare les manquants / cassés au retour.
+  const canCheckin = canCheckinReturns(context);
+  const canCheckinReturn = canCheckin && modalState.open && modalState.reservationId != null;
+
+  const detailQuery = useQuery<Reservation>(
+    {
+      queryKey: ['reservation-detail', modalState.reservationId],
+      enabled: canCheckinReturn,
+      queryFn: async () => {
+        const response = await context.api.get(
+          `${RESERVATIONS_URL}${modalState.reservationId}/`
+        );
+        return response.data as Reservation;
+      }
+    },
+    context.queryClient
+  );
 
   // Validation / refus d'une réservation soumise via l'endpoint de transition.
   const transitionMutation = useMutation(
@@ -368,7 +390,7 @@ export function ReservationsList({
                           loading={
                             transitionMutation.isPending &&
                             transitionMutation.variables?.id ===
-                              reservation.id &&
+                            reservation.id &&
                             transitionMutation.variables?.statut === 'validee'
                           }
                           disabled={transitionMutation.isPending}
@@ -388,7 +410,7 @@ export function ReservationsList({
                           loading={
                             transitionMutation.isPending &&
                             transitionMutation.variables?.id ===
-                              reservation.id &&
+                            reservation.id &&
                             transitionMutation.variables?.statut === 'refusee'
                           }
                           disabled={transitionMutation.isPending}
@@ -433,6 +455,12 @@ export function ReservationsList({
           readOnly={!canWrite}
           onSaved={closeModal}
         />
+        {canCheckinReturn && detailQuery.data && (
+          <ReturnCheckin
+            context={context}
+            reservation={detailQuery.data}
+          />
+        )}
       </Modal>
     </Stack>
   );
