@@ -1,9 +1,3 @@
-"""Ajoute le modèle ReturnIncident (SCRUM-96).
-
-Trace les incidents de retour (manquant / cassé) ligne par ligne, avec
-commentaire libre et option de facturation au client. Alimente le rapport
-de pertes.
-"""
 
 from django.conf import settings
 from django.db import migrations, models

@@ -94,7 +94,6 @@ export interface Reservation {
   updated_at: string;
 }
 
-/** Incident de retour (manquant / cassé) — SCRUM-96. */
 export type ReturnIncidentType = "missing" | "broken";
 
 /** Incident de retour tel que renvoyé par l'API (`ReturnIncidentSerializer`). */

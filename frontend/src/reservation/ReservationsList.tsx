@@ -152,7 +152,6 @@ export function ReservationsList({
   // Livreur / magasinier / sav / lecteur : lecture seule (cf. permissions.py).
   const canWrite = canWriteReservations(context);
   const canArbitrate = canArbitrateReservations(context);
-  // SCRUM-96 : le magasinier déclare les manquants / cassés au retour.
   const canCheckin = canCheckinReturns(context);
   const canCheckinReturn = canCheckin && modalState.open && modalState.reservationId != null;
 

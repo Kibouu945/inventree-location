@@ -1,4 +1,3 @@
-// Check-in retour (SCRUM-96) : marquer une ligne « manquant » (ou « cassé »),
 // commentaire libre et option « facturer au client ». Alimente le rapport de pertes.
 import type { InvenTreePluginContext } from "@inventreedb/ui";
 import {

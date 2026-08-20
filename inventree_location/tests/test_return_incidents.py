@@ -1,4 +1,3 @@
-"""Tests SCRUM-96 : incidents de retour (manquant / cassé) et rapport de pertes."""
 
 from __future__ import annotations
 

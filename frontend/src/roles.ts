@@ -19,7 +19,7 @@ export const CATALOG_WRITE_ROLES = [ADMIN, GESTIONNAIRE];
 export const ORGANISATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE, ORGANISATEUR];
 // Arbitrage (valider / refuser) : gestionnaire + admin seulement.
 export const RESERVATION_ARBITRAGE_ROLES = [ADMIN, GESTIONNAIRE];
-// Check-in retour (manquant / cassé) : magasinier + admin (SCRUM-96).
+// Check-in retour (manquant / cassé) : magasinier + admin
 export const RETURN_CHECKIN_ROLES = [ADMIN, MAGASINIER];
 
 /**
@@ -88,7 +88,7 @@ export function canWriteOrganisation(context: InvenTreePluginContext): boolean {
   return hasAnyRole(context, ORGANISATION_WRITE_ROLES);
 }
 
-/** Peut déclarer un retour (manquant / cassé) : magasinier + admin (SCRUM-96). */
+/** Peut déclarer un retour (manquant / cassé) : magasinier + admin */
 export function canCheckinReturns(context: InvenTreePluginContext): boolean {
   return hasAnyRole(context, RETURN_CHECKIN_ROLES);
 }
