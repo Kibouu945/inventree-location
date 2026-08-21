@@ -22,6 +22,7 @@ from .models import (
     ReservationStatusLog,
     Prestation,
     RentableItem,
+    ReturnIncident,
     StatutManifestation,
     StatutReservation,
 )
@@ -144,6 +145,23 @@ class LigneReservationSerializer(serializers.ModelSerializer):
             "commentaire",
         ]
         read_only_fields = ["id"]
+
+
+class ReturnIncidentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReturnIncident
+        fields = [
+            "id",
+            "line",
+            "type",
+            "qty",
+            "comment",
+            "reported_at",
+            "reported_by",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
 
 
 class ReservationStatusLogSerializer(serializers.ModelSerializer):
