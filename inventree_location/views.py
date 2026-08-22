@@ -31,6 +31,7 @@ from .models import (
     Prestation,
     RentableItem,
     Reservation,
+    ReturnIncident,
     StatutReservation,
 )
 from .permissions import (
@@ -39,6 +40,7 @@ from .permissions import (
     ManifestationPermission,
     PrestationPermission,
     ReservationPermission,
+    ReturnCheckinPermission,
     RoleBasedPermission,
 )
 from .serializers import (
@@ -51,6 +53,7 @@ from .serializers import (
     RentableItemSerializer,
     ReservationSerializer,
     ReservationTransitionSerializer,
+    ReturnIncidentSerializer,
     UserSerializer,
     geocode_candidates,
 )
@@ -389,6 +392,46 @@ class ReservationTransitionView(APIView):
         )
 
         return Response(result, status=status.HTTP_200_OK)
+
+
+class ReturnIncidentListCreateView(generics.ListCreateAPIView):
+    """Liste et crée les incidents de retour (manquant / cassé)."""
+
+    permission_classes = [ReturnCheckinPermission]
+    serializer_class = ReturnIncidentSerializer
+
+    def get_queryset(self):
+        """Retourne les incidents, filtrés par réservation et type."""
+
+        queryset = (
+            ReturnIncident.objects.select_related(
+                "line__part", "line__reservation", "reported_by"
+            )
+            .all()
+            .order_by("-reported_at")
+        )
+
+        reservation_id = self.request.query_params.get("reservation")
+
+        if reservation_id:
+            queryset = queryset.filter(line__reservation_id=reservation_id)
+
+        incident_type = self.request.query_params.get("type")
+
+        if incident_type:
+            queryset = queryset.filter(type=incident_type)
+
+        return queryset
+
+
+class ReturnIncidentDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Détail, mise à jour et suppression d'un incident de retour."""
+
+    permission_classes = [ReturnCheckinPermission]
+    serializer_class = ReturnIncidentSerializer
+    queryset = ReturnIncident.objects.select_related(
+        "line__part", "line__reservation", "reported_by"
+    )
 
 
 class ConflictsListView(APIView):

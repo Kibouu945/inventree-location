@@ -70,3 +70,9 @@ class PrestationPermission(RoleBasedPermission):
     """Lecture pour tous ; gestion pour admin / gestionnaire / organisateur."""
 
     write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR)
+
+
+class ReturnCheckinPermission(RoleBasedPermission):
+    """Check-in retour ligne par ligne (OK / manquant / cassé) : rôle magasinier."""
+
+    write_roles = (roles.ADMIN, roles.MAGASINIER)
