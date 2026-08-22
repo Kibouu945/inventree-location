@@ -543,6 +543,7 @@ class LigneReservation(TimestampedModel):
 class ReturnIncidentType(models.TextChoices):
     MISSING = "missing", _("Manquant")
     BROKEN = "broken", _("Cassé")
+    DESTROYED = "destroyed", _("Détruit")
 
 
 class ReturnIncident(TimestampedModel):
