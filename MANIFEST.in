@@ -1,1 +1,2 @@
 recursive-include inventree_location/static *
+recursive-include inventree_location/templates *
