@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.mail import send_mail
 from django.db.models import Q, Sum
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
@@ -58,6 +59,8 @@ from .serializers import (
     geocode_candidates,
 )
 from .stock import _as_date, compute_prestation_stock, compute_stock_availability
+from .services.return_report import build_return_report
+from .services.return_report_pdf import generate_return_report_pdf
 from .services.workflow_service import (
     get_available_transitions,
     transition_reservation_status,
@@ -432,6 +435,46 @@ class ReturnIncidentDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = ReturnIncident.objects.select_related(
         "line__part", "line__reservation", "reported_by"
     )
+
+
+class ReturnReportView(APIView):
+    """Rapport synthétique du retour d'une réservation (JSON)."""
+
+    permission_classes = [ReturnCheckinPermission]
+
+    def get(self, request, pk, *args, **kwargs):
+        """Retourne le récap retour : rendu / manquant / cassé / détruit."""
+        try:
+            report = build_return_report(pk)
+        except ValueError:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(report, status=status.HTTP_200_OK)
+
+
+class ReturnReportPdfView(APIView):
+    """Export PDF imprimable du rapport de retour."""
+
+    permission_classes = [ReturnCheckinPermission]
+
+    def get(self, request, pk, *args, **kwargs):
+        """Génère et renvoie le PDF du rapport de retour."""
+        try:
+            pdf_buffer = generate_return_report_pdf(pk)
+        except ValueError:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        response = HttpResponse(
+            pdf_buffer.getvalue(),
+            content_type="application/pdf",
+        )
+        response["Content-Disposition"] = f'attachment; filename="rapport-retour-{pk}.pdf"'
+        return response
 
 
 class ConflictsListView(APIView):
