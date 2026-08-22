@@ -23,6 +23,7 @@ from .models import (
     Prestation,
     RentableItem,
     ReturnIncident,
+    ReturnIncidentType,
     StatutManifestation,
     StatutReservation,
 )
@@ -148,20 +149,90 @@ class LigneReservationSerializer(serializers.ModelSerializer):
 
 
 class ReturnIncidentSerializer(serializers.ModelSerializer):
+    """Sérialiseur d'un incident de retour (manquant / cassé)."""
+
+    line_part_name = serializers.CharField(
+        source="line.part.name", read_only=True
+    )
+    line_reservation_numero = serializers.CharField(
+        source="line.reservation.numero", read_only=True
+    )
+    reported_by_username = serializers.CharField(
+        source="reported_by.username", read_only=True, allow_null=True
+    )
+
     class Meta:
+        """Configuration du serializer ReturnIncident."""
+
         model = ReturnIncident
         fields = [
             "id",
             "line",
+            "line_part_name",
+            "line_reservation_numero",
             "type",
             "qty",
             "comment",
             "reported_at",
             "reported_by",
+            "reported_by_username",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = fields
+        read_only_fields = [
+            "id",
+            "line_part_name",
+            "line_reservation_numero",
+            "reported_at",
+            "reported_by",
+            "reported_by_username",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate_type(self, value):
+        """Valide le type d'incident (manquant / cassé)."""
+
+        if value not in ReturnIncidentType.values:
+            raise serializers.ValidationError(
+                "Type d'incident invalide : manquant ou cassé attendu."
+            )
+        return value
+
+    def validate(self, attrs):
+        """La quantité signalée ne peut pas dépasser la quantité livrée."""
+
+        line = attrs.get("line") or getattr(self.instance, "line", None)
+
+        if line is not None:
+            qty = attrs.get("qty", getattr(self.instance, "qty", 0))
+            max_qty = line.quantite_livree or line.quantite_demandee
+
+            if qty > max_qty:
+                raise serializers.ValidationError({
+                    "qty": (
+                        f"La quantité signalée ({qty}) dépasse la quantité "
+                        f"disponible ({max_qty})."
+                    )
+                })
+
+        return attrs
+
+    def create(self, validated_data):
+        """Crée l'incident et met à jour l'état de retour de la ligne."""
+
+        request = self.context.get("request")
+        if request is not None and request.user.is_authenticated:
+            validated_data["reported_by"] = request.user
+
+        incident = super().create(validated_data)
+
+        line = incident.line
+        line.etat_retour = incident.type
+        line.commentaire = incident.comment
+        line.save(update_fields=["etat_retour", "commentaire", "updated_at"])
+
+        return incident
 
 
 class ReservationStatusLogSerializer(serializers.ModelSerializer):
