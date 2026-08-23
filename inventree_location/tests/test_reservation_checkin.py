@@ -228,3 +228,145 @@ class TestCheckinEndpointPost:
         response = ReservationCheckinView.as_view()(request, pk=reservation.pk)
 
         assert response.status_code == status.HTTP_409_CONFLICT
+
+    @pytest.mark.django_db
+    def test_post_refuse_un_pointage_partiel(
+        self, factory, magasinier, reservation_livree, ligne
+    ):
+        """Une ligne absente du payload ne doit pas clôturer la réservation."""
+
+        autre_part = Part.objects.create(name="Table pliante")
+        autre_ligne = LigneReservation.objects.create(
+            reservation=reservation_livree,
+            part=autre_part,
+            quantite_demandee=2,
+        )
+        request = factory.post(
+            CHECKIN_URL.format(pk=reservation_livree.pk),
+            {"lignes": [{"id": ligne.pk, "ok": 5, "manquant": 0, "casse": 0}]},
+            format="json",
+        )
+        force_authenticate(request, user=magasinier)
+
+        response = ReservationCheckinView.as_view()(
+            request, pk=reservation_livree.pk
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert str(autre_ligne.pk) in response.data["lignes"]
+
+        reservation_livree.refresh_from_db()
+        ligne.refresh_from_db()
+        assert reservation_livree.statut == StatutReservation.LIVREE
+        assert ligne.quantite_retour_ok == 0
+
+    @pytest.mark.django_db
+    def test_post_liste_vide_ne_cloture_pas(
+        self, factory, magasinier, reservation_livree, ligne
+    ):
+        request = factory.post(
+            CHECKIN_URL.format(pk=reservation_livree.pk),
+            {"lignes": []},
+            format="json",
+        )
+        force_authenticate(request, user=magasinier)
+
+        response = ReservationCheckinView.as_view()(
+            request, pk=reservation_livree.pk
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+        reservation_livree.refresh_from_db()
+        assert reservation_livree.statut == StatutReservation.LIVREE
+
+    @pytest.mark.django_db
+    def test_post_refuse_une_ligne_en_double(
+        self, factory, magasinier, reservation_livree, ligne
+    ):
+        request = factory.post(
+            CHECKIN_URL.format(pk=reservation_livree.pk),
+            {
+                "lignes": [
+                    {"id": ligne.pk, "ok": 5, "manquant": 0, "casse": 0},
+                    {"id": ligne.pk, "ok": 0, "manquant": 5, "casse": 0},
+                ]
+            },
+            format="json",
+        )
+        force_authenticate(request, user=magasinier)
+
+        response = ReservationCheckinView.as_view()(
+            request, pk=reservation_livree.pk
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+        reservation_livree.refresh_from_db()
+        assert reservation_livree.statut == StatutReservation.LIVREE
+
+    @pytest.mark.django_db
+    def test_post_sans_commentaire_conserve_celui_de_la_ligne(
+        self, factory, magasinier, reservation_livree, ligne
+    ):
+        ligne.commentaire = "Prévoir une bâche"
+        ligne.save(update_fields=["commentaire"])
+
+        request = factory.post(
+            CHECKIN_URL.format(pk=reservation_livree.pk),
+            {"lignes": [{"id": ligne.pk, "ok": 5, "manquant": 0, "casse": 0}]},
+            format="json",
+        )
+        force_authenticate(request, user=magasinier)
+
+        response = ReservationCheckinView.as_view()(
+            request, pk=reservation_livree.pk
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+
+        ligne.refresh_from_db()
+        assert ligne.commentaire == "Prévoir une bâche"
+
+    @pytest.mark.django_db
+    def test_post_commentaire_vide_efface_explicitement(
+        self, factory, magasinier, reservation_livree, ligne
+    ):
+        ligne.commentaire = "Prévoir une bâche"
+        ligne.save(update_fields=["commentaire"])
+
+        request = factory.post(
+            CHECKIN_URL.format(pk=reservation_livree.pk),
+            {
+                "lignes": [
+                    {
+                        "id": ligne.pk,
+                        "ok": 5,
+                        "manquant": 0,
+                        "casse": 0,
+                        "commentaire": "",
+                    }
+                ]
+            },
+            format="json",
+        )
+        force_authenticate(request, user=magasinier)
+
+        ReservationCheckinView.as_view()(request, pk=reservation_livree.pk)
+
+        ligne.refresh_from_db()
+        assert ligne.commentaire == ""
+
+
+class TestCheckinFieldsReadOnly:
+    @pytest.mark.django_db
+    def test_les_quantites_de_retour_ne_sont_pas_ecrivables_par_la_reservation(self):
+        """Le détail du retour est réservé au check-in magasinier."""
+
+        from inventree_location.serializers import LigneReservationSerializer
+
+        fields = LigneReservationSerializer().fields
+
+        assert fields["quantite_retour_ok"].read_only
+        assert fields["quantite_retour_manquant"].read_only
+        assert fields["quantite_retour_casse"].read_only

@@ -2,6 +2,7 @@ import type { InvenTreePluginContext } from '@inventreedb/ui';
 import { describe, expect, it } from 'vitest';
 
 import {
+  canCheckinReturns,
   canWriteCatalog,
   canWriteReservations,
   hasAnyRole,
@@ -73,6 +74,23 @@ describe('canWriteReservations', () => {
     ['lecteur', false]
   ])('%s -> %s', (role, expected) => {
     expect(canWriteReservations(makeContext({ groups: groups(role) }))).toBe(
+      expected
+    );
+  });
+});
+
+describe('canCheckinReturns', () => {
+  // Miroir de ReturnCheckinPermission.write_roles côté serveur.
+  it.each([
+    ['admin', true],
+    ['gestionnaire', true],
+    ['magasinier', true],
+    ['organisateur', false],
+    ['livreur', false],
+    ['sav', false],
+    ['lecteur', false]
+  ])('%s -> %s', (role, expected) => {
+    expect(canCheckinReturns(makeContext({ groups: groups(role) }))).toBe(
       expected
     );
   });

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   checkinLigneTotal,
   isCheckinValid,
+  summarizeCheckin,
   validateCheckinLignes
 } from '../checkinLogic';
 
@@ -74,5 +75,28 @@ describe('isCheckinValid', () => {
     expect(
       isCheckinValid([makeLigne({ id: 1, quantite_demandee: 5, ok: 4 })])
     ).toBe(false);
+  });
+});
+
+describe('summarizeCheckin', () => {
+  it('adds up missing and broken quantities across lines', () => {
+    expect(
+      summarizeCheckin([
+        makeLigne({
+          id: 1,
+          quantite_demandee: 5,
+          ok: 3,
+          manquant: 1,
+          casse: 1
+        }),
+        makeLigne({ id: 2, quantite_demandee: 4, ok: 2, manquant: 0, casse: 2 })
+      ])
+    ).toEqual({ manquant: 1, casse: 3 });
+  });
+
+  it('reports no incident when everything comes back OK', () => {
+    expect(
+      summarizeCheckin([makeLigne({ id: 1, quantite_demandee: 5, ok: 5 })])
+    ).toEqual({ manquant: 0, casse: 0 });
   });
 });

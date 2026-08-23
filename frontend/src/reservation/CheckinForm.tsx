@@ -18,11 +18,12 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   type CheckinErrors,
   type CheckinLigneValues,
+  summarizeCheckin,
   validateCheckinLignes
 } from './checkinLogic';
 
@@ -47,14 +48,25 @@ interface CheckinResponse {
 }
 
 function toFormLignes(lignes: CheckinLigneApi[]): CheckinLigneValues[] {
-  return lignes.map((ligne) => ({
-    id: ligne.id,
-    quantite_demandee: ligne.quantite_demandee,
-    ok: ligne.quantite_retour_ok || ligne.quantite_demandee,
-    manquant: ligne.quantite_retour_manquant || 0,
-    casse: ligne.quantite_retour_casse || 0,
-    commentaire: ligne.commentaire || ''
-  }));
+  return lignes.map((ligne) => {
+    // Un check-in déjà pointé est rechargé tel quel (y compris un « OK = 0 »,
+    // que le `||` d'origine remplaçait à tort par la quantité demandée) ;
+    // sinon, on pré-remplit la ligne comme intégralement rendue.
+    const dejaPointee =
+      ligne.quantite_retour_ok +
+        ligne.quantite_retour_manquant +
+        ligne.quantite_retour_casse >
+      0;
+
+    return {
+      id: ligne.id,
+      quantite_demandee: ligne.quantite_demandee,
+      ok: dejaPointee ? ligne.quantite_retour_ok : ligne.quantite_demandee,
+      manquant: dejaPointee ? ligne.quantite_retour_manquant : 0,
+      casse: dejaPointee ? ligne.quantite_retour_casse : 0,
+      commentaire: ligne.commentaire || ''
+    };
+  });
 }
 
 /**
@@ -72,6 +84,11 @@ export function CheckinForm({
   const [lignes, setLignes] = useState<CheckinLigneValues[]>([]);
   const [errors, setErrors] = useState<CheckinErrors>({});
   const [partNames, setPartNames] = useState<Record<number, string>>({});
+  const [confirming, setConfirming] = useState(false);
+  // Le formulaire n'est initialisé qu'une fois par réservation : un refetch
+  // (retour de focus sur l'onglet, invalidation) ne doit pas écraser la
+  // saisie en cours du magasinier.
+  const seededFor = useRef<number | null>(null);
 
   const query = useQuery<CheckinResponse>(
     {
@@ -87,15 +104,18 @@ export function CheckinForm({
   );
 
   useEffect(() => {
-    if (query.data) {
-      setLignes(toFormLignes(query.data.lignes));
-      setPartNames(
-        Object.fromEntries(
-          query.data.lignes.map((ligne) => [ligne.id, ligne.part_name])
-        )
-      );
+    if (!query.data || seededFor.current === reservationId) {
+      return;
     }
-  }, [query.data]);
+
+    seededFor.current = reservationId;
+    setLignes(toFormLignes(query.data.lignes));
+    setPartNames(
+      Object.fromEntries(
+        query.data.lignes.map((ligne) => [ligne.id, ligne.part_name])
+      )
+    );
+  }, [query.data, reservationId]);
 
   const saveMutation = useMutation(
     {
@@ -115,13 +135,18 @@ export function CheckinForm({
         return response.data;
       },
       onSuccess: () => {
-        context.queryClient.invalidateQueries({ queryKey: ['reservations'] });
         notifications.show({
           title: 'Check-in enregistré',
           message: 'La réservation a été clôturée.',
           color: 'green'
         });
         onSaved();
+
+        // Rendue à react-query plutôt qu'abandonnée : la mutation reste
+        // « pending » jusqu'au rafraîchissement de la liste.
+        return context.queryClient.invalidateQueries({
+          queryKey: ['reservations']
+        });
       },
       onError: (error: unknown) => {
         const data = (
@@ -129,6 +154,8 @@ export function CheckinForm({
             response?: { data?: { lignes?: CheckinErrors; detail?: string } };
           }
         )?.response?.data;
+
+        setConfirming(false);
 
         if (data?.lignes) {
           setErrors(data.lignes);
@@ -145,6 +172,8 @@ export function CheckinForm({
   );
 
   function updateLigne(id: number, patch: Partial<CheckinLigneValues>) {
+    // Toute modification invalide la confirmation en cours.
+    setConfirming(false);
     setLignes((current) =>
       current.map((ligne) => (ligne.id === id ? { ...ligne, ...patch } : ligne))
     );
@@ -155,11 +184,22 @@ export function CheckinForm({
     setErrors(validationErrors);
 
     if (Object.keys(validationErrors).length > 0) {
+      setConfirming(false);
+      return;
+    }
+
+    // La clôture est définitive : premier clic = récapitulatif, second clic =
+    // envoi. Évite qu'un clic malencontreux ne clôture la réservation avec le
+    // pré-remplissage « tout OK ».
+    if (!confirming) {
+      setConfirming(true);
       return;
     }
 
     saveMutation.mutate(lignes);
   }
+
+  const totals = summarizeCheckin(lignes);
 
   if (query.isLoading) {
     return (
@@ -264,13 +304,30 @@ export function CheckinForm({
         ) : null
       )}
 
+      {confirming && (
+        <Alert color='orange' title='Confirmer la clôture'>
+          {totals.manquant === 0 && totals.casse === 0
+            ? 'Aucun incident déclaré : tout le matériel est rendu en bon état.'
+            : `${totals.manquant} article(s) manquant(s) et ${totals.casse} article(s) cassé(s) vont être déclarés.`}{' '}
+          La réservation sera clôturée définitivement.
+        </Alert>
+      )}
+
       <Group justify='flex-end'>
+        {confirming && (
+          <Button variant='default' onClick={() => setConfirming(false)}>
+            Revenir à la saisie
+          </Button>
+        )}
         <Button
           onClick={handleSubmit}
+          color={confirming ? 'orange' : undefined}
           loading={saveMutation.isPending}
           disabled={lignes.length === 0}
         >
-          Valider le check-in et clôturer
+          {confirming
+            ? 'Confirmer et clôturer'
+            : 'Valider le check-in et clôturer'}
         </Button>
       </Group>
     </Stack>

@@ -9,6 +9,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.mail import send_mail
+from django.db import transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 from rest_framework import generics, permissions, status
@@ -406,11 +407,39 @@ class ReservationCheckinView(APIView):
     permission_classes = [ReturnCheckinPermission]
     serializer_class = ReservationCheckinSerializer
 
-    def _get_reservation(self, pk):
-        return (
-            Reservation.objects.prefetch_related("lignes", "lignes__part")
-            .filter(pk=pk)
-            .first()
+    NOT_FOUND_DETAIL = "Reservation introuvable."
+    NOT_LIVREE_DETAIL = (
+        "Le check-in retour n'est accessible que pour une reservation livree."
+    )
+
+    def _get_reservation(self, pk, *, lock=False):
+        """Charge la reservation et ses lignes ; `lock` pose un verrou de ligne.
+
+        Le verrou serialise deux check-in concurrents : sans lui, les deux
+        requetes franchissent la garde « livree » avec un objet en memoire
+        perime et rejouent toutes les deux les transitions de statut.
+        """
+
+        queryset = Reservation.objects.prefetch_related("lignes", "lignes__part")
+
+        if lock:
+            queryset = queryset.select_for_update()
+
+        return queryset.filter(pk=pk).first()
+
+    def _not_found_response(self):
+        return Response(
+            {"detail": self.NOT_FOUND_DETAIL},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    def _not_livree_response(self, reservation):
+        return Response(
+            {
+                "detail": self.NOT_LIVREE_DETAIL,
+                "current_status": reservation.statut,
+            },
+            status=status.HTTP_409_CONFLICT,
         )
 
     def get(self, request, pk, *args, **kwargs):
@@ -419,22 +448,10 @@ class ReservationCheckinView(APIView):
         reservation = self._get_reservation(pk)
 
         if reservation is None:
-            return Response(
-                {"detail": "Reservation introuvable."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return self._not_found_response()
 
         if reservation.statut != StatutReservation.LIVREE:
-            return Response(
-                {
-                    "detail": (
-                        "Le check-in retour n'est accessible que pour une "
-                        "reservation livree."
-                    ),
-                    "current_status": reservation.statut,
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
+            return self._not_livree_response(reservation)
 
         return Response(
             {
@@ -458,35 +475,17 @@ class ReservationCheckinView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    def post(self, request, pk, *args, **kwargs):
-        """Enregistre le check-in retour et cloture la reservation."""
+    @staticmethod
+    def _validate_payload_lignes(payload_lignes, lignes_by_id):
+        """Erreurs par ligne : appartenance, somme, et couverture complete.
 
-        reservation = self._get_reservation(pk)
+        Le check-in cloture definitivement la reservation : toutes ses lignes
+        doivent donc etre pointees dans la meme requete, sinon on cloturerait
+        un retour partiel sans possibilite de le corriger ensuite.
+        """
 
-        if reservation is None:
-            return Response(
-                {"detail": "Reservation introuvable."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        if reservation.statut != StatutReservation.LIVREE:
-            return Response(
-                {
-                    "detail": (
-                        "Le check-in retour n'est accessible que pour une "
-                        "reservation livree."
-                    ),
-                    "current_status": reservation.statut,
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        serializer = self.serializer_class(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        lignes_by_id = {ligne.pk: ligne for ligne in reservation.lignes.all()}
-        payload_lignes = serializer.validated_data["lignes"]
         errors = {}
+        seen = set()
 
         for entry in payload_lignes:
             ligne = lignes_by_id.get(entry["id"])
@@ -497,6 +496,11 @@ class ReservationCheckinView(APIView):
                 )
                 continue
 
+            if entry["id"] in seen:
+                errors[str(entry["id"])] = "Cette ligne est presente en double."
+                continue
+
+            seen.add(entry["id"])
             total = entry["ok"] + entry["manquant"] + entry["casse"]
 
             if total != ligne.quantite_demandee:
@@ -507,68 +511,106 @@ class ReservationCheckinView(APIView):
                     + ")."
                 )
 
-        if errors:
-            return Response({"lignes": errors}, status=status.HTTP_400_BAD_REQUEST)
-
-        incidents = []
-
-        for entry in payload_lignes:
-            ligne = lignes_by_id[entry["id"]]
-            ligne.quantite_retour_ok = entry["ok"]
-            ligne.quantite_retour_manquant = entry["manquant"]
-            ligne.quantite_retour_casse = entry["casse"]
-            ligne.quantite_retournee = entry["ok"] + entry["casse"]
-            ligne.commentaire = entry.get("commentaire", "")
-
-            if entry["casse"] > 0:
-                ligne.etat_retour = "casse"
-            elif entry["manquant"] > 0:
-                ligne.etat_retour = "manquant"
-            else:
-                ligne.etat_retour = "ok"
-
-            ligne.save(
-                update_fields=[
-                    "quantite_retour_ok",
-                    "quantite_retour_manquant",
-                    "quantite_retour_casse",
-                    "quantite_retournee",
-                    "commentaire",
-                    "etat_retour",
-                    "updated_at",
-                ]
-            )
-
-            if entry["manquant"] > 0 or entry["casse"] > 0:
-                incidents.append(
-                    str(getattr(ligne.part, "name", ligne.part_id))
-                    + ": "
-                    + str(entry["manquant"])
-                    + " manquant(s), "
-                    + str(entry["casse"])
-                    + " casse(s)"
+        for ligne_id in lignes_by_id:
+            if ligne_id not in seen:
+                errors[str(ligne_id)] = (
+                    "Cette ligne doit etre pointee pour cloturer le check-in."
                 )
 
-        incident_comment = (
-            "Incidents check-in : " + "; ".join(incidents)
-            if incidents
-            else "Check-in retour sans incident."
-        )
+        return errors
 
-        transition_reservation_status(
-            reservation=reservation,
-            new_status=StatutReservation.RETOURNEE,
-            user=request.user,
-            comment=incident_comment,
-        )
-        transition_reservation_status(
-            reservation=reservation,
-            new_status=StatutReservation.CLOTUREE,
-            user=request.user,
-            comment="Cloturee automatiquement apres check-in retour.",
-        )
+    @staticmethod
+    def _apply_checkin_ligne(ligne, entry):
+        """Reporte une entree de check-in sur la ligne et la sauvegarde."""
 
-        reservation.refresh_from_db()
+        ligne.quantite_retour_ok = entry["ok"]
+        ligne.quantite_retour_manquant = entry["manquant"]
+        ligne.quantite_retour_casse = entry["casse"]
+        ligne.quantite_retournee = entry["ok"] + entry["casse"]
+
+        if entry["casse"] > 0:
+            ligne.etat_retour = "casse"
+        elif entry["manquant"] > 0:
+            ligne.etat_retour = "manquant"
+        else:
+            ligne.etat_retour = "ok"
+
+        update_fields = [
+            "quantite_retour_ok",
+            "quantite_retour_manquant",
+            "quantite_retour_casse",
+            "quantite_retournee",
+            "etat_retour",
+            "updated_at",
+        ]
+
+        # `commentaire` porte aussi la note saisie a la reservation : on ne
+        # l'ecrase que si le check-in en fournit une explicitement.
+        if "commentaire" in entry:
+            ligne.commentaire = entry["commentaire"]
+            update_fields.append("commentaire")
+
+        ligne.save(update_fields=update_fields)
+
+    def post(self, request, pk, *args, **kwargs):
+        """Enregistre le check-in retour et cloture la reservation."""
+
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload_lignes = serializer.validated_data["lignes"]
+
+        # Ecritures des lignes et transitions de statut dans une seule
+        # transaction : un echec en cours de route ne doit pas laisser la
+        # reservation coincee en « retournee » avec un check-in a moitie pose.
+        with transaction.atomic():
+            reservation = self._get_reservation(pk, lock=True)
+
+            if reservation is None:
+                return self._not_found_response()
+
+            if reservation.statut != StatutReservation.LIVREE:
+                return self._not_livree_response(reservation)
+
+            lignes_by_id = {ligne.pk: ligne for ligne in reservation.lignes.all()}
+            errors = self._validate_payload_lignes(payload_lignes, lignes_by_id)
+
+            if errors:
+                return Response({"lignes": errors}, status=status.HTTP_400_BAD_REQUEST)
+
+            incidents = []
+
+            for entry in payload_lignes:
+                ligne = lignes_by_id[entry["id"]]
+                self._apply_checkin_ligne(ligne, entry)
+
+                if entry["manquant"] > 0 or entry["casse"] > 0:
+                    incidents.append(
+                        str(getattr(ligne.part, "name", ligne.part_id))
+                        + ": "
+                        + str(entry["manquant"])
+                        + " manquant(s), "
+                        + str(entry["casse"])
+                        + " casse(s)"
+                    )
+
+            incident_comment = (
+                "Incidents check-in : " + "; ".join(incidents)
+                if incidents
+                else "Check-in retour sans incident."
+            )
+
+            transition_reservation_status(
+                reservation=reservation,
+                new_status=StatutReservation.RETOURNEE,
+                user=request.user,
+                comment=incident_comment,
+            )
+            transition_reservation_status(
+                reservation=reservation,
+                new_status=StatutReservation.CLOTUREE,
+                user=request.user,
+                comment="Cloturee automatiquement apres check-in retour.",
+            )
 
         return Response(
             {

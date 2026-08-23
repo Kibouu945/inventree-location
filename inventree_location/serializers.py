@@ -146,7 +146,16 @@ class LigneReservationSerializer(serializers.ModelSerializer):
             "quantite_retour_casse",
             "commentaire",
         ]
-        read_only_fields = ["id"]
+        # Le détail du retour n'appartient qu'au check-in magasinier
+        # (`ReservationCheckinView` / `ReturnCheckinPermission`) : exposé en
+        # écriture ici, il serait modifiable par tout rôle autorisé à éditer
+        # une réservation, et remis à zéro à chaque réécriture des lignes.
+        read_only_fields = [
+            "id",
+            "quantite_retour_ok",
+            "quantite_retour_manquant",
+            "quantite_retour_casse",
+        ]
 
 
 class ReservationStatusLogSerializer(serializers.ModelSerializer):
@@ -205,13 +214,17 @@ class CheckinLigneSerializer(serializers.Serializer):
 
     La validation de la somme (== quantité demandée) se fait au niveau de la
     vue, une fois la ligne de réservation résolue par `id`.
+
+    `commentaire` n'a volontairement pas de valeur par défaut : absent du
+    payload, il reste absent de `validated_data`, et la vue laisse alors
+    intact le commentaire déjà saisi sur la ligne de réservation.
     """
 
     id = serializers.IntegerField(required=True)
     ok = serializers.IntegerField(required=True, min_value=0)
     manquant = serializers.IntegerField(required=True, min_value=0)
     casse = serializers.IntegerField(required=True, min_value=0)
-    commentaire = serializers.CharField(required=False, allow_blank=True, default="")
+    commentaire = serializers.CharField(required=False, allow_blank=True)
 
 
 class ReservationCheckinSerializer(serializers.Serializer):
