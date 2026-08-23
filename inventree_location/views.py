@@ -502,7 +502,9 @@ class ReservationCheckinView(APIView):
             if total != ligne.quantite_demandee:
                 errors[str(entry["id"])] = (
                     "La somme OK + manquant + casse (" + str(total) + ") doit "
-                    "egaler la quantite demandee (" + str(ligne.quantite_demandee) + ")."
+                    "egaler la quantite demandee ("
+                    + str(ligne.quantite_demandee)
+                    + ")."
                 )
 
         if errors:
@@ -539,9 +541,12 @@ class ReservationCheckinView(APIView):
 
             if entry["manquant"] > 0 or entry["casse"] > 0:
                 incidents.append(
-                    str(getattr(ligne.part, "name", ligne.part_id)) + ": "
-                    + str(entry["manquant"]) + " manquant(s), "
-                    + str(entry["casse"]) + " casse(s)"
+                    str(getattr(ligne.part, "name", ligne.part_id))
+                    + ": "
+                    + str(entry["manquant"])
+                    + " manquant(s), "
+                    + str(entry["casse"])
+                    + " casse(s)"
                 )
 
         incident_comment = (

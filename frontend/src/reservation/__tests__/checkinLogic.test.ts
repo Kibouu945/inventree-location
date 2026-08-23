@@ -6,7 +6,9 @@ import {
   validateCheckinLignes
 } from '../checkinLogic';
 
-function makeLigne(overrides: Partial<Parameters<typeof checkinLigneTotal>[0]> = {}) {
+function makeLigne(
+  overrides: Partial<Parameters<typeof checkinLigneTotal>[0]> = {}
+) {
   return {
     id: 1,
     quantite_demandee: 5,
@@ -28,7 +30,9 @@ describe('checkinLigneTotal', () => {
 
 describe('validateCheckinLignes', () => {
   it('returns no error when the sum matches the requested quantity', () => {
-    const errors = validateCheckinLignes([makeLigne({ ok: 3, manquant: 1, casse: 1 })]);
+    const errors = validateCheckinLignes([
+      makeLigne({ ok: 3, manquant: 1, casse: 1 })
+    ]);
     expect(errors).toEqual({});
   });
 
@@ -68,9 +72,7 @@ describe('isCheckinValid', () => {
 
   it('is false when at least one line is unbalanced', () => {
     expect(
-      isCheckinValid([
-        makeLigne({ id: 1, quantite_demandee: 5, ok: 4 })
-      ])
+      isCheckinValid([makeLigne({ id: 1, quantite_demandee: 5, ok: 4 })])
     ).toBe(false);
   });
 });

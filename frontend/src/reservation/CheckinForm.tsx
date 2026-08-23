@@ -124,8 +124,11 @@ export function CheckinForm({
         onSaved();
       },
       onError: (error: unknown) => {
-        const data = (error as { response?: { data?: { lignes?: CheckinErrors; detail?: string } } })
-          ?.response?.data;
+        const data = (
+          error as {
+            response?: { data?: { lignes?: CheckinErrors; detail?: string } };
+          }
+        )?.response?.data;
 
         if (data?.lignes) {
           setErrors(data.lignes);
@@ -133,7 +136,7 @@ export function CheckinForm({
 
         notifications.show({
           title: 'Check-in impossible',
-          message: data?.detail || "Vérifiez les quantités saisies.",
+          message: data?.detail || 'Vérifiez les quantités saisies.',
           color: 'red'
         });
       }
@@ -173,7 +176,7 @@ export function CheckinForm({
 
     return (
       <Alert color='red' title='Check-in indisponible'>
-        {detail || "Impossible de charger le check-in de cette réservation."}
+        {detail || 'Impossible de charger le check-in de cette réservation.'}
       </Alert>
     );
   }
@@ -181,8 +184,8 @@ export function CheckinForm({
   return (
     <Stack gap='md'>
       <Text size='sm' c='dimmed'>
-        Réservation {query.data?.numero} — saisissez OK / manquant / cassé
-        pour chaque ligne. La somme doit égaler la quantité demandée.
+        Réservation {query.data?.numero} — saisissez OK / manquant / cassé pour
+        chaque ligne. La somme doit égaler la quantité demandée.
       </Text>
 
       <Table striped>
@@ -251,7 +254,11 @@ export function CheckinForm({
 
       {Object.entries(errors).map(([id, message]) =>
         message ? (
-          <Alert key={id} color='red' title={`Ligne ${partNames[Number(id)] || id}`}>
+          <Alert
+            key={id}
+            color='red'
+            title={`Ligne ${partNames[Number(id)] || id}`}
+          >
             {message}
           </Alert>
         ) : null

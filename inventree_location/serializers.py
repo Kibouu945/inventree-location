@@ -211,9 +211,7 @@ class CheckinLigneSerializer(serializers.Serializer):
     ok = serializers.IntegerField(required=True, min_value=0)
     manquant = serializers.IntegerField(required=True, min_value=0)
     casse = serializers.IntegerField(required=True, min_value=0)
-    commentaire = serializers.CharField(
-        required=False, allow_blank=True, default=""
-    )
+    commentaire = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class ReservationCheckinSerializer(serializers.Serializer):
