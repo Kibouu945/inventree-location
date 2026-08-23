@@ -23,6 +23,7 @@ from inventree_location.models import (
 )
 from inventree_location.views import (
     ReturnIncidentDetailView,
+    ReturnIncidentHistoryView,
     ReturnIncidentListCreateView,
 )
 
@@ -259,6 +260,42 @@ class TestReturnIncidentListCreate:
         response = ReturnIncidentListCreateView.as_view()(request)
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    @pytest.mark.django_db
+    def test_history_filters_recent_items_and_links_reservation(
+        self, factory, magasinier, ligne
+    ):
+        older = ReturnIncident.objects.create(
+            line=ligne,
+            type=ReturnIncidentType.MISSING,
+            qty=1,
+            reported_by=magasinier,
+            reported_at=timezone.now() - timedelta(days=120),
+        )
+        recent = ReturnIncident.objects.create(
+            line=ligne,
+            type=ReturnIncidentType.BROKEN,
+            qty=1,
+            reported_by=magasinier,
+            reported_at=timezone.now() - timedelta(days=10),
+        )
+
+        request = factory.get(
+            "/plugin/inventree-location/returns/history/",
+            {"type": ReturnIncidentType.BROKEN, "object": "Tente", "event": "Camp"},
+        )
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnIncidentHistoryView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        assert response.data[0]["id"] == recent.id
+        assert response.data[0]["reservation_id"] == ligne.reservation_id
+        assert response.data[0]["reservation_number"] == ligne.reservation.numero
+        assert response.data[0]["part_name"] == "Tente 4 places"
+        assert response.data[0]["event_name"] == "Camp été 2026"
+        assert older.id not in [item["id"] for item in response.data]
 
 
 class TestReturnIncidentDetail:

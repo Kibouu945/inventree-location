@@ -88,6 +88,7 @@ class InvenTreeLocation(
             ReservationListCreateView,
             ReservationTransitionView,
             ReturnIncidentDetailView,
+            ReturnIncidentHistoryView,
             ReturnIncidentListCreateView,
             ReturnReportPdfView,
             ReturnReportView,
@@ -135,6 +136,11 @@ class InvenTreeLocation(
                 "returns/incidents/",
                 ReturnIncidentListCreateView.as_view(),
                 name="return-incident-list",
+            ),
+            path(
+                "returns/history/",
+                ReturnIncidentHistoryView.as_view(),
+                name="return-incident-history",
             ),
             path(
                 "returns/incidents/<int:pk>/",

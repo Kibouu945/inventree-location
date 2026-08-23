@@ -427,6 +427,42 @@ class ReturnIncidentListCreateView(generics.ListCreateAPIView):
         return queryset
 
 
+class ReturnIncidentHistoryView(generics.ListAPIView):
+    """Retourne les incidents de retour des 90 derniers jours."""
+
+    permission_classes = [ReturnCheckinPermission]
+    serializer_class = ReturnIncidentSerializer
+
+    def get_queryset(self):
+        cutoff = timezone.now() - timedelta(days=90)
+        queryset = (
+            ReturnIncident.objects.filter(reported_at__gte=cutoff)
+            .select_related(
+                "line__part",
+                "line__reservation__prestation__manifestation",
+                "reported_by",
+            )
+            .order_by("-reported_at")
+        )
+
+        incident_type = self.request.query_params.get("type")
+        if incident_type:
+            queryset = queryset.filter(type=incident_type)
+
+        object_name = self.request.query_params.get("object")
+        if object_name:
+            queryset = queryset.filter(line__part__name__icontains=object_name)
+
+        event_name = self.request.query_params.get("event")
+        if event_name:
+            queryset = queryset.filter(
+                line__reservation__prestation__manifestation__nom__icontains=
+                    event_name
+            )
+
+        return queryset
+
+
 class ReturnIncidentDetailView(generics.RetrieveUpdateDestroyAPIView):
     """Détail, mise à jour et suppression d'un incident de retour."""
 
