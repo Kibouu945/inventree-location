@@ -218,7 +218,8 @@ class ReservationListCreateView(generics.ListCreateAPIView):
         """Retourne les réservations, filtrées par statut, période et recherche."""
 
         queryset = (
-            Reservation.objects.select_related("prestation", "demandeur")
+            Reservation.objects
+            .select_related("prestation", "demandeur")
             .prefetch_related("lignes")
             .all()
             .order_by("-date_demande")
@@ -404,9 +405,8 @@ class ReturnIncidentListCreateView(generics.ListCreateAPIView):
         """Retourne les incidents, filtrés par réservation et type."""
 
         queryset = (
-            ReturnIncident.objects.select_related(
-                "line__part", "line__reservation", "reported_by"
-            )
+            ReturnIncident.objects
+            .select_related("line__part", "line__reservation", "reported_by")
             .all()
             .order_by("-reported_at")
         )
@@ -736,7 +736,8 @@ class CatalogPartListView(APIView):
         from part.models import Part
 
         queryset = (
-            Part.objects.select_related("category", "rentable_info")
+            Part.objects
+            .select_related("category", "rentable_info")
             .all()
             .order_by("name")
         )
@@ -877,7 +878,8 @@ class CatalogPartDetailView(APIView):
         from part.models import Part
 
         part = (
-            Part.objects.select_related("category", "rentable_info")
+            Part.objects
+            .select_related("category", "rentable_info")
             .filter(pk=pk)
             .first()
         )
@@ -1039,7 +1041,8 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
         """Retourne les manifestations, filtrées par statut et recherche."""
 
         queryset = (
-            Manifestation.objects.select_related("organisateur", "groupe")
+            Manifestation.objects
+            .select_related("organisateur", "groupe")
             .all()
             .order_by("-date_debut")
         )
@@ -1069,7 +1072,8 @@ def _prestation_queryset():
     """Queryset commun aux vues prestation, avec relations préchargées."""
 
     return (
-        Prestation.objects.select_related("manifestation", "lieu")
+        Prestation.objects
+        .select_related("manifestation", "lieu")
         .prefetch_related("lignes_prestation__part")
         .all()
     )
@@ -1128,7 +1132,8 @@ class PrestationStockView(APIView):
         """Retourne la disponibilité de stock de la prestation."""
 
         prestation = (
-            Prestation.objects.prefetch_related("lignes_prestation")
+            Prestation.objects
+            .prefetch_related("lignes_prestation")
             .filter(pk=pk)
             .first()
         )

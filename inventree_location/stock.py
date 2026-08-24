@@ -107,7 +107,8 @@ def compute_engagement_details(
 
     if exclude_reservation_id is not None:
         excluded_forecast_id = (
-            Reservation.objects.filter(pk=exclude_reservation_id)
+            Reservation.objects
+            .filter(pk=exclude_reservation_id)
             .values_list("prestation_id", flat=True)
             .first()
         )
