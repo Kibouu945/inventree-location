@@ -39,7 +39,9 @@ export interface RetourErrors {
   [ligneId: number]: string | undefined;
 }
 
-export function validateRetourLignes(lignes: RetourLigneValues[]): RetourErrors {
+export function validateRetourLignes(
+  lignes: RetourLigneValues[]
+): RetourErrors {
   const errors: RetourErrors = {};
 
   for (const ligne of lignes) {
@@ -57,6 +59,56 @@ export function validateRetourLignes(lignes: RetourLigneValues[]): RetourErrors 
   return errors;
 }
 
-export function isRetourValid(lignes: RetourLigneValues[]): boolean {
-  return Object.keys(validateRetourLignes(lignes)).length === 0;
+/**
+ * Normalise les erreurs `lignes` renvoyées par le serveur.
+ *
+ * Deux formes coexistent : la vue renvoie un objet `{ "<id>": "message" }`,
+ * mais une erreur de champ DRF (`quantite_rendue` non entier, par exemple)
+ * arrive sous forme de *liste* alignée sur l'ordre envoyé. Rendue telle
+ * quelle, cette liste d'objets était passée à React comme enfant et faisait
+ * planter le widget.
+ */
+export function normalizeRetourErrors(
+  data: unknown,
+  envoyees: RetourLigneValues[]
+): RetourErrors {
+  const errors: RetourErrors = {};
+
+  if (!data || typeof data !== 'object') {
+    return errors;
+  }
+
+  const lignes = (data as { lignes?: unknown }).lignes;
+
+  if (Array.isArray(lignes)) {
+    lignes.forEach((entry, index) => {
+      const ligne = envoyees[index];
+
+      if (!ligne || !entry || typeof entry !== 'object') {
+        return;
+      }
+
+      const messages = Object.values(entry as Record<string, unknown>)
+        .flat()
+        .map((message) => String(message));
+
+      if (messages.length > 0) {
+        errors[ligne.id] = messages.join(' ');
+      }
+    });
+
+    return errors;
+  }
+
+  if (lignes && typeof lignes === 'object') {
+    for (const [id, message] of Object.entries(
+      lignes as Record<string, unknown>
+    )) {
+      errors[Number(id)] = Array.isArray(message)
+        ? message.map(String).join(' ')
+        : String(message);
+    }
+  }
+
+  return errors;
 }

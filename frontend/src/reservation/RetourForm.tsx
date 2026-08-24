@@ -18,9 +18,11 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
+  computeStatutRetour,
+  normalizeRetourErrors,
   type RetourErrors,
   type RetourLigneValues,
   type StatutRetour,
@@ -82,6 +84,10 @@ export function RetourForm({
   const [lignes, setLignes] = useState<RetourLigneValues[]>([]);
   const [errors, setErrors] = useState<RetourErrors>({});
   const [partNames, setPartNames] = useState<Record<number, string>>({});
+  // Le formulaire n'est initialisé qu'une fois par réservation : un refetch
+  // (retour de focus sur l'onglet, invalidation) ne doit pas écraser la
+  // saisie en cours du magasinier.
+  const seededFor = useRef<number | null>(null);
 
   const query = useQuery<RetourResponse>(
     {
@@ -97,15 +103,18 @@ export function RetourForm({
   );
 
   useEffect(() => {
-    if (query.data) {
-      setLignes(toFormLignes(query.data.lignes));
-      setPartNames(
-        Object.fromEntries(
-          query.data.lignes.map((ligne) => [ligne.id, ligne.part_name])
-        )
-      );
+    if (!query.data || seededFor.current === reservationId) {
+      return;
     }
-  }, [query.data]);
+
+    seededFor.current = reservationId;
+    setLignes(toFormLignes(query.data.lignes));
+    setPartNames(
+      Object.fromEntries(
+        query.data.lignes.map((ligne) => [ligne.id, ligne.part_name])
+      )
+    );
+  }, [query.data, reservationId]);
 
   const saveMutation = useMutation(
     {
@@ -139,14 +148,11 @@ export function RetourForm({
           onSaved();
         }
       },
-      onError: (error: unknown) => {
-        const data = (
-          error as { response?: { data?: { lignes?: RetourErrors; detail?: string } } }
-        )?.response?.data;
+      onError: (error: unknown, envoyees) => {
+        const data = (error as { response?: { data?: { detail?: string } } })
+          ?.response?.data;
 
-        if (data?.lignes) {
-          setErrors(data.lignes);
-        }
+        setErrors(normalizeRetourErrors(data, envoyees));
 
         notifications.show({
           title: 'Retour impossible',
@@ -177,6 +183,8 @@ export function RetourForm({
     saveMutation.mutate(lignes);
   }
 
+  const statutSaisi = computeStatutRetour(lignes);
+
   if (query.isLoading) {
     return (
       <Group justify='center' p='xl'>
@@ -192,7 +200,7 @@ export function RetourForm({
 
     return (
       <Alert color='red' title='Retour indisponible'>
-        {detail || "Impossible de charger le retour de cette réservation."}
+        {detail || 'Impossible de charger le retour de cette réservation.'}
       </Alert>
     );
   }
@@ -204,11 +212,11 @@ export function RetourForm({
           Bon {query.data?.numero} — saisissez la quantité rendue pour chaque
           ligne.
         </Text>
-        {query.data && (
-          <Badge color={STATUT_RETOUR_COLORS[query.data.statut_retour]}>
-            {STATUT_RETOUR_LABELS[query.data.statut_retour]}
-          </Badge>
-        )}
+        {/* Calculé sur la saisie en cours, pas sur la réponse serveur : le
+            magasinier voit tout de suite où en est le bon qu'il pointe. */}
+        <Badge color={STATUT_RETOUR_COLORS[statutSaisi]}>
+          {STATUT_RETOUR_LABELS[statutSaisi]}
+        </Badge>
       </Group>
 
       <Table striped>
@@ -229,9 +237,12 @@ export function RetourForm({
                   value={ligne.quantite_rendue}
                   min={0}
                   max={ligne.quantite_demandee}
+                  // Le serveur attend un entier : sans ça, une saisie « 2,5 »
+                  // partait au POST et revenait en erreur de champ DRF.
+                  allowDecimal={false}
                   w={110}
                   onChange={(value) =>
-                    updateLigne(ligne.id, Number(value) || 0)
+                    updateLigne(ligne.id, Math.trunc(Number(value)) || 0)
                   }
                 />
               </Table.Td>
@@ -242,7 +253,11 @@ export function RetourForm({
 
       {Object.entries(errors).map(([id, message]) =>
         message ? (
-          <Alert key={id} color='red' title={`Ligne ${partNames[Number(id)] || id}`}>
+          <Alert
+            key={id}
+            color='red'
+            title={`Ligne ${partNames[Number(id)] || id}`}
+          >
             {message}
           </Alert>
         ) : null

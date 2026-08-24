@@ -276,3 +276,90 @@ class TestRetourEndpointPost:
         response = ReservationRetourView.as_view()(request, pk=reservation.pk)
 
         assert response.status_code == status.HTTP_409_CONFLICT
+
+
+class TestRetourEndpointGardeFous:
+    """Défauts relevés en revue : bon rouvert, doublons, atomicité."""
+
+    @pytest.mark.django_db
+    def test_post_refuse_sur_un_bon_deja_retourne(
+        self, factory, magasinier, reservation_livree, deux_lignes
+    ):
+        ligne_tente, ligne_chaise = deux_lignes
+
+        complet = factory.post(
+            RETOUR_URL.format(pk=reservation_livree.pk),
+            {
+                "lignes": [
+                    {"id": ligne_tente.pk, "quantite_rendue": 5},
+                    {"id": ligne_chaise.pk, "quantite_rendue": 10},
+                ]
+            },
+            format="json",
+        )
+        force_authenticate(complet, user=magasinier)
+        ReservationRetourView.as_view()(complet, pk=reservation_livree.pk)
+
+        reservation_livree.refresh_from_db()
+        assert reservation_livree.statut == StatutReservation.RETOURNEE
+
+        # Rouvrir le bon pour baisser les quantités laissait un état
+        # « retournee / partiel » sans retour arrière possible.
+        correction = factory.post(
+            RETOUR_URL.format(pk=reservation_livree.pk),
+            {"lignes": [{"id": ligne_tente.pk, "quantite_rendue": 2}]},
+            format="json",
+        )
+        force_authenticate(correction, user=magasinier)
+
+        response = ReservationRetourView.as_view()(
+            correction, pk=reservation_livree.pk
+        )
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+
+        ligne_tente.refresh_from_db()
+        assert ligne_tente.quantite_retournee == 5
+
+    @pytest.mark.django_db
+    def test_get_reste_consultable_sur_un_bon_retourne(
+        self, factory, magasinier, reservation_livree, deux_lignes
+    ):
+        reservation_livree.statut = StatutReservation.RETOURNEE
+        reservation_livree.save(update_fields=["statut"])
+
+        request = factory.get(RETOUR_URL.format(pk=reservation_livree.pk))
+        force_authenticate(request, user=magasinier)
+
+        response = ReservationRetourView.as_view()(
+            request, pk=reservation_livree.pk
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+
+    @pytest.mark.django_db
+    def test_post_refuse_une_ligne_en_double(
+        self, factory, magasinier, reservation_livree, deux_lignes
+    ):
+        ligne_tente, _ = deux_lignes
+
+        request = factory.post(
+            RETOUR_URL.format(pk=reservation_livree.pk),
+            {
+                "lignes": [
+                    {"id": ligne_tente.pk, "quantite_rendue": 5},
+                    {"id": ligne_tente.pk, "quantite_rendue": 1},
+                ]
+            },
+            format="json",
+        )
+        force_authenticate(request, user=magasinier)
+
+        response = ReservationRetourView.as_view()(
+            request, pk=reservation_livree.pk
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+        ligne_tente.refresh_from_db()
+        assert ligne_tente.quantite_retournee == 0

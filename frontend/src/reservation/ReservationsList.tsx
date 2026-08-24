@@ -21,7 +21,11 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
-import { canArbitrateReservations, canWriteReservations } from '../roles';
+import {
+  canArbitrateReservations,
+  canDeclareRetour,
+  canWriteReservations
+} from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
 import { canArbitrateReservation, transitionErrorMessage } from './formLogic';
 import { ReservationForm } from './ReservationForm';
@@ -153,9 +157,14 @@ export function ReservationsList({
     ? query.data
     : (query.data?.results ?? []);
 
-  // Livreur / magasinier / sav / lecteur : lecture seule (cf. permissions.py).
+  // Livreur / sav / lecteur : lecture seule (cf. permissions.py).
   const canWrite = canWriteReservations(context);
   const canArbitrate = canArbitrateReservations(context);
+  // Le magasinier n'arbitre pas mais déclare les retours : la colonne
+  // d'actions doit s'afficher pour lui aussi, sinon la déclaration de
+  // retour reste invisible pour sa propre persona.
+  const canRetour = canDeclareRetour(context);
+  const showActions = canArbitrate || canRetour;
 
   // Validation / refus d'une réservation soumise via l'endpoint de transition.
   const transitionMutation = useMutation(
@@ -336,7 +345,7 @@ export function ReservationsList({
               <Table.Th>Retour prévu</Table.Th>
               <Table.Th>Statut</Table.Th>
               <Table.Th>Nb objets</Table.Th>
-              {canArbitrate && <Table.Th>Actions</Table.Th>}
+              {showActions && <Table.Th>Actions</Table.Th>}
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -367,14 +376,15 @@ export function ReservationsList({
                   </Badge>
                 </Table.Td>
                 <Table.Td>{reservation.lignes.length}</Table.Td>
-                {canArbitrate && (
+                {showActions && (
                   <Table.Td
                     // Les actions ne doivent pas ouvrir la modale de détail.
                     onClick={(event) => event.stopPropagation()}
                     style={{ cursor: 'default' }}
                   >
-                    {(reservation.statut === 'livree' ||
-                      reservation.statut === 'retournee') && (
+                    {/* Seul un bon livré se déclare : un bon « retourné » est
+                        complet, le serveur refuse toute nouvelle déclaration. */}
+                    {canRetour && reservation.statut === 'livree' && (
                       <Button
                         size='xs'
                         color='grape'
@@ -388,7 +398,8 @@ export function ReservationsList({
                         Déclarer le retour
                       </Button>
                     )}
-                    {canArbitrateReservation(reservation.statut) ? (
+                    {canArbitrate &&
+                    canArbitrateReservation(reservation.statut) ? (
                       <Group gap='xs' wrap='nowrap'>
                         <Button
                           size='xs'
@@ -431,9 +442,13 @@ export function ReservationsList({
                         </Button>
                       </Group>
                     ) : (
-                      <Text c='dimmed' size='sm'>
-                        —
-                      </Text>
+                      // Le tiret ne s'affiche que si la ligne n'offre aucune
+                      // action, sinon il doublonnerait le bouton de retour.
+                      !(canRetour && reservation.statut === 'livree') && (
+                        <Text c='dimmed' size='sm'>
+                          —
+                        </Text>
+                      )
                     )}
                   </Table.Td>
                 )}

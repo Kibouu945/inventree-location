@@ -9,6 +9,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.mail import send_mail
+from django.db import transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 from rest_framework import generics, permissions, status
@@ -406,21 +407,47 @@ class ReservationRetourView(APIView):
     permission_classes = [PrestationRetourPermission]
     serializer_class = PrestationRetourSerializer
 
+    #: Consultable tant que le bon est livré ou déjà retourné.
     ELIGIBLE_STATUTS = {StatutReservation.LIVREE, StatutReservation.RETOURNEE}
+    #: Déclarable seulement tant que le bon est livré. Un bon « retourné » est
+    #: complet par construction : le rouvrir permettait de *baisser* les
+    #: quantités, et aucune transition ne ramène ensuite vers « livrée ».
+    DECLARABLE_STATUTS = {StatutReservation.LIVREE}
 
-    def _get_reservation(self, pk):
-        return (
-            Reservation.objects.prefetch_related("lignes", "lignes__part")
-            .filter(pk=pk)
-            .first()
+    NOT_DECLARABLE_DETAIL = (
+        "La déclaration de retour n'est accessible que pour une réservation livrée."
+    )
+    NOT_ELIGIBLE_DETAIL = (
+        "La déclaration de retour n'est accessible que pour "
+        "une réservation livrée ou déjà en cours de retour."
+    )
+
+    def _get_reservation(self, pk, *, lock=False):
+        """Charge la réservation ; `lock` pose un verrou de ligne.
+
+        Le verrou sérialise deux déclarations concurrentes : sans lui, les
+        deux franchissent la garde de statut avec un objet périmé et rejouent
+        toutes les deux la transition.
+        """
+
+        queryset = Reservation.objects.prefetch_related("lignes", "lignes__part")
+
+        if lock:
+            queryset = queryset.select_for_update()
+
+        return queryset.filter(pk=pk).first()
+
+    def _conflict_response(self, reservation, detail):
+        return Response(
+            {"detail": detail, "current_status": reservation.statut},
+            status=status.HTTP_409_CONFLICT,
         )
 
     @staticmethod
     def _statut_retour(lignes):
         total_demandee = sum(ligne.quantite_demandee for ligne in lignes)
         total_rendue = sum(
-            min(ligne.quantite_retournee, ligne.quantite_demandee)
-            for ligne in lignes
+            min(ligne.quantite_retournee, ligne.quantite_demandee) for ligne in lignes
         )
 
         if total_demandee <= 0 or total_rendue <= 0:
@@ -455,16 +482,7 @@ class ReservationRetourView(APIView):
             )
 
         if reservation.statut not in self.ELIGIBLE_STATUTS:
-            return Response(
-                {
-                    "detail": (
-                        "La déclaration de retour n'est accessible que pour "
-                        "une réservation livrée ou déjà en cours de retour."
-                    ),
-                    "current_status": reservation.statut,
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
+            return self._conflict_response(reservation, self.NOT_ELIGIBLE_DETAIL)
 
         lignes = list(reservation.lignes.all())
         statut_retour, total_demandee, total_rendue = self._statut_retour(lignes)
@@ -485,67 +503,73 @@ class ReservationRetourView(APIView):
     def post(self, request, pk, *args, **kwargs):
         """Enregistre les quantités rendues et met à jour le statut de retour."""
 
-        reservation = self._get_reservation(pk)
-
-        if reservation is None:
-            return Response(
-                {"detail": "Réservation introuvable."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        if reservation.statut not in self.ELIGIBLE_STATUTS:
-            return Response(
-                {
-                    "detail": (
-                        "La déclaration de retour n'est accessible que pour "
-                        "une réservation livrée ou déjà en cours de retour."
-                    ),
-                    "current_status": reservation.statut,
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        lignes_by_id = {ligne.pk: ligne for ligne in reservation.lignes.all()}
-        errors = {}
+        # Les écritures de lignes et la transition sont indissociables : sans
+        # la transaction, une transition qui échoue laissait les quantités
+        # déjà persistées et le bon coincé en « livrée ».
+        with transaction.atomic():
+            reservation = self._get_reservation(pk, lock=True)
 
-        for entry in serializer.validated_data["lignes"]:
-            ligne = lignes_by_id.get(entry["id"])
-
-            if ligne is None:
-                errors[str(entry["id"])] = (
-                    "Cette ligne n'appartient pas à la réservation."
-                )
-                continue
-
-            if entry["quantite_rendue"] > ligne.quantite_demandee:
-                errors[str(entry["id"])] = (
-                    f"La quantité rendue ({entry['quantite_rendue']}) ne peut "
-                    f"pas dépasser la quantité demandée "
-                    f"({ligne.quantite_demandee})."
+            if reservation is None:
+                return Response(
+                    {"detail": "Réservation introuvable."},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
 
-        if errors:
-            return Response({"lignes": errors}, status=status.HTTP_400_BAD_REQUEST)
+            if reservation.statut not in self.DECLARABLE_STATUTS:
+                return self._conflict_response(reservation, self.NOT_DECLARABLE_DETAIL)
 
-        for entry in serializer.validated_data["lignes"]:
-            ligne = lignes_by_id[entry["id"]]
-            ligne.quantite_retournee = entry["quantite_rendue"]
-            ligne.save(update_fields=["quantite_retournee", "updated_at"])
+            lignes_by_id = {ligne.pk: ligne for ligne in reservation.lignes.all()}
+            errors = {}
+            vues = set()
 
-        lignes = list(lignes_by_id.values())
-        statut_retour, total_demandee, total_rendue = self._statut_retour(lignes)
+            for entry in serializer.validated_data["lignes"]:
+                ligne = lignes_by_id.get(entry["id"])
 
-        if statut_retour == "complet" and reservation.statut == StatutReservation.LIVREE:
-            transition_reservation_status(
-                reservation=reservation,
-                new_status=StatutReservation.RETOURNEE,
-                user=request.user,
-                comment="Retour complet déclaré (SCRUM-95).",
-            )
-            reservation.refresh_from_db()
+                if ligne is None:
+                    errors[str(entry["id"])] = (
+                        "Cette ligne n'appartient pas à la réservation."
+                    )
+                    continue
+
+                # Un doublon était traité en dernier-gagnant silencieux : deux
+                # envois pour la même ligne sous-comptaient le retour.
+                if entry["id"] in vues:
+                    errors[str(entry["id"])] = (
+                        "Cette ligne est présente plusieurs fois dans l'envoi."
+                    )
+                    continue
+
+                vues.add(entry["id"])
+
+                if entry["quantite_rendue"] > ligne.quantite_demandee:
+                    errors[str(entry["id"])] = (
+                        f"La quantité rendue ({entry['quantite_rendue']}) ne peut "
+                        f"pas dépasser la quantité demandée "
+                        f"({ligne.quantite_demandee})."
+                    )
+
+            if errors:
+                return Response({"lignes": errors}, status=status.HTTP_400_BAD_REQUEST)
+
+            for entry in serializer.validated_data["lignes"]:
+                ligne = lignes_by_id[entry["id"]]
+                ligne.quantite_retournee = entry["quantite_rendue"]
+                ligne.save(update_fields=["quantite_retournee", "updated_at"])
+
+            lignes = list(lignes_by_id.values())
+            statut_retour, total_demandee, total_rendue = self._statut_retour(lignes)
+
+            if statut_retour == "complet":
+                transition_reservation_status(
+                    reservation=reservation,
+                    new_status=StatutReservation.RETOURNEE,
+                    user=request.user,
+                    comment="Retour complet déclaré (SCRUM-95).",
+                )
+                reservation.refresh_from_db()
 
         return Response(
             {

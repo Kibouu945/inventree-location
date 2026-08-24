@@ -2,6 +2,8 @@ import type { InvenTreePluginContext } from '@inventreedb/ui';
 import { describe, expect, it } from 'vitest';
 
 import {
+  canArbitrateReservations,
+  canDeclareRetour,
   canWriteCatalog,
   canWriteReservations,
   hasAnyRole,
@@ -90,5 +92,31 @@ describe('canWriteCatalog', () => {
     expect(canWriteCatalog(makeContext({ groups: groups(role) }))).toBe(
       expected
     );
+  });
+});
+
+// Le retour et l'arbitrage ne se recouvrent pas : le magasinier déclare les
+// retours sans arbitrer, le gestionnaire arbitre sans déclarer. Le bouton
+// « Déclarer le retour » vivait dans la colonne d'arbitrage, donc invisible
+// pour sa propre persona.
+describe('canDeclareRetour', () => {
+  it('ouvert au magasinier et à l’admin', () => {
+    expect(
+      canDeclareRetour(makeContext({ groups: groups('magasinier') }))
+    ).toBe(true);
+    expect(canDeclareRetour(makeContext({ groups: groups('admin') }))).toBe(
+      true
+    );
+  });
+
+  it('fermé au gestionnaire, qui n’arbitre que les réservations', () => {
+    const ctx = makeContext({ groups: groups('gestionnaire') });
+    expect(canDeclareRetour(ctx)).toBe(false);
+    expect(canArbitrateReservations(ctx)).toBe(true);
+  });
+
+  it('le magasinier n’arbitre pas', () => {
+    const ctx = makeContext({ groups: groups('magasinier') });
+    expect(canArbitrateReservations(ctx)).toBe(false);
   });
 });
