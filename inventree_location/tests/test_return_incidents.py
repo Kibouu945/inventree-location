@@ -437,3 +437,43 @@ class TestReturnIncidentCoherenceLigne:
         response = ReturnIncidentListCreateView.as_view()(request)
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+class TestIncidentDetruit:
+    """SCRUM-99 ajoute le type « détruit » : la ligne doit le refléter."""
+
+    @pytest.mark.django_db
+    def test_detruit_marque_la_ligne_cassee(self, factory, magasinier, ligne):
+        payload = {
+            "line": ligne.pk,
+            "type": ReturnIncidentType.DESTROYED,
+            "qty": 1,
+            "comment": "",
+        }
+        request = factory.post(INCIDENTS_URL, payload, format="json")
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnIncidentListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+        ligne.refresh_from_db()
+        assert ligne.etat_retour == "casse"
+
+    @pytest.mark.django_db
+    def test_detruit_prime_sur_manquant(self, factory, magasinier, ligne):
+        ReturnIncident.objects.create(
+            line=ligne, type=ReturnIncidentType.MISSING, qty=1
+        )
+
+        payload = {
+            "line": ligne.pk,
+            "type": ReturnIncidentType.DESTROYED,
+            "qty": 1,
+            "comment": "",
+        }
+        request = factory.post(INCIDENTS_URL, payload, format="json")
+        force_authenticate(request, user=magasinier)
+        ReturnIncidentListCreateView.as_view()(request)
+
+        ligne.refresh_from_db()
+        assert ligne.etat_retour == "casse"

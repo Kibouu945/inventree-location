@@ -68,7 +68,9 @@ def build_return_report(reservation_id: int) -> dict:
             "extra_cost": extra_cost,
         })
 
-    demandeur = f"{reservation.demandeur.first_name} {reservation.demandeur.last_name}".strip()
+    demandeur = (
+        f"{reservation.demandeur.first_name} {reservation.demandeur.last_name}".strip()
+    )
     if not demandeur:
         demandeur = reservation.demandeur.username
 

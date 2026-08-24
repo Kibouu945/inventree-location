@@ -61,7 +61,10 @@ from .serializers import (
 )
 from .stock import _as_date, compute_prestation_stock, compute_stock_availability
 from .services.return_report import build_return_report
-from .services.return_report_pdf import generate_return_report_pdf
+from .services.return_report_pdf import (
+    PdfEngineUnavailable,
+    generate_return_report_pdf,
+)
 from .services.workflow_service import (
     get_available_transitions,
     transition_reservation_status,
@@ -482,12 +485,21 @@ class ReturnReportPdfView(APIView):
                 {"detail": "Réservation introuvable."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        except PdfEngineUnavailable as error:
+            # L'absence du moteur PDF ne concerne que cet export : elle ne doit
+            # pas ressortir en 500 opaque.
+            return Response(
+                {"detail": str(error)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         response = HttpResponse(
             pdf_buffer.getvalue(),
             content_type="application/pdf",
         )
-        response["Content-Disposition"] = f'attachment; filename="rapport-retour-{pk}.pdf"'
+        response["Content-Disposition"] = (
+            f'attachment; filename="rapport-retour-{pk}.pdf"'
+        )
         return response
 
 

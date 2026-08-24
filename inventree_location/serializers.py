@@ -156,7 +156,19 @@ class LigneReservationSerializer(serializers.ModelSerializer):
 ETAT_RETOUR_PAR_TYPE = {
     ReturnIncidentType.MISSING: "manquant",
     ReturnIncidentType.BROKEN: "casse",
+    # « Détruit » n'a pas de valeur propre côté ligne : le vocabulaire de
+    # `etat_retour` s'arrête à ok / manquant / casse, et un objet détruit est
+    # un objet cassé du point de vue de la ligne. Le rapport de retour, lui,
+    # garde la distinction (la caution y remplace la valeur de remplacement).
+    ReturnIncidentType.DESTROYED: "casse",
 }
+
+#: Du plus grave au moins grave : le premier type présent gagne.
+ORDRE_GRAVITE_INCIDENT = (
+    ReturnIncidentType.DESTROYED,
+    ReturnIncidentType.BROKEN,
+    ReturnIncidentType.MISSING,
+)
 
 
 def sync_ligne_etat_retour(ligne):
@@ -164,18 +176,17 @@ def sync_ligne_etat_retour(ligne):
 
     Recalculé plutôt que déduit du dernier incident écrit : une modification
     ou une suppression doit ramener la ligne à son état réel, sinon elle reste
-    figée sur un incident qui n'existe plus. Le casse prime sur le manquant,
+    figée sur un incident qui n'existe plus. Le type le plus grave l'emporte,
     et l'absence d'incident remet la ligne à l'état « non renseigné ».
     """
 
     types = set(ligne.incidents.values_list("type", flat=True))
+    ligne.etat_retour = ""
 
-    if ReturnIncidentType.BROKEN in types:
-        ligne.etat_retour = ETAT_RETOUR_PAR_TYPE[ReturnIncidentType.BROKEN]
-    elif ReturnIncidentType.MISSING in types:
-        ligne.etat_retour = ETAT_RETOUR_PAR_TYPE[ReturnIncidentType.MISSING]
-    else:
-        ligne.etat_retour = ""
+    for type_incident in ORDRE_GRAVITE_INCIDENT:
+        if type_incident in types:
+            ligne.etat_retour = ETAT_RETOUR_PAR_TYPE[type_incident]
+            break
 
     ligne.save(update_fields=["etat_retour", "updated_at"])
 

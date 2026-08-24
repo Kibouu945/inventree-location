@@ -36,6 +36,17 @@ INSTALLED_APPS = [
 
 ROOT_URLCONF = "tests.urls"
 
+# Sans configuration de templates, aucun loader ne trouve
+# `inventree_location/templates/` : le rapport de retour PDF (SCRUM-99) rendait
+# un TemplateDoesNotExist en test alors qu'InvenTree, lui, active APP_DIRS.
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "APP_DIRS": True,
+        "OPTIONS": {},
+    }
+]
+
 # InvenTree expose ses endpoints derrière `TokenAuthentication` ; on garde le
 # même garde-fou ici pour que les tests reflètent la prod (401 sans token, pas 403).
 REST_FRAMEWORK = {

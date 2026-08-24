@@ -169,7 +169,22 @@ class TestReturnReportView:
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
+def _weasyprint_disponible() -> bool:
+    """WeasyPrint est un extra : ses bibliothèques natives manquent souvent."""
+
+    try:
+        import weasyprint  # noqa: F401
+    except ImportError:
+        return False
+
+    return True
+
+
 class TestReturnReportPdfView:
+    @pytest.mark.skipif(
+        not _weasyprint_disponible(),
+        reason="WeasyPrint absent (extra « pdf » non installé).",
+    )
     @pytest.mark.django_db
     def test_get_pdf(self, factory, magasinier, ligne):
         request = factory.get(f"{REPORT_URL}{ligne.reservation_id}/pdf/")
@@ -179,3 +194,59 @@ class TestReturnReportPdfView:
 
         assert response.status_code == status.HTTP_200_OK
         assert response["Content-Type"] == "application/pdf"
+
+    @pytest.mark.django_db
+    def test_moteur_absent_repond_503(self, factory, magasinier, ligne, monkeypatch):
+        """L'absence du moteur PDF ne doit toucher que cet export."""
+
+        from inventree_location.services import return_report_pdf
+
+        def _indisponible():
+            raise return_report_pdf.PdfEngineUnavailable(
+                "L'export PDF nécessite WeasyPrint et ses bibliothèques natives."
+            )
+
+        monkeypatch.setattr(
+            return_report_pdf, "_load_html_engine", _indisponible
+        )
+
+        request = factory.get(f"{REPORT_URL}{ligne.reservation_id}/pdf/")
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnReportPdfView.as_view()(request, pk=ligne.reservation_id)
+
+        assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+
+    @pytest.mark.django_db
+    def test_le_plugin_reste_importable_sans_weasyprint(self):
+        """Importé en tête de module, WeasyPrint rendait `views.py` — donc le
+        plugin entier et toute la suite — non importable."""
+
+        import ast
+        from pathlib import Path
+
+        source = Path(return_report_pdf_path()).read_text(encoding="utf-8")
+        arbre = ast.parse(source)
+
+        imports_racine = [
+            noeud
+            for noeud in arbre.body
+            if isinstance(noeud, (ast.Import, ast.ImportFrom))
+        ]
+        modules = {
+            alias.name.split(".")[0]
+            for noeud in imports_racine
+            for alias in noeud.names
+        } | {
+            noeud.module.split(".")[0]
+            for noeud in imports_racine
+            if isinstance(noeud, ast.ImportFrom) and noeud.module
+        }
+
+        assert "weasyprint" not in modules
+
+
+def return_report_pdf_path() -> str:
+    from inventree_location.services import return_report_pdf
+
+    return return_report_pdf.__file__
