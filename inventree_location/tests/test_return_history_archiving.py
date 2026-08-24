@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from inventree_location.archiving import archive_old_reservations
+from inventree_location.archiving import ARCHIVE_AFTER_DAYS, archive_old_reservations
 from inventree_location.models import (
     Groupe,
     Manifestation,
@@ -152,3 +152,21 @@ class TestReservationListPaginationAndArchiving:
         assert response.status_code == 200
         assert response.data["count"] == 3
         assert len(response.data["results"]) == 2
+
+
+class TestArchivageTracabilite:
+    @pytest.mark.django_db
+    def test_archivage_horodate_la_reservation(self, make_reservation):
+        """`queryset.update()` court-circuite `auto_now` : posé explicitement."""
+
+        old_date = timezone.now() - timedelta(days=ARCHIVE_AFTER_DAYS + 1)
+        reservation = make_reservation(
+            statut=StatutReservation.CLOTUREE, date_demande=old_date
+        )
+        Reservation.objects.filter(pk=reservation.pk).update(updated_at=old_date)
+
+        archive_old_reservations()
+
+        reservation.refresh_from_db()
+        assert reservation.is_archived is True
+        assert reservation.updated_at > old_date

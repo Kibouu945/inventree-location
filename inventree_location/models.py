@@ -380,8 +380,7 @@ def _generate_reservation_numero(year: int) -> str:
 
     prefix = f"RES-{year}-"
     last_numero = (
-        Reservation.objects
-        .filter(numero__startswith=prefix)
+        Reservation.objects.filter(numero__startswith=prefix)
         .order_by("-numero")
         .values_list("numero", flat=True)
         .first()

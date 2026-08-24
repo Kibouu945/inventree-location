@@ -90,7 +90,7 @@ class TestReservationFilters:
         response = ReservationListCreateView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        assert [row["id"] for row in response.data] == [validee.pk]
+        assert [row["id"] for row in response.data["results"]] == [validee.pk]
 
     @pytest.mark.django_db
     def test_filter_by_period(self, factory, user, prestation):
@@ -122,7 +122,7 @@ class TestReservationFilters:
         response = ReservationListCreateView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        assert [row["id"] for row in response.data] == [early.pk]
+        assert [row["id"] for row in response.data["results"]] == [early.pk]
 
     @pytest.mark.django_db
     def test_filter_by_categories(self, factory, user, prestation):
@@ -154,8 +154,8 @@ class TestReservationFilters:
         response = ReservationListCreateView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        assert [row["id"] for row in response.data] == [reservation_a.pk]
-        assert reservation_b.pk not in [row["id"] for row in response.data]
+        assert [row["id"] for row in response.data["results"]] == [reservation_a.pk]
+        assert reservation_b.pk not in [row["id"] for row in response.data["results"]]
 
 
 class TestReservationNestedLignes:
