@@ -227,7 +227,11 @@ class ReservationListCreateView(generics.ListCreateAPIView):
             .order_by("-date_demande")
         )
 
-        # Un livreur pur ne voit que les réservations validées.
+        include_archived = self.request.query_params.get("include_archived")
+
+        if str(include_archived).lower() not in {"1", "true", "yes"}:
+            queryset = queryset.filter(is_archived=False)
+
         if roles.sees_only_deliverable_reservations(self.request.user):
             queryset = queryset.filter(statut=StatutReservation.VALIDEE)
 
