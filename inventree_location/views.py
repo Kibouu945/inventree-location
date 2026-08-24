@@ -57,10 +57,14 @@ from .serializers import (
     ReturnIncidentSerializer,
     UserSerializer,
     geocode_candidates,
+    sync_ligne_etat_retour,
 )
 from .stock import _as_date, compute_prestation_stock, compute_stock_availability
 from .services.return_report import build_return_report
-from .services.return_report_pdf import generate_return_report_pdf
+from .services.return_report_pdf import (
+    PdfEngineUnavailable,
+    generate_return_report_pdf,
+)
 from .services.workflow_service import (
     get_available_transitions,
     transition_reservation_status,
@@ -414,9 +418,11 @@ class ReturnIncidentListCreateView(generics.ListCreateAPIView):
             .order_by("-reported_at")
         )
 
-        reservation_id = self.request.query_params.get("reservation")
+        # Validé plutôt que passé tel quel : `?reservation=abc` remontait
+        # jusqu'au ORM et sortait en 500 au lieu d'un 400.
+        reservation_id = parse_optional_int_param(self.request, "reservation")
 
-        if reservation_id:
+        if reservation_id is not None:
             queryset = queryset.filter(line__reservation_id=reservation_id)
 
         incident_type = self.request.query_params.get("type")
@@ -456,8 +462,7 @@ class ReturnIncidentHistoryView(generics.ListAPIView):
         event_name = self.request.query_params.get("event")
         if event_name:
             queryset = queryset.filter(
-                line__reservation__prestation__manifestation__nom__icontains=
-                    event_name
+                line__reservation__prestation__manifestation__nom__icontains=event_name
             )
 
         return queryset
@@ -471,6 +476,17 @@ class ReturnIncidentDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = ReturnIncident.objects.select_related(
         "line__part", "line__reservation", "reported_by"
     )
+
+    def perform_destroy(self, instance):
+        """Supprime l'incident puis réaligne l'état de retour de la ligne.
+
+        Sans ça, supprimer le dernier incident d'une ligne la laissait
+        indéfiniment marquée « manquant » ou « cassé ».
+        """
+
+        ligne = instance.line
+        super().perform_destroy(instance)
+        sync_ligne_etat_retour(ligne)
 
 
 class ReturnReportView(APIView):
@@ -504,12 +520,21 @@ class ReturnReportPdfView(APIView):
                 {"detail": "Réservation introuvable."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        except PdfEngineUnavailable as error:
+            # L'absence du moteur PDF ne concerne que cet export : elle ne doit
+            # pas ressortir en 500 opaque.
+            return Response(
+                {"detail": str(error)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         response = HttpResponse(
             pdf_buffer.getvalue(),
             content_type="application/pdf",
         )
-        response["Content-Disposition"] = f'attachment; filename="rapport-retour-{pk}.pdf"'
+        response["Content-Disposition"] = (
+            f'attachment; filename="rapport-retour-{pk}.pdf"'
+        )
         return response
 
 
