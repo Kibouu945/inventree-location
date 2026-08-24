@@ -360,8 +360,7 @@ def list_current_conflicts() -> List[dict]:
     from .models import Reservation
 
     queryset = (
-        Reservation.objects
-        .select_related("prestation", "demandeur")
+        Reservation.objects.select_related("prestation", "demandeur")
         .prefetch_related("lignes")
         .filter(
             statut__in=CONFLICT_STATUSES,

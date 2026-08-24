@@ -56,6 +56,7 @@ from .serializers import (
     ReturnIncidentSerializer,
     UserSerializer,
     geocode_candidates,
+    sync_ligne_etat_retour,
 )
 from .stock import _as_date, compute_prestation_stock, compute_stock_availability
 from .services.workflow_service import (
@@ -218,8 +219,7 @@ class ReservationListCreateView(generics.ListCreateAPIView):
         """Retourne les réservations, filtrées par statut, période et recherche."""
 
         queryset = (
-            Reservation.objects
-            .select_related("prestation", "demandeur")
+            Reservation.objects.select_related("prestation", "demandeur")
             .prefetch_related("lignes")
             .all()
             .order_by("-date_demande")
@@ -405,15 +405,18 @@ class ReturnIncidentListCreateView(generics.ListCreateAPIView):
         """Retourne les incidents, filtrés par réservation et type."""
 
         queryset = (
-            ReturnIncident.objects
-            .select_related("line__part", "line__reservation", "reported_by")
+            ReturnIncident.objects.select_related(
+                "line__part", "line__reservation", "reported_by"
+            )
             .all()
             .order_by("-reported_at")
         )
 
-        reservation_id = self.request.query_params.get("reservation")
+        # Validé plutôt que passé tel quel : `?reservation=abc` remontait
+        # jusqu'au ORM et sortait en 500 au lieu d'un 400.
+        reservation_id = parse_optional_int_param(self.request, "reservation")
 
-        if reservation_id:
+        if reservation_id is not None:
             queryset = queryset.filter(line__reservation_id=reservation_id)
 
         incident_type = self.request.query_params.get("type")
@@ -432,6 +435,17 @@ class ReturnIncidentDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = ReturnIncident.objects.select_related(
         "line__part", "line__reservation", "reported_by"
     )
+
+    def perform_destroy(self, instance):
+        """Supprime l'incident puis réaligne l'état de retour de la ligne.
+
+        Sans ça, supprimer le dernier incident d'une ligne la laissait
+        indéfiniment marquée « manquant » ou « cassé ».
+        """
+
+        ligne = instance.line
+        super().perform_destroy(instance)
+        sync_ligne_etat_retour(ligne)
 
 
 class ConflictsListView(APIView):
@@ -736,8 +750,7 @@ class CatalogPartListView(APIView):
         from part.models import Part
 
         queryset = (
-            Part.objects
-            .select_related("category", "rentable_info")
+            Part.objects.select_related("category", "rentable_info")
             .all()
             .order_by("name")
         )
@@ -878,8 +891,7 @@ class CatalogPartDetailView(APIView):
         from part.models import Part
 
         part = (
-            Part.objects
-            .select_related("category", "rentable_info")
+            Part.objects.select_related("category", "rentable_info")
             .filter(pk=pk)
             .first()
         )
@@ -1041,8 +1053,7 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
         """Retourne les manifestations, filtrées par statut et recherche."""
 
         queryset = (
-            Manifestation.objects
-            .select_related("organisateur", "groupe")
+            Manifestation.objects.select_related("organisateur", "groupe")
             .all()
             .order_by("-date_debut")
         )
@@ -1072,8 +1083,7 @@ def _prestation_queryset():
     """Queryset commun aux vues prestation, avec relations préchargées."""
 
     return (
-        Prestation.objects
-        .select_related("manifestation", "lieu")
+        Prestation.objects.select_related("manifestation", "lieu")
         .prefetch_related("lignes_prestation__part")
         .all()
     )
@@ -1132,8 +1142,7 @@ class PrestationStockView(APIView):
         """Retourne la disponibilité de stock de la prestation."""
 
         prestation = (
-            Prestation.objects
-            .prefetch_related("lignes_prestation")
+            Prestation.objects.prefetch_related("lignes_prestation")
             .filter(pk=pk)
             .first()
         )
