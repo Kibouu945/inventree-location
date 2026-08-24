@@ -380,7 +380,8 @@ def _generate_reservation_numero(year: int) -> str:
 
     prefix = f"RES-{year}-"
     last_numero = (
-        Reservation.objects.filter(numero__startswith=prefix)
+        Reservation.objects
+        .filter(numero__startswith=prefix)
         .order_by("-numero")
         .values_list("numero", flat=True)
         .first()
@@ -454,9 +455,7 @@ class Reservation(TimestampedModel):
     commentaire = models.TextField(
         blank=True, default="", verbose_name=_("commentaire")
     )
-    is_archived = models.BooleanField(
-        default=False, verbose_name=_("archivée")
-    )
+    is_archived = models.BooleanField(default=False, verbose_name=_("archivée"))
 
     class Meta:
         app_label = "inventree_location"
