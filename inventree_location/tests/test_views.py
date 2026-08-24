@@ -144,8 +144,8 @@ class TestReservationListCreateView:
         response = ReservationListCreateView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        assert len(response.data) == 1
-        assert response.data[0]["id"] == reservation.pk
+        assert len(response.data["results"]) == 1
+        assert response.data["results"][0]["id"] == reservation.pk
 
     @pytest.mark.django_db
     def test_list_exposes_prestation_and_demandeur_names(
@@ -157,7 +157,7 @@ class TestReservationListCreateView:
         response = ReservationListCreateView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        row = response.data[0]
+        row = response.data["results"][0]
         assert row["prestation_nom"] == reservation.prestation.nom
         assert row["demandeur_nom"] == user.username
 
@@ -177,7 +177,7 @@ class TestReservationListCreateView:
         response = ReservationListCreateView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        ids = [row["id"] for row in response.data]
+        ids = [row["id"] for row in response.data["results"]]
         assert ids == [recente.pk, ancienne.pk]
 
     @pytest.mark.django_db
@@ -201,7 +201,7 @@ class TestReservationListCreateView:
         response = ReservationListCreateView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        ids = [row["id"] for row in response.data]
+        ids = [row["id"] for row in response.data["results"]]
         assert reservation.pk in ids
         assert autre.pk not in ids
 
@@ -216,7 +216,7 @@ class TestReservationListCreateView:
         response = ReservationListCreateView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        assert [row["id"] for row in response.data] == [reservation.pk]
+        assert [row["id"] for row in response.data["results"]] == [reservation.pk]
 
     @pytest.mark.django_db
     def test_create_reservation(self, factory, user, prestation):
