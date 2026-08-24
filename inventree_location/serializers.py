@@ -8,6 +8,7 @@ from urllib.request import Request, urlopen
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -148,12 +149,54 @@ class LigneReservationSerializer(serializers.ModelSerializer):
         read_only_fields = ["id"]
 
 
+#: Traduction du type d'incident vers le vocabulaire applicatif de
+#: `LigneReservation.etat_retour` ("ok" | "manquant" | "casse", cf. models.py).
+#: Sans elle, la colonne porterait deux vocabulaires incompatibles selon
+#: qu'elle est écrite par un incident ou par le check-in retour.
+ETAT_RETOUR_PAR_TYPE = {
+    ReturnIncidentType.MISSING: "manquant",
+    ReturnIncidentType.BROKEN: "casse",
+}
+
+
+def sync_ligne_etat_retour(ligne):
+    """Recalcule `etat_retour` à partir de tous les incidents de la ligne.
+
+    Recalculé plutôt que déduit du dernier incident écrit : une modification
+    ou une suppression doit ramener la ligne à son état réel, sinon elle reste
+    figée sur un incident qui n'existe plus. Le casse prime sur le manquant,
+    et l'absence d'incident remet la ligne à l'état « non renseigné ».
+    """
+
+    types = set(ligne.incidents.values_list("type", flat=True))
+
+    if ReturnIncidentType.BROKEN in types:
+        ligne.etat_retour = ETAT_RETOUR_PAR_TYPE[ReturnIncidentType.BROKEN]
+    elif ReturnIncidentType.MISSING in types:
+        ligne.etat_retour = ETAT_RETOUR_PAR_TYPE[ReturnIncidentType.MISSING]
+    else:
+        ligne.etat_retour = ""
+
+    ligne.save(update_fields=["etat_retour", "updated_at"])
+
+
 class ReturnIncidentSerializer(serializers.ModelSerializer):
     """Sérialiseur d'un incident de retour (manquant / cassé)."""
 
-    line_part_name = serializers.CharField(
-        source="line.part.name", read_only=True
+    # Déclaré explicitement : le `ChoiceField` implicite du ModelSerializer
+    # rejette la valeur avant tout `validate_type`, dont le message français
+    # n'atteignait donc jamais le client.
+    type = serializers.ChoiceField(
+        choices=ReturnIncidentType.choices,
+        error_messages={
+            "invalid_choice": "Type d'incident invalide : manquant ou cassé attendu."
+        },
     )
+    qty = serializers.IntegerField(
+        min_value=1,
+        error_messages={"min_value": "La quantité signalée doit être d'au moins 1."},
+    )
+    line_part_name = serializers.CharField(source="line.part.name", read_only=True)
     line_reservation_numero = serializers.CharField(
         source="line.reservation.numero", read_only=True
     )
@@ -190,29 +233,34 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
-    def validate_type(self, value):
-        """Valide le type d'incident (manquant / cassé)."""
-
-        if value not in ReturnIncidentType.values:
-            raise serializers.ValidationError(
-                "Type d'incident invalide : manquant ou cassé attendu."
-            )
-        return value
-
     def validate(self, attrs):
-        """La quantité signalée ne peut pas dépasser la quantité livrée."""
+        """Le cumul des incidents d'une ligne ne peut pas dépasser sa quantité.
+
+        Le plafond porte sur le cumul, pas sur l'incident isolé : deux
+        signalements de 3 sur une ligne de 3 passaient tous les deux, et la
+        ligne se retrouvait avec 6 unités en incident pour 3 engagées.
+        """
 
         line = attrs.get("line") or getattr(self.instance, "line", None)
 
         if line is not None:
             qty = attrs.get("qty", getattr(self.instance, "qty", 0))
+            # `quantite_livree` n'est renseignée par aucun endpoint à ce jour :
+            # le plafond retombe alors sur la quantité demandée.
             max_qty = line.quantite_livree or line.quantite_demandee
 
-            if qty > max_qty:
+            autres = line.incidents.all()
+
+            if self.instance is not None:
+                autres = autres.exclude(pk=self.instance.pk)
+
+            deja_signale = autres.aggregate(total=Sum("qty"))["total"] or 0
+
+            if deja_signale + qty > max_qty:
                 raise serializers.ValidationError({
                     "qty": (
-                        f"La quantité signalée ({qty}) dépasse la quantité "
-                        f"disponible ({max_qty})."
+                        f"La quantité signalée ({deja_signale + qty} au total) "
+                        f"dépasse la quantité disponible ({max_qty})."
                     )
                 })
 
@@ -226,13 +274,31 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
             validated_data["reported_by"] = request.user
 
         incident = super().create(validated_data)
-
-        line = incident.line
-        line.etat_retour = incident.type
-        line.commentaire = incident.comment
-        line.save(update_fields=["etat_retour", "commentaire", "updated_at"])
+        self._reporter_sur_la_ligne(incident)
 
         return incident
+
+    def update(self, instance, validated_data):
+        """Met à jour l'incident, puis réaligne l'état de retour de la ligne."""
+
+        incident = super().update(instance, validated_data)
+        self._reporter_sur_la_ligne(incident)
+
+        return incident
+
+    @staticmethod
+    def _reporter_sur_la_ligne(incident):
+        """Réaligne la ligne : état recalculé, commentaire jamais effacé."""
+
+        ligne = incident.line
+
+        # Le commentaire de la ligne appartient au magasinier : il n'est repris
+        # que si l'incident en fournit un, jamais remis à blanc.
+        if incident.comment:
+            ligne.commentaire = incident.comment
+            ligne.save(update_fields=["commentaire", "updated_at"])
+
+        sync_ligne_etat_retour(ligne)
 
 
 class ReservationStatusLogSerializer(serializers.ModelSerializer):

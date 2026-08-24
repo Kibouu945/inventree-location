@@ -171,9 +171,10 @@ class TestReturnIncidentListCreate:
         assert incident.comment == "Une tente manque au retour"
         assert incident.reported_by_id == magasinier.pk
 
-        # La ligne est mise à jour automatiquement.
+        # La ligne est mise à jour automatiquement, dans le vocabulaire
+        # applicatif de `etat_retour` ("ok" / "manquant" / "casse").
         ligne.refresh_from_db()
-        assert ligne.etat_retour == ReturnIncidentType.MISSING
+        assert ligne.etat_retour == "manquant"
         assert ligne.commentaire == "Une tente manque au retour"
 
     @pytest.mark.django_db
@@ -300,3 +301,139 @@ class TestReturnIncidentDetail:
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
         assert ReturnIncident.objects.count() == 0
+
+
+class TestReturnIncidentCoherenceLigne:
+    """L'état de la ligne suit les incidents, y compris après édition."""
+
+    @pytest.mark.django_db
+    def test_casse_prime_sur_manquant(self, factory, magasinier, ligne):
+        ReturnIncident.objects.create(
+            line=ligne, type=ReturnIncidentType.MISSING, qty=1
+        )
+
+        payload = {
+            "line": ligne.pk,
+            "type": ReturnIncidentType.BROKEN,
+            "qty": 1,
+            "comment": "",
+        }
+        request = factory.post(INCIDENTS_URL, payload, format="json")
+        force_authenticate(request, user=magasinier)
+
+        assert (
+            ReturnIncidentListCreateView.as_view()(request).status_code
+            == status.HTTP_201_CREATED
+        )
+
+        ligne.refresh_from_db()
+        assert ligne.etat_retour == "casse"
+
+    @pytest.mark.django_db
+    def test_commentaire_de_ligne_jamais_efface(self, factory, magasinier, ligne):
+        ligne.commentaire = "Commentaire métier à conserver"
+        ligne.save(update_fields=["commentaire"])
+
+        payload = {
+            "line": ligne.pk,
+            "type": ReturnIncidentType.MISSING,
+            "qty": 1,
+        }
+        request = factory.post(INCIDENTS_URL, payload, format="json")
+        force_authenticate(request, user=magasinier)
+
+        ReturnIncidentListCreateView.as_view()(request)
+
+        ligne.refresh_from_db()
+        assert ligne.commentaire == "Commentaire métier à conserver"
+
+    @pytest.mark.django_db
+    def test_cumul_des_incidents_plafonne(self, factory, magasinier, ligne):
+        ReturnIncident.objects.create(
+            line=ligne, type=ReturnIncidentType.MISSING, qty=3
+        )
+
+        payload = {
+            "line": ligne.pk,
+            "type": ReturnIncidentType.BROKEN,
+            "qty": 1,
+            "comment": "",
+        }
+        request = factory.post(INCIDENTS_URL, payload, format="json")
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnIncidentListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert ReturnIncident.objects.count() == 1
+
+    @pytest.mark.django_db
+    def test_quantite_nulle_refusee(self, factory, magasinier, ligne):
+        payload = {
+            "line": ligne.pk,
+            "type": ReturnIncidentType.MISSING,
+            "qty": 0,
+            "comment": "",
+        }
+        request = factory.post(INCIDENTS_URL, payload, format="json")
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnIncidentListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert ReturnIncident.objects.count() == 0
+
+    @pytest.mark.django_db
+    def test_patch_du_type_realigne_la_ligne(self, factory, magasinier, ligne):
+        incident = ReturnIncident.objects.create(
+            line=ligne, type=ReturnIncidentType.MISSING, qty=1
+        )
+        ligne.refresh_from_db()
+
+        request = factory.patch(
+            f"{INCIDENTS_URL}{incident.pk}/",
+            {"type": ReturnIncidentType.BROKEN},
+            format="json",
+        )
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnIncidentDetailView.as_view()(request, pk=incident.pk)
+
+        assert response.status_code == status.HTTP_200_OK
+        ligne.refresh_from_db()
+        assert ligne.etat_retour == "casse"
+
+    @pytest.mark.django_db
+    def test_delete_du_dernier_incident_remet_la_ligne_a_zero(
+        self, factory, magasinier, ligne
+    ):
+        payload = {
+            "line": ligne.pk,
+            "type": ReturnIncidentType.MISSING,
+            "qty": 1,
+            "comment": "",
+        }
+        request = factory.post(INCIDENTS_URL, payload, format="json")
+        force_authenticate(request, user=magasinier)
+        ReturnIncidentListCreateView.as_view()(request)
+
+        ligne.refresh_from_db()
+        assert ligne.etat_retour == "manquant"
+
+        incident = ReturnIncident.objects.get()
+        request = factory.delete(f"{INCIDENTS_URL}{incident.pk}/")
+        force_authenticate(request, user=magasinier)
+
+        ReturnIncidentDetailView.as_view()(request, pk=incident.pk)
+
+        ligne.refresh_from_db()
+        assert ligne.etat_retour == ""
+
+    @pytest.mark.django_db
+    def test_filtre_reservation_non_entier_refuse(self, factory, magasinier):
+        request = factory.get(INCIDENTS_URL, {"reservation": "abc"})
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnIncidentListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
