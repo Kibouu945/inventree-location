@@ -106,7 +106,7 @@ DASHBOARD_WIDGET_ROLES: dict[str, set[str]] = {
         LECTEUR,
     },
     "inventree-location-conflicts": {ADMIN, GESTIONNAIRE, LECTEUR},
-    "inventree-location-deliveries": {ADMIN, GESTIONNAIRE, LIVREUR},
+    "inventree-location-stock-alerts": {ADMIN, GESTIONNAIRE, MAGASINIER, LECTEUR},
 }
 
 

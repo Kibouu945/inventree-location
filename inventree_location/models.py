@@ -6,7 +6,8 @@ recrée pas ici. Le plugin se limite à 8 tables propres :
 
 1. Groupe — Organisation scoute propriétaire (mono-tenant MVP)
 2. Profile — Extension OneToOne du User Django
-3. RentableItem — Extension OneToOne de `part.Part` (drapeau louable + champs location)
+3. RentableItem — Extension OneToOne de `part.Part` (drapeau louable + champs
+   location) ; le stock physique reste celui d'InvenTree (`StockItem`)
 4. Manifestation — Événement (camp, formation, week-end)
 5. Prestation — Sous-événement / besoin matériel d'une Manifestation
 6. Lieu — Localisation physique rattachée à une Prestation
@@ -141,11 +142,10 @@ class RentableItem(TimestampedModel):
     is_rentable = models.BooleanField(default=True, verbose_name=_("louable"))
     consommable = models.BooleanField(default=False, verbose_name=_("consommable"))
     is_virtual = models.BooleanField(default=False, verbose_name=_("article virtuel"))
-    stock_total = models.PositiveIntegerField(
-        default=0,
-        verbose_name=_("stock total"),
-        help_text=_("Stock total disponible pour la location."),
-    )
+    # Pas de champ « stock total » ici : le stock physique appartient à
+    # InvenTree (`StockItem`). Un compteur parallèle divergeait en silence dès
+    # qu'une casse, un achat ou un inventaire était saisi côté InvenTree.
+    # Cf. `conflicts.get_part_total_stock`.
     caution = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -162,6 +162,9 @@ class RentableItem(TimestampedModel):
     )
     seuil_alerte_bas = models.PositiveIntegerField(
         null=True, blank=True, verbose_name=_("seuil d'alerte bas")
+    )
+    seuil_alerte_haut = models.PositiveIntegerField(
+        null=True, blank=True, verbose_name=_("seuil d'alerte haut")
     )
 
     class Meta:

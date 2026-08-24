@@ -21,11 +21,12 @@ CATALOG = "inventree-location-catalog"
 RESERVATIONS = "inventree-location-reservations"
 CONFLICTS = "inventree-location-conflicts"
 ORGANISATION = "inventree-location-organisation"
-DELIVERIES = "inventree-location-deliveries"
-ALL_WIDGETS = {CATALOG, RESERVATIONS, CONFLICTS, ORGANISATION, DELIVERIES}
-#: Widgets vus par un lecteur : tous sauf les tournées livreur (rôle non listé
-#: dans DASHBOARD_WIDGET_ROLES pour cette clé).
-LECTEUR_WIDGETS = ALL_WIDGETS - {DELIVERIES}
+STOCK_ALERTS = "inventree-location-stock-alerts"
+
+#: Dérivé du mapping et non figé en dur : un widget ajouté à
+#: ``DASHBOARD_WIDGET_ROLES`` sans toucher ce test faisait échouer cinq cas d'un
+#: coup, sans que la régression concerne les rôles.
+ALL_WIDGETS = set(roles.DASHBOARD_WIDGET_ROLES)
 
 
 def _make_user(username, role=None, *, is_staff=False, is_superuser=False):
@@ -67,8 +68,10 @@ class TestVisibleDashboardWidgetKeys:
         [
             (roles.ADMIN, ALL_WIDGETS),
             (roles.GESTIONNAIRE, ALL_WIDGETS),
-            (roles.LECTEUR, LECTEUR_WIDGETS),
-            (roles.MAGASINIER, {CATALOG, RESERVATIONS}),
+            (roles.LECTEUR, ALL_WIDGETS),
+            # Le magasinier suit la disponibilité future et l'inventaire :
+            # les alertes de seuil le concernent (US-09).
+            (roles.MAGASINIER, {CATALOG, RESERVATIONS, STOCK_ALERTS}),
             (roles.ORGANISATEUR, {RESERVATIONS, ORGANISATION}),
             (roles.LIVREUR, {RESERVATIONS, DELIVERIES}),
             (roles.SAV, set()),

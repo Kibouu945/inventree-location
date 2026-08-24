@@ -1,4 +1,4 @@
-// Liste des réservations + modal de création/édition (RES-03).
+// Liste des réservations + modal de création/édition.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   Alert,
@@ -87,11 +87,7 @@ function initialFilters(): ReservationFiltersState {
 }
 
 /**
- * Écran liste des réservations (RES-03).
- *
- * Tableau (numéro, demandeur, événement, dates, statut, nb objets) filtrable
- * par recherche, statut et période. Le tri par date décroissante est assuré
- * côté serveur. Ouvre le formulaire de création/édition dans une modale.
+ * Écran liste des réservations
  */
 export function ReservationsList({
   context

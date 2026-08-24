@@ -88,6 +88,7 @@ class InvenTreeLocation(
             ReservationDetailView,
             ReservationListCreateView,
             ReservationTransitionView,
+            StockAlertListView,
             UserListView,
         )
 
@@ -174,6 +175,11 @@ class InvenTreeLocation(
                 UserListView.as_view(),
                 name="user-list",
             ),
+            path(
+                "alerts/stock/",
+                StockAlertListView.as_view(),
+                name="stock-alert-list",
+            ),
         ]
 
     # User interface elements (from UserInterfaceMixin)
@@ -237,6 +243,13 @@ class InvenTreeLocation(
                 "source": self.plugin_static_file(
                     "Catalog.js:renderInvenTreeLocationCatalog"
                 ),
+                # Seul widget à ne pas déclarer sa taille, il retombait sur la
+                # boîte par défaut : un tableau de 5 colonnes y tenait dans une
+                # colonne, illisible. Même gabarit que les autres écrans.
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
                 "context": {
                     "settings": self.get_settings_dict(),
                 },
@@ -324,18 +337,22 @@ class InvenTreeLocation(
                 },
             })
 
-        return items
-
-    def get_ui_spotlight_actions(self, request, context, **kwargs):
-        """Return a list of custom spotlight actions to be made available."""
-        return [
-            {
-                "key": "sample-spotlight-action",
-                "title": "Hello Action",
-                "description": "Hello from InvenTreeLocation",
-                "icon": "ti:heart-handshake:outline",
+        if visible("inventree-location-stock-alerts"):
+            items.append({
+                "key": "inventree-location-stock-alerts",
+                "title": "Alertes stock",
+                "description": "Seuils bas/hauts et tension projetée",
+                "icon": "ti:bell-ringing:outline",
                 "source": self.plugin_static_file(
-                    "Spotlight.js:InvenTreeLocationSpotlightAction"
+                    "Dashboard.js:renderInvenTreeLocationDashboardItem"
                 ),
-            }
-        ]
+                "options": {
+                    "width": 12,
+                    "height": 6,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        return items

@@ -427,7 +427,12 @@ class ReservationSerializer(serializers.ModelSerializer):
 
 
 class RentableItemSerializer(serializers.ModelSerializer):
-    """Drapeaux location d'un Part."""
+    """Drapeaux location d'un Part.
+
+    Le stock physique n'y figure pas : il appartient à InvenTree et se met à
+    jour par les `StockItem`, pas par ce formulaire. `stock_total` reste
+    exposé en lecture par `CatalogPartSerializer`, calculé depuis InvenTree.
+    """
 
     class Meta:
         """Configuration du serializer RentableItem."""
@@ -438,10 +443,10 @@ class RentableItemSerializer(serializers.ModelSerializer):
             "is_rentable",
             "consommable",
             "is_virtual",
-            "stock_total",
             "caution",
             "valeur_remplacement",
             "seuil_alerte_bas",
+            "seuil_alerte_haut",
         ]
         read_only_fields = ["part"]
 
@@ -696,6 +701,8 @@ class CatalogPartSerializer(serializers.Serializer):
     consommable = serializers.SerializerMethodField()
     is_virtual = serializers.SerializerMethodField()
     stock_total = serializers.SerializerMethodField()
+    seuil_alerte_bas = serializers.SerializerMethodField()
+    seuil_alerte_haut = serializers.SerializerMethodField()
 
     def get_stock_available(self, obj):
         """Stock disponible de la part, exposé à 0 si non renseigné."""
@@ -748,13 +755,31 @@ class CatalogPartSerializer(serializers.Serializer):
         return bool(rentable_info.is_virtual)
 
     def get_stock_total(self, obj):
-        """Stock total louable issu de RentableItem (0 par défaut)."""
+        """Stock physique louable, tel qu'InvenTree le connaît."""
+
+        from .conflicts import get_part_total_stock
+
+        return get_part_total_stock(obj)
+
+    def get_seuil_alerte_bas(self, obj):
+        """Seuil bas configurable du part (null par défaut)."""
+
         rentable_info = getattr(obj, "rentable_info", None)
 
         if rentable_info is None:
-            return 0
+            return None
 
-        return rentable_info.stock_total
+        return rentable_info.seuil_alerte_bas
+
+    def get_seuil_alerte_haut(self, obj):
+        """Seuil haut configurable du part (null par défaut)."""
+
+        rentable_info = getattr(obj, "rentable_info", None)
+
+        if rentable_info is None:
+            return None
+
+        return rentable_info.seuil_alerte_haut
 
 
 class GroupeSerializer(serializers.ModelSerializer):

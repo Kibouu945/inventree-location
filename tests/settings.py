@@ -8,6 +8,12 @@ d'InvenTree afin que les FK `"part.Part"` résolvent.
 
 SECRET_KEY = "test-only-not-secret"
 USE_TZ = True
+# Même fuseau métier que la stack (INVENTREE_TIMEZONE dans docker-compose).
+# Sans ce réglage, Django retombe sur son défaut America/Chicago : la
+# disponibilité « du jour », calculée en heure locale, désignait alors une
+# autre journée que les fixtures construites en UTC, et les tests basculaient
+# au rouge selon l'heure d'exécution.
+TIME_ZONE = "Europe/Paris"
 DEBUG = False
 DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 
@@ -24,6 +30,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "part",
+    "stock",
     "inventree_location",
 ]
 
