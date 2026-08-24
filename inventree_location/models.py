@@ -454,6 +454,9 @@ class Reservation(TimestampedModel):
     commentaire = models.TextField(
         blank=True, default="", verbose_name=_("commentaire")
     )
+    is_archived = models.BooleanField(
+        default=False, verbose_name=_("archivée")
+    )
 
     class Meta:
         app_label = "inventree_location"
@@ -465,6 +468,10 @@ class Reservation(TimestampedModel):
                 fields=["date_retrait_prevue", "date_retour_prevue", "statut"],
                 name="resa_periode_statut_idx",
             ),
+            models.Index(fields=["statut"], name="resa_statut_idx"),
+            models.Index(fields=["date_retrait_prevue"], name="resa_retrait_idx"),
+            models.Index(fields=["date_retour_prevue"], name="resa_retour_idx"),
+            models.Index(fields=["is_archived"], name="resa_archived_idx"),
         ]
 
     def __str__(self):
