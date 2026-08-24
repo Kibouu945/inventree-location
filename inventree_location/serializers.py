@@ -149,13 +149,9 @@ class LigneReservationSerializer(serializers.ModelSerializer):
 
 
 class ReturnIncidentSerializer(serializers.ModelSerializer):
-    """Sérialiseur d'un incident de retour (manquant / cassé).
+    """Sérialiseur d'un incident de retour (manquant / cassé)."""
 
-    """
-
-    line_part_name = serializers.CharField(
-        source="line.part.name", read_only=True
-    )
+    line_part_name = serializers.CharField(source="line.part.name", read_only=True)
     line_reservation_numero = serializers.CharField(
         source="line.reservation.numero", read_only=True
     )

@@ -153,7 +153,8 @@ export function ReservationsList({
   const canWrite = canWriteReservations(context);
   const canArbitrate = canArbitrateReservations(context);
   const canCheckin = canCheckinReturns(context);
-  const canCheckinReturn = canCheckin && modalState.open && modalState.reservationId != null;
+  const canCheckinReturn =
+    canCheckin && modalState.open && modalState.reservationId != null;
 
   const detailQuery = useQuery<Reservation>(
     {
@@ -389,7 +390,7 @@ export function ReservationsList({
                           loading={
                             transitionMutation.isPending &&
                             transitionMutation.variables?.id ===
-                            reservation.id &&
+                              reservation.id &&
                             transitionMutation.variables?.statut === 'validee'
                           }
                           disabled={transitionMutation.isPending}
@@ -409,7 +410,7 @@ export function ReservationsList({
                           loading={
                             transitionMutation.isPending &&
                             transitionMutation.variables?.id ===
-                            reservation.id &&
+                              reservation.id &&
                             transitionMutation.variables?.statut === 'refusee'
                           }
                           disabled={transitionMutation.isPending}
@@ -455,10 +456,7 @@ export function ReservationsList({
           onSaved={closeModal}
         />
         {canCheckinReturn && detailQuery.data && (
-          <ReturnCheckin
-            context={context}
-            reservation={detailQuery.data}
-          />
+          <ReturnCheckin context={context} reservation={detailQuery.data} />
         )}
       </Modal>
     </Stack>

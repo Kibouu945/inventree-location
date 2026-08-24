@@ -32,6 +32,7 @@ from .models import (
     RentableItem,
     Reservation,
     ReturnIncident,
+    ReturnIncidentType,
     StatutReservation,
 )
 from .permissions import (
@@ -333,8 +334,7 @@ class ReservationConflictCheckView(APIView):
 
 
 class ReturnIncidentListCreateView(generics.ListCreateAPIView):
-    """Liste et crée les incidents de retour (manquant / cassé).
-    """
+    """Liste et crée les incidents de retour (manquant / cassé)."""
 
     permission_classes = [ReturnCheckinPermission]
     serializer_class = ReturnIncidentSerializer
@@ -350,9 +350,11 @@ class ReturnIncidentListCreateView(generics.ListCreateAPIView):
             .order_by("-reported_at")
         )
 
-        reservation_id = self.request.query_params.get("reservation")
+        # Validé plutôt que passé tel quel : `?reservation=abc` remontait
+        # jusqu'à l'ORM et sortait en 500 au lieu d'un 400.
+        reservation_id = parse_optional_int_param(self.request, "reservation")
 
-        if reservation_id:
+        if reservation_id is not None:
             queryset = queryset.filter(line__reservation_id=reservation_id)
 
         incident_type = self.request.query_params.get("type")
@@ -362,7 +364,10 @@ class ReturnIncidentListCreateView(generics.ListCreateAPIView):
 
         bill_client = self.request.query_params.get("bill_client")
 
-        if bill_client is not None:
+        # `?bill_client=` (vide) n'est pas un filtre : sans ce garde-fou il
+        # était lu comme « false » et masquait silencieusement la moitié des
+        # incidents.
+        if bill_client is not None and str(bill_client).strip():
             bill_value = str(bill_client).lower() in {"1", "true", "yes"}
             queryset = queryset.filter(bill_client=bill_value)
 
@@ -380,64 +385,83 @@ class ReturnIncidentDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 class ReturnLossReportView(APIView):
+    """Rapport de pertes agrégé : manquants, cassés et facturés au client.
+
+    Les totaux et les ventilations sont calculés depuis la même passe, avec
+    la même définition de « facturé » : tout incident portant `bill_client`,
+    quel que soit son type. Le total ne comptait que les manquants, donc il
+    ne se réconciliait pas avec les ventilations.
+    """
 
     permission_classes = [ReturnCheckinPermission]
+
+    #: Clés d'agrégation par type d'incident, alignées sur ReturnIncidentType.
+    TOTAL_KEYS = {
+        ReturnIncidentType.MISSING: "missing",
+        ReturnIncidentType.BROKEN: "broken",
+    }
 
     def get(self, request, *args, **kwargs):
         """Retourne le rapport de pertes agrégé."""
 
-        reservation_id = request.query_params.get("reservation")
+        reservation_id = parse_optional_int_param(request, "reservation")
 
         incidents = ReturnIncident.objects.select_related(
             "line__part", "line__reservation"
         )
 
-        if reservation_id:
+        if reservation_id is not None:
             incidents = incidents.filter(line__reservation_id=reservation_id)
 
         incidents = list(incidents)
 
-        total_missing = sum(
-            incident.qty for incident in incidents if incident.type == "missing"
-        )
-        total_broken = sum(
-            incident.qty for incident in incidents if incident.type == "broken"
-        )
-        total_billed = sum(
-            incident.qty
-            for incident in incidents
-            if incident.type == "missing" and incident.bill_client
-        )
-
+        totaux = {"missing": 0, "broken": 0, "billed": 0}
         by_part = {}
         by_reservation = {}
 
         for incident in incidents:
-            part_id = incident.line.part_id
-            part_name = incident.line.part.name
+            # Un type inconnu (ajouté au modèle sans passer ici) ne doit pas
+            # faire tomber le rapport sur un KeyError.
+            cle = self.TOTAL_KEYS.get(incident.type)
 
-            part_entry = by_part.setdefault(part_id, {
-                "part_id": part_id,
-                "part_name": part_name,
-                "missing": 0,
-                "broken": 0,
-                "billed": 0,
-            })
-            part_entry[incident.type] += incident.qty
-            if incident.bill_client:
-                part_entry["billed"] += incident.qty
+            part_id = incident.line.part_id
+
+            part_entry = by_part.setdefault(
+                part_id,
+                {
+                    "part_id": part_id,
+                    "part_name": incident.line.part.name,
+                    "missing": 0,
+                    "broken": 0,
+                    "billed": 0,
+                },
+            )
 
             reservation_id_key = incident.line.reservation_id
-            reservation_entry = by_reservation.setdefault(reservation_id_key, {
-                "reservation_id": reservation_id_key,
-                "reservation_numero": incident.line.reservation.numero,
-                "missing": 0,
-                "broken": 0,
-                "billed": 0,
-            })
-            reservation_entry[incident.type] += incident.qty
+            reservation_entry = by_reservation.setdefault(
+                reservation_id_key,
+                {
+                    "reservation_id": reservation_id_key,
+                    "reservation_numero": incident.line.reservation.numero,
+                    "missing": 0,
+                    "broken": 0,
+                    "billed": 0,
+                },
+            )
+
+            if cle is not None:
+                totaux[cle] += incident.qty
+                part_entry[cle] += incident.qty
+                reservation_entry[cle] += incident.qty
+
             if incident.bill_client:
+                totaux["billed"] += incident.qty
+                part_entry["billed"] += incident.qty
                 reservation_entry["billed"] += incident.qty
+
+        total_missing = totaux["missing"]
+        total_broken = totaux["broken"]
+        total_billed = totaux["billed"]
 
         return Response(
             {

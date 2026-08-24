@@ -38,7 +38,7 @@ export interface Page<T> {
   results: T[];
 }
 
-export type ReservationStatut = "brouillon" | "soumise";
+export type ReservationStatut = 'brouillon' | 'soumise';
 
 /** Ligne de matériel telle que manipulée par le formulaire (avant envoi API). */
 export interface LigneReservationLine {
@@ -94,7 +94,7 @@ export interface Reservation {
   updated_at: string;
 }
 
-export type ReturnIncidentType = "missing" | "broken";
+export type ReturnIncidentType = 'missing' | 'broken';
 
 /** Incident de retour tel que renvoyé par l'API (`ReturnIncidentSerializer`). */
 export interface ReturnIncident {

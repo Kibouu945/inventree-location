@@ -316,3 +316,71 @@ class TestReturnLossReport:
         assert response.status_code == status.HTTP_200_OK
         assert response.data["count"] == 1
         assert response.data["total_missing"] == 1
+
+class TestReturnLossReportGardeFous:
+    """Défauts relevés en revue du rapport de pertes."""
+
+    @pytest.mark.django_db
+    def test_casse_facture_compte_dans_le_total(self, factory, magasinier, ligne):
+        """Le total « facturé » se réconcilie avec les ventilations.
+
+        `total_billed` ne comptait que les manquants alors que `by_part` et
+        `by_reservation` comptaient tout incident facturé : un cassé facturé
+        apparaissait dans la ventilation mais pas dans le total.
+        """
+
+        ReturnIncident.objects.create(
+            line=ligne,
+            type=ReturnIncidentType.BROKEN,
+            qty=2,
+            bill_client=True,
+            reported_by=magasinier,
+        )
+
+        request = factory.get(LOSS_REPORT_URL)
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnLossReportView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["total_billed"] == 2
+        assert response.data["by_part"][0]["billed"] == 2
+        assert response.data["by_reservation"][0]["billed"] == 2
+
+    @pytest.mark.django_db
+    def test_rapport_filtre_non_entier_refuse(self, factory, magasinier):
+        request = factory.get(LOSS_REPORT_URL, {"reservation": "abc"})
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnLossReportView.as_view()(request)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.django_db
+    def test_liste_filtre_non_entier_refuse(self, factory, magasinier):
+        request = factory.get(INCIDENTS_URL, {"reservation": "abc"})
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnIncidentListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.django_db
+    def test_bill_client_vide_ne_filtre_pas(self, factory, magasinier, ligne):
+        """`?bill_client=` était lu comme « false » et masquait la moitié."""
+
+        ReturnIncident.objects.create(
+            line=ligne,
+            type=ReturnIncidentType.MISSING,
+            qty=1,
+            bill_client=True,
+            reported_by=magasinier,
+        )
+
+        request = factory.get(INCIDENTS_URL, {"bill_client": ""})
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnIncidentListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
