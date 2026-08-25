@@ -208,20 +208,8 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
         error_messages={"min_value": "La quantité signalée doit être d'au moins 1."},
     )
     line_part_name = serializers.CharField(source="line.part.name", read_only=True)
-    # Alias exposés par la vue historique (SCRUM-100), qui les consomme sous
-    # ces noms-là.
-    part_name = serializers.CharField(source="line.part.name", read_only=True)
-    reservation_id = serializers.IntegerField(
-        source="line.reservation_id", read_only=True
-    )
     line_reservation_numero = serializers.CharField(
         source="line.reservation.numero", read_only=True
-    )
-    reservation_number = serializers.CharField(
-        source="line.reservation.numero", read_only=True
-    )
-    event_name = serializers.CharField(
-        source="line.reservation.prestation.manifestation.nom", read_only=True
     )
     reported_by_username = serializers.CharField(
         source="reported_by.username", read_only=True, allow_null=True
@@ -234,12 +222,8 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "line",
-            "reservation_id",
-            "reservation_number",
             "line_part_name",
-            "part_name",
             "line_reservation_numero",
-            "event_name",
             "type",
             "qty",
             "comment",
@@ -251,12 +235,8 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id",
-            "reservation_id",
-            "reservation_number",
             "line_part_name",
-            "part_name",
             "line_reservation_numero",
-            "event_name",
             "reported_at",
             "reported_by",
             "reported_by_username",
@@ -330,6 +310,44 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
             ligne.save(update_fields=["commentaire", "updated_at"])
 
         sync_ligne_etat_retour(ligne)
+
+
+class ReturnIncidentHistorySerializer(ReturnIncidentSerializer):
+    """Incident enrichi du contexte réservation / manifestation (SCRUM-100).
+
+    Ces champs vivaient sur le sérialiseur partagé, ce qui coûtait cher :
+    `event_name` traverse `line.reservation.prestation.manifestation`, et seule
+    la vue historique avait le `select_related` correspondant. La liste et le
+    détail des incidents payaient deux requêtes de plus par incident pour des
+    champs qu'ils n'exposent pas.
+    """
+
+    part_name = serializers.CharField(source="line.part.name", read_only=True)
+    reservation_id = serializers.IntegerField(
+        source="line.reservation_id", read_only=True
+    )
+    reservation_number = serializers.CharField(
+        source="line.reservation.numero", read_only=True
+    )
+    event_name = serializers.CharField(
+        source="line.reservation.prestation.manifestation.nom", read_only=True
+    )
+
+    class Meta(ReturnIncidentSerializer.Meta):
+        """Ajoute le contexte d'affichage aux champs de base."""
+
+        fields = ReturnIncidentSerializer.Meta.fields + [
+            "part_name",
+            "reservation_id",
+            "reservation_number",
+            "event_name",
+        ]
+        read_only_fields = ReturnIncidentSerializer.Meta.read_only_fields + [
+            "part_name",
+            "reservation_id",
+            "reservation_number",
+            "event_name",
+        ]
 
 
 class ReservationStatusLogSerializer(serializers.ModelSerializer):

@@ -514,3 +514,88 @@ class TestIncidentDetruit:
 
         ligne.refresh_from_db()
         assert ligne.etat_retour == "casse"
+
+
+class TestHistoriqueFiltres:
+    """Chaque filtre isolément : appliqués ensemble, ils se masquaient."""
+
+    HISTORY_URL = "/plugin/inventree-location/returns/history/"
+
+    def _incident(self, ligne, magasinier, jours, type_incident):
+        return ReturnIncident.objects.create(
+            line=ligne,
+            type=type_incident,
+            qty=1,
+            reported_by=magasinier,
+            reported_at=timezone.now() - timedelta(days=jours),
+        )
+
+    def _get(self, factory, magasinier, params=None):
+        request = factory.get(self.HISTORY_URL, params or {})
+        force_authenticate(request, user=magasinier)
+        return ReturnIncidentHistoryView.as_view()(request)
+
+    @pytest.mark.django_db
+    def test_borne_des_90_jours(self, factory, magasinier, ligne):
+        dedans = self._incident(ligne, magasinier, 89, ReturnIncidentType.MISSING)
+        dehors = self._incident(ligne, magasinier, 91, ReturnIncidentType.MISSING)
+
+        response = self._get(factory, magasinier)
+
+        ids = [item["id"] for item in response.data]
+        assert dedans.id in ids
+        assert dehors.id not in ids
+
+    @pytest.mark.django_db
+    def test_filtre_type_seul(self, factory, magasinier, ligne):
+        casse = self._incident(ligne, magasinier, 1, ReturnIncidentType.BROKEN)
+        self._incident(ligne, magasinier, 1, ReturnIncidentType.MISSING)
+
+        response = self._get(
+            factory, magasinier, {"type": ReturnIncidentType.BROKEN}
+        )
+
+        assert [item["id"] for item in response.data] == [casse.id]
+
+    @pytest.mark.django_db
+    def test_filtre_objet_seul(self, factory, magasinier, ligne):
+        attendu = self._incident(ligne, magasinier, 1, ReturnIncidentType.MISSING)
+
+        assert [item["id"] for item in self._get(
+            factory, magasinier, {"object": "tente"}
+        ).data] == [attendu.id]
+        assert self._get(factory, magasinier, {"object": "zzz"}).data == []
+
+    @pytest.mark.django_db
+    def test_filtre_evenement_seul(self, factory, magasinier, ligne):
+        attendu = self._incident(ligne, magasinier, 1, ReturnIncidentType.MISSING)
+
+        assert [item["id"] for item in self._get(
+            factory, magasinier, {"event": "camp"}
+        ).data] == [attendu.id]
+        assert self._get(factory, magasinier, {"event": "zzz"}).data == []
+
+    @pytest.mark.django_db
+    def test_type_inconnu_refuse(self, factory, magasinier, ligne):
+        """Une faute de frappe se lisait « aucun incident » en 200."""
+
+        self._incident(ligne, magasinier, 1, ReturnIncidentType.MISSING)
+
+        response = self._get(factory, magasinier, {"type": "nawak"})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.django_db
+    def test_historique_lisible_par_tous_les_roles(
+        self, factory, gestionnaire, ligne
+    ):
+        """La lecture reste ouverte : `RoleBasedPermission` ne restreint que
+        l'écriture. Le gestionnaire consulte donc l'historique sans le nourrir.
+        """
+
+        request = factory.get(self.HISTORY_URL)
+        force_authenticate(request, user=gestionnaire)
+
+        response = ReturnIncidentHistoryView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK

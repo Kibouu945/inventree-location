@@ -33,6 +33,7 @@ from .models import (
     RentableItem,
     Reservation,
     ReturnIncident,
+    ReturnIncidentType,
     StatutReservation,
 )
 from .permissions import (
@@ -54,6 +55,7 @@ from .serializers import (
     RentableItemSerializer,
     ReservationSerializer,
     ReservationTransitionSerializer,
+    ReturnIncidentHistorySerializer,
     ReturnIncidentSerializer,
     UserSerializer,
     geocode_candidates,
@@ -434,13 +436,20 @@ class ReturnIncidentListCreateView(generics.ListCreateAPIView):
 
 
 class ReturnIncidentHistoryView(generics.ListAPIView):
-    """Retourne les incidents de retour des 90 derniers jours."""
+    """Retourne les incidents de retour des 90 derniers jours.
+
+    Filtres cumulables : `type`, `object` (nom d'article) et `event` (nom de
+    manifestation), tous en recherche partielle insensible à la casse.
+    """
 
     permission_classes = [ReturnCheckinPermission]
-    serializer_class = ReturnIncidentSerializer
+    serializer_class = ReturnIncidentHistorySerializer
+
+    #: Profondeur d'historique exposée par la vue (SCRUM-100).
+    HISTORY_DAYS = 90
 
     def get_queryset(self):
-        cutoff = timezone.now() - timedelta(days=90)
+        cutoff = timezone.now() - timedelta(days=self.HISTORY_DAYS)
         queryset = (
             ReturnIncident.objects.filter(reported_at__gte=cutoff)
             .select_related(
@@ -453,6 +462,16 @@ class ReturnIncidentHistoryView(generics.ListAPIView):
 
         incident_type = self.request.query_params.get("type")
         if incident_type:
+            # Un type inconnu renvoyait 200 avec une liste vide : sur une vue
+            # de suivi qualité, une faute de frappe se lisait « aucun incident ».
+            if incident_type not in ReturnIncidentType.values:
+                raise ValidationError({
+                    "type": (
+                        "Type d'incident inconnu : "
+                        f"{', '.join(ReturnIncidentType.values)} attendus."
+                    )
+                })
+
             queryset = queryset.filter(type=incident_type)
 
         object_name = self.request.query_params.get("object")
