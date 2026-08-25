@@ -88,6 +88,7 @@ class InvenTreeLocation(
             ReservationConflictCheckView,
             ReservationDetailView,
             ReservationListCreateView,
+            ReservationRetourView,
             ReservationTransitionView,
             ReturnIncidentDetailView,
             ReturnIncidentHistoryView,
@@ -133,6 +134,11 @@ class InvenTreeLocation(
                 "reservations/<int:pk>/transition/",
                 ReservationTransitionView.as_view(),
                 name="reservation-transition",
+            ),
+            path(
+                "reservations/<int:pk>/retour/",
+                ReservationRetourView.as_view(),
+                name="reservation-retour",
             ),
             path(
                 "reservations/<int:pk>/checkin/",

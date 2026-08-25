@@ -24,12 +24,14 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   canArbitrateReservations,
   canCheckinReturns,
+  canDeclareRetour,
   canWriteReservations
 } from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
 import { CheckinForm } from './CheckinForm';
 import { canArbitrateReservation, transitionErrorMessage } from './formLogic';
 import { ReservationForm } from './ReservationForm';
+import { RetourForm } from './RetourForm';
 import {
   buildReservationQuery,
   DEFAULT_RESERVATION_FILTERS,
@@ -64,6 +66,11 @@ const STATUT_OPTIONS = [
 ];
 
 interface ModalState {
+  open: boolean;
+  reservationId?: number;
+}
+
+interface RetourModalState {
   open: boolean;
   reservationId?: number;
 }
@@ -106,6 +113,9 @@ export function ReservationsList({
 }) {
   const [modalState, setModalState] = useState<ModalState>({ open: false });
   const [checkinModal, setCheckinModal] = useState<CheckinModalState>({
+    open: false
+  });
+  const [retourModal, setRetourModal] = useState<RetourModalState>({
     open: false
   });
   const [filters, setFilters] =
@@ -163,7 +173,8 @@ export function ReservationsList({
   // Le check-in retour est ouvert au magasinier, qui n'arbitre pas : la
   // colonne « Actions » doit donc s'afficher pour lui aussi.
   const canCheckin = canCheckinReturns(context);
-  const showActions = canArbitrate || canCheckin;
+  const canRetour = canDeclareRetour(context);
+  const showActions = canArbitrate || canCheckin || canRetour;
 
   // Validation / refus d'une réservation soumise via l'endpoint de transition.
   const transitionMutation = useMutation(
@@ -233,6 +244,10 @@ export function ReservationsList({
 
   function closeModal() {
     setModalState({ open: false });
+  }
+
+  function closeRetourModal() {
+    setRetourModal({ open: false });
   }
 
   function closeCheckinModal() {
@@ -351,6 +366,10 @@ export function ReservationsList({
             {rows.map((reservation) => {
               const showCheckinAction =
                 canCheckin && reservation.statut === 'livree';
+              // Seul un bon livré se déclare : le serveur refuse toute
+              // déclaration sur un bon déjà retourné.
+              const showRetourAction =
+                canRetour && reservation.statut === 'livree';
               const showArbitrageActions =
                 canArbitrate && canArbitrateReservation(reservation.statut);
 
@@ -451,11 +470,27 @@ export function ReservationsList({
                             </Button>
                           </>
                         )}
-                        {!showCheckinAction && !showArbitrageActions && (
-                          <Text c='dimmed' size='sm'>
-                            —
-                          </Text>
+                        {showRetourAction && (
+                          <Button
+                            size='xs'
+                            color='grape'
+                            onClick={() =>
+                              setRetourModal({
+                                open: true,
+                                reservationId: reservation.id
+                              })
+                            }
+                          >
+                            Déclarer le retour
+                          </Button>
                         )}
+                        {!showCheckinAction &&
+                          !showRetourAction &&
+                          !showArbitrageActions && (
+                            <Text c='dimmed' size='sm'>
+                              —
+                            </Text>
+                          )}
                       </Group>
                     </Table.Td>
                   )}
@@ -497,6 +532,21 @@ export function ReservationsList({
             context={context}
             reservationId={checkinModal.reservationId}
             onSaved={closeCheckinModal}
+          />
+        )}
+      </Modal>
+
+      <Modal
+        opened={retourModal.open}
+        onClose={closeRetourModal}
+        size='xl'
+        title='Déclarer le retour'
+      >
+        {retourModal.reservationId && (
+          <RetourForm
+            context={context}
+            reservationId={retourModal.reservationId}
+            onSaved={closeRetourModal}
           />
         )}
       </Modal>

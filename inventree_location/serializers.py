@@ -499,6 +499,19 @@ class ReservationCheckinSerializer(serializers.Serializer):
     lignes = CheckinLigneSerializer(many=True, required=True)
 
 
+class RetourLigneSerializer(serializers.Serializer):
+    """Une ligne du bon de réservation avec sa quantité rendue (SCRUM-95)."""
+
+    id = serializers.IntegerField(required=True)
+    quantite_rendue = serializers.IntegerField(required=True, min_value=0)
+
+
+class PrestationRetourSerializer(serializers.Serializer):
+    """Payload de déclaration du retour d'une prestation (POST retour)."""
+
+    lignes = RetourLigneSerializer(many=True, required=True)
+
+
 class ReservationSerializer(serializers.ModelSerializer):
     """Sérialiseur DRF pour le modèle Reservation, avec lignes imbriquées."""
 

@@ -43,6 +43,7 @@ from .permissions import (
     LieuPermission,
     ManifestationPermission,
     PrestationPermission,
+    PrestationRetourPermission,
     ReservationPermission,
     ReturnCheckinPermission,
     RoleBasedPermission,
@@ -54,6 +55,7 @@ from .serializers import (
     GroupeSerializer,
     LieuSerializer,
     ManifestationSerializer,
+    PrestationRetourSerializer,
     PrestationSerializer,
     RentableItemSerializer,
     ReservationCheckinSerializer,
@@ -464,6 +466,197 @@ class ReservationTransitionView(APIView):
         )
 
         return Response(result, status=status.HTTP_200_OK)
+
+
+class ReservationRetourView(APIView):
+    """Déclaration du retour d'une prestation ligne par ligne (SCRUM-95).
+
+    - GET  : accessible quand la réservation est livrée ou retournée ;
+      renvoie les lignes du bon avec la quantité déjà déclarée rendue.
+    - POST : enregistre la quantité rendue par ligne (retour possible en
+      plusieurs fois), calcule le statut de retour (partiel / complet) et
+      fait passer la réservation en "retournée" une fois le retour complet.
+    """
+
+    permission_classes = [PrestationRetourPermission]
+    serializer_class = PrestationRetourSerializer
+
+    #: Consultable tant que le bon est livré ou déjà retourné.
+    ELIGIBLE_STATUTS = {StatutReservation.LIVREE, StatutReservation.RETOURNEE}
+    #: Déclarable seulement tant que le bon est livré. Un bon « retourné » est
+    #: complet par construction : le rouvrir permettait de *baisser* les
+    #: quantités, et aucune transition ne ramène ensuite vers « livrée ».
+    DECLARABLE_STATUTS = {StatutReservation.LIVREE}
+
+    NOT_DECLARABLE_DETAIL = (
+        "La déclaration de retour n'est accessible que pour une réservation livrée."
+    )
+    NOT_ELIGIBLE_DETAIL = (
+        "La déclaration de retour n'est accessible que pour "
+        "une réservation livrée ou déjà en cours de retour."
+    )
+
+    def _get_reservation(self, pk, *, lock=False):
+        """Charge la réservation ; `lock` pose un verrou de ligne.
+
+        Le verrou sérialise deux déclarations concurrentes : sans lui, les
+        deux franchissent la garde de statut avec un objet périmé et rejouent
+        toutes les deux la transition.
+        """
+
+        queryset = Reservation.objects.prefetch_related("lignes", "lignes__part")
+
+        if lock:
+            queryset = queryset.select_for_update()
+
+        return queryset.filter(pk=pk).first()
+
+    def _conflict_response(self, reservation, detail):
+        return Response(
+            {"detail": detail, "current_status": reservation.statut},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    @staticmethod
+    def _statut_retour(lignes):
+        total_demandee = sum(ligne.quantite_demandee for ligne in lignes)
+        total_rendue = sum(
+            min(ligne.quantite_retournee, ligne.quantite_demandee) for ligne in lignes
+        )
+
+        if total_demandee <= 0 or total_rendue <= 0:
+            return "aucun", total_demandee, total_rendue
+
+        if total_rendue >= total_demandee:
+            return "complet", total_demandee, total_rendue
+
+        return "partiel", total_demandee, total_rendue
+
+    def _serialize_lignes(self, lignes):
+        return [
+            {
+                "id": ligne.pk,
+                "part": ligne.part_id,
+                "part_name": getattr(ligne.part, "name", str(ligne.part)),
+                "quantite_demandee": ligne.quantite_demandee,
+                "quantite_retournee": ligne.quantite_retournee,
+            }
+            for ligne in lignes
+        ]
+
+    def get(self, request, pk, *args, **kwargs):
+        """Retourne la réservation et ses lignes si un retour est possible."""
+
+        reservation = self._get_reservation(pk)
+
+        if reservation is None:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if reservation.statut not in self.ELIGIBLE_STATUTS:
+            return self._conflict_response(reservation, self.NOT_ELIGIBLE_DETAIL)
+
+        lignes = list(reservation.lignes.all())
+        statut_retour, total_demandee, total_rendue = self._statut_retour(lignes)
+
+        return Response(
+            {
+                "reservation": reservation.pk,
+                "numero": reservation.numero,
+                "statut": reservation.statut,
+                "statut_retour": statut_retour,
+                "quantite_demandee_totale": total_demandee,
+                "quantite_rendue_totale": total_rendue,
+                "lignes": self._serialize_lignes(lignes),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request, pk, *args, **kwargs):
+        """Enregistre les quantités rendues et met à jour le statut de retour."""
+
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Les écritures de lignes et la transition sont indissociables : sans
+        # la transaction, une transition qui échoue laissait les quantités
+        # déjà persistées et le bon coincé en « livrée ».
+        with transaction.atomic():
+            reservation = self._get_reservation(pk, lock=True)
+
+            if reservation is None:
+                return Response(
+                    {"detail": "Réservation introuvable."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            if reservation.statut not in self.DECLARABLE_STATUTS:
+                return self._conflict_response(reservation, self.NOT_DECLARABLE_DETAIL)
+
+            lignes_by_id = {ligne.pk: ligne for ligne in reservation.lignes.all()}
+            errors = {}
+            vues = set()
+
+            for entry in serializer.validated_data["lignes"]:
+                ligne = lignes_by_id.get(entry["id"])
+
+                if ligne is None:
+                    errors[str(entry["id"])] = (
+                        "Cette ligne n'appartient pas à la réservation."
+                    )
+                    continue
+
+                # Un doublon était traité en dernier-gagnant silencieux : deux
+                # envois pour la même ligne sous-comptaient le retour.
+                if entry["id"] in vues:
+                    errors[str(entry["id"])] = (
+                        "Cette ligne est présente plusieurs fois dans l'envoi."
+                    )
+                    continue
+
+                vues.add(entry["id"])
+
+                if entry["quantite_rendue"] > ligne.quantite_demandee:
+                    errors[str(entry["id"])] = (
+                        f"La quantité rendue ({entry['quantite_rendue']}) ne peut "
+                        f"pas dépasser la quantité demandée "
+                        f"({ligne.quantite_demandee})."
+                    )
+
+            if errors:
+                return Response({"lignes": errors}, status=status.HTTP_400_BAD_REQUEST)
+
+            for entry in serializer.validated_data["lignes"]:
+                ligne = lignes_by_id[entry["id"]]
+                ligne.quantite_retournee = entry["quantite_rendue"]
+                ligne.save(update_fields=["quantite_retournee", "updated_at"])
+
+            lignes = list(lignes_by_id.values())
+            statut_retour, total_demandee, total_rendue = self._statut_retour(lignes)
+
+            if statut_retour == "complet":
+                transition_reservation_status(
+                    reservation=reservation,
+                    new_status=StatutReservation.RETOURNEE,
+                    user=request.user,
+                    comment="Retour complet déclaré (SCRUM-95).",
+                )
+                reservation.refresh_from_db()
+
+        return Response(
+            {
+                "reservation": reservation.pk,
+                "numero": reservation.numero,
+                "statut": reservation.statut,
+                "statut_retour": statut_retour,
+                "quantite_demandee_totale": total_demandee,
+                "quantite_rendue_totale": total_rendue,
+                "lignes": self._serialize_lignes(lignes),
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class ReturnIncidentListCreateView(generics.ListCreateAPIView):
