@@ -599,3 +599,63 @@ class TestHistoriqueFiltres:
         response = ReturnIncidentHistoryView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
+
+
+class TestCoexistenceCheckinEtIncidents:
+    """Deux fonctionnalités écrivent `etat_retour` : elles doivent s'accorder.
+
+    Le check-in retour (SCRUM-94) pose l'état depuis ses quantités, le journal
+    d'incidents (SCRUM-93) le recalcule depuis les incidents. Supprimer le
+    dernier incident effaçait l'état posé par le check-in.
+    """
+
+    @pytest.mark.django_db
+    def test_suppression_dincident_preserve_letat_du_checkin(
+        self, factory, magasinier, ligne
+    ):
+        ligne.quantite_retour_ok = ligne.quantite_demandee
+        ligne.save(update_fields=["quantite_retour_ok"])
+
+        incident = ReturnIncident.objects.create(
+            line=ligne, type=ReturnIncidentType.MISSING, qty=1
+        )
+
+        request = factory.delete(f"{INCIDENTS_URL}{incident.pk}/")
+        force_authenticate(request, user=magasinier)
+        ReturnIncidentDetailView.as_view()(request, pk=incident.pk)
+
+        ligne.refresh_from_db()
+        assert ligne.etat_retour == "ok"
+
+    @pytest.mark.django_db
+    def test_sans_checkin_ni_incident_letat_reste_vide(
+        self, factory, magasinier, ligne
+    ):
+        incident = ReturnIncident.objects.create(
+            line=ligne, type=ReturnIncidentType.MISSING, qty=1
+        )
+
+        request = factory.delete(f"{INCIDENTS_URL}{incident.pk}/")
+        force_authenticate(request, user=magasinier)
+        ReturnIncidentDetailView.as_view()(request, pk=incident.pk)
+
+        ligne.refresh_from_db()
+        assert ligne.etat_retour == ""
+
+    @pytest.mark.django_db
+    def test_un_incident_prime_sur_le_checkin(self, factory, magasinier, ligne):
+        ligne.quantite_retour_ok = ligne.quantite_demandee
+        ligne.save(update_fields=["quantite_retour_ok"])
+
+        payload = {
+            "line": ligne.pk,
+            "type": ReturnIncidentType.BROKEN,
+            "qty": 1,
+            "comment": "",
+        }
+        request = factory.post(INCIDENTS_URL, payload, format="json")
+        force_authenticate(request, user=magasinier)
+        ReturnIncidentListCreateView.as_view()(request)
+
+        ligne.refresh_from_db()
+        assert ligne.etat_retour == "casse"

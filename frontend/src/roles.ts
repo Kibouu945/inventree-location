@@ -19,6 +19,9 @@ export const CATALOG_WRITE_ROLES = [ADMIN, GESTIONNAIRE];
 export const ORGANISATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE, ORGANISATEUR];
 // Arbitrage (valider / refuser) : gestionnaire + admin seulement.
 export const RESERVATION_ARBITRAGE_ROLES = [ADMIN, GESTIONNAIRE];
+// Check-in retour : le magasinier pointe les retours, pas le gestionnaire —
+// miroir strict de `ReturnCheckinPermission`, qui refuse ce dernier en 403.
+export const RETURN_CHECKIN_ROLES = [ADMIN, MAGASINIER];
 
 /**
  * Rôles (noms de groupes) de l'utilisateur courant.
@@ -74,6 +77,11 @@ export function canArbitrateReservations(
   context: InvenTreePluginContext
 ): boolean {
   return hasAnyRole(context, RESERVATION_ARBITRAGE_ROLES);
+}
+
+/** Peut pointer le retour d'une réservation livrée (admin, gestionnaire, magasinier). */
+export function canCheckinReturns(context: InvenTreePluginContext): boolean {
+  return hasAnyRole(context, RETURN_CHECKIN_ROLES);
 }
 
 /** Peut modifier les drapeaux du catalogue (admin, gestionnaire). */

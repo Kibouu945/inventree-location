@@ -21,8 +21,13 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
-import { canArbitrateReservations, canWriteReservations } from '../roles';
+import {
+  canArbitrateReservations,
+  canCheckinReturns,
+  canWriteReservations
+} from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
+import { CheckinForm } from './CheckinForm';
 import { canArbitrateReservation, transitionErrorMessage } from './formLogic';
 import { ReservationForm } from './ReservationForm';
 import {
@@ -63,6 +68,11 @@ interface ModalState {
   reservationId?: number;
 }
 
+interface CheckinModalState {
+  open: boolean;
+  reservationId?: number;
+}
+
 interface CategoryResponseItem {
   id?: number;
   pk?: number;
@@ -95,6 +105,9 @@ export function ReservationsList({
   context: InvenTreePluginContext;
 }) {
   const [modalState, setModalState] = useState<ModalState>({ open: false });
+  const [checkinModal, setCheckinModal] = useState<CheckinModalState>({
+    open: false
+  });
   const [filters, setFilters] =
     useState<ReservationFiltersState>(initialFilters);
   const [debouncedSearch] = useDebouncedValue(filters.search, 300);
@@ -147,6 +160,10 @@ export function ReservationsList({
   // Livreur / magasinier / sav / lecteur : lecture seule (cf. permissions.py).
   const canWrite = canWriteReservations(context);
   const canArbitrate = canArbitrateReservations(context);
+  // Le check-in retour est ouvert au magasinier, qui n'arbitre pas : la
+  // colonne « Actions » doit donc s'afficher pour lui aussi.
+  const canCheckin = canCheckinReturns(context);
+  const showActions = canArbitrate || canCheckin;
 
   // Validation / refus d'une réservation soumise via l'endpoint de transition.
   const transitionMutation = useMutation(
@@ -216,6 +233,10 @@ export function ReservationsList({
 
   function closeModal() {
     setModalState({ open: false });
+  }
+
+  function closeCheckinModal() {
+    setCheckinModal({ open: false });
   }
 
   return (
@@ -323,94 +344,124 @@ export function ReservationsList({
               <Table.Th>Retour prévu</Table.Th>
               <Table.Th>Statut</Table.Th>
               <Table.Th>Nb objets</Table.Th>
-              {canArbitrate && <Table.Th>Actions</Table.Th>}
+              {showActions && <Table.Th>Actions</Table.Th>}
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {rows.map((reservation) => (
-              <Table.Tr
-                key={reservation.id}
-                style={{ cursor: 'pointer' }}
-                onClick={() =>
-                  setModalState({ open: true, reservationId: reservation.id })
-                }
-              >
-                <Table.Td>{reservation.numero}</Table.Td>
-                <Table.Td>{reservation.demandeur_nom || '—'}</Table.Td>
-                <Table.Td>{reservation.prestation_nom || '—'}</Table.Td>
-                <Table.Td>
-                  {reservation.date_retrait_prevue
-                    ? new Date(reservation.date_retrait_prevue).toLocaleString()
-                    : '—'}
-                </Table.Td>
-                <Table.Td>
-                  {reservation.date_retour_prevue
-                    ? new Date(reservation.date_retour_prevue).toLocaleString()
-                    : '—'}
-                </Table.Td>
-                <Table.Td>
-                  <Badge color={STATUT_COLORS[reservation.statut] ?? 'gray'}>
-                    {reservation.statut}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>{reservation.lignes.length}</Table.Td>
-                {canArbitrate && (
-                  <Table.Td
-                    // Les actions ne doivent pas ouvrir la modale de détail.
-                    onClick={(event) => event.stopPropagation()}
-                    style={{ cursor: 'default' }}
-                  >
-                    {canArbitrateReservation(reservation.statut) ? (
-                      <Group gap='xs' wrap='nowrap'>
-                        <Button
-                          size='xs'
-                          color='green'
-                          loading={
-                            transitionMutation.isPending &&
-                            transitionMutation.variables?.id ===
-                              reservation.id &&
-                            transitionMutation.variables?.statut === 'validee'
-                          }
-                          disabled={transitionMutation.isPending}
-                          onClick={() =>
-                            transitionMutation.mutate({
-                              id: reservation.id,
-                              statut: 'validee'
-                            })
-                          }
-                        >
-                          Valider
-                        </Button>
-                        <Button
-                          size='xs'
-                          variant='light'
-                          color='red'
-                          loading={
-                            transitionMutation.isPending &&
-                            transitionMutation.variables?.id ===
-                              reservation.id &&
-                            transitionMutation.variables?.statut === 'refusee'
-                          }
-                          disabled={transitionMutation.isPending}
-                          onClick={() =>
-                            transitionMutation.mutate({
-                              id: reservation.id,
-                              statut: 'refusee'
-                            })
-                          }
-                        >
-                          Refuser
-                        </Button>
-                      </Group>
-                    ) : (
-                      <Text c='dimmed' size='sm'>
-                        —
-                      </Text>
-                    )}
+            {rows.map((reservation) => {
+              const showCheckinAction =
+                canCheckin && reservation.statut === 'livree';
+              const showArbitrageActions =
+                canArbitrate && canArbitrateReservation(reservation.statut);
+
+              return (
+                <Table.Tr
+                  key={reservation.id}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() =>
+                    setModalState({ open: true, reservationId: reservation.id })
+                  }
+                >
+                  <Table.Td>{reservation.numero}</Table.Td>
+                  <Table.Td>{reservation.demandeur_nom || '—'}</Table.Td>
+                  <Table.Td>{reservation.prestation_nom || '—'}</Table.Td>
+                  <Table.Td>
+                    {reservation.date_retrait_prevue
+                      ? new Date(
+                          reservation.date_retrait_prevue
+                        ).toLocaleString()
+                      : '—'}
                   </Table.Td>
-                )}
-              </Table.Tr>
-            ))}
+                  <Table.Td>
+                    {reservation.date_retour_prevue
+                      ? new Date(
+                          reservation.date_retour_prevue
+                        ).toLocaleString()
+                      : '—'}
+                  </Table.Td>
+                  <Table.Td>
+                    <Badge color={STATUT_COLORS[reservation.statut] ?? 'gray'}>
+                      {reservation.statut}
+                    </Badge>
+                  </Table.Td>
+                  <Table.Td>{reservation.lignes.length}</Table.Td>
+                  {showActions && (
+                    <Table.Td
+                      // Les actions ne doivent pas ouvrir la modale de détail.
+                      onClick={(event) => event.stopPropagation()}
+                      style={{ cursor: 'default' }}
+                    >
+                      <Group gap='xs' wrap='nowrap'>
+                        {showCheckinAction && (
+                          <Button
+                            size='xs'
+                            color='teal'
+                            onClick={() =>
+                              setCheckinModal({
+                                open: true,
+                                reservationId: reservation.id
+                              })
+                            }
+                          >
+                            Check-in retour
+                          </Button>
+                        )}
+                        {showArbitrageActions && (
+                          <>
+                            <Button
+                              size='xs'
+                              color='green'
+                              loading={
+                                transitionMutation.isPending &&
+                                transitionMutation.variables?.id ===
+                                  reservation.id &&
+                                transitionMutation.variables?.statut ===
+                                  'validee'
+                              }
+                              disabled={transitionMutation.isPending}
+                              onClick={() =>
+                                transitionMutation.mutate({
+                                  id: reservation.id,
+                                  statut: 'validee'
+                                })
+                              }
+                            >
+                              Valider
+                            </Button>
+                            <Button
+                              size='xs'
+                              variant='light'
+                              color='red'
+                              loading={
+                                transitionMutation.isPending &&
+                                transitionMutation.variables?.id ===
+                                  reservation.id &&
+                                transitionMutation.variables?.statut ===
+                                  'refusee'
+                              }
+                              disabled={transitionMutation.isPending}
+                              onClick={() =>
+                                transitionMutation.mutate({
+                                  id: reservation.id,
+                                  statut: 'refusee'
+                                })
+                              }
+                            >
+                              Refuser
+                            </Button>
+                          </>
+                        )}
+                        {!showCheckinAction && !showArbitrageActions && (
+                          <Text c='dimmed' size='sm'>
+                            —
+                          </Text>
+                        )}
+                      </Group>
+                    </Table.Td>
+                  )}
+                </Table.Tr>
+              );
+            })}
           </Table.Tbody>
         </Table>
       )}
@@ -433,6 +484,21 @@ export function ReservationsList({
           readOnly={!canWrite}
           onSaved={closeModal}
         />
+      </Modal>
+
+      <Modal
+        opened={checkinModal.open}
+        onClose={closeCheckinModal}
+        size='xl'
+        title='Check-in retour'
+      >
+        {checkinModal.reservationId && (
+          <CheckinForm
+            context={context}
+            reservationId={checkinModal.reservationId}
+            onSaved={closeCheckinModal}
+          />
+        )}
       </Modal>
     </Stack>
   );

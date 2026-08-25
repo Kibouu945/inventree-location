@@ -520,6 +520,17 @@ class LigneReservation(TimestampedModel):
     etat_retour = models.CharField(
         max_length=20, blank=True, default="", verbose_name=_("état du retour")
     )
+    # Détail du check-in retour (SCRUM-94) : la somme des 3 doit égaler
+    # quantite_demandee. quantite_retournee reste la vue agrégée (ok + casse).
+    quantite_retour_ok = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité retournée OK")
+    )
+    quantite_retour_manquant = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité manquante")
+    )
+    quantite_retour_casse = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité cassée")
+    )
     commentaire = models.TextField(
         blank=True, default="", verbose_name=_("commentaire")
     )

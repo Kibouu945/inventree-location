@@ -173,9 +173,21 @@ class LigneReservationSerializer(serializers.ModelSerializer):
             "quantite_livree",
             "quantite_retournee",
             "etat_retour",
+            "quantite_retour_ok",
+            "quantite_retour_manquant",
+            "quantite_retour_casse",
             "commentaire",
         ]
-        read_only_fields = ["id"]
+        # Le détail du retour n'appartient qu'au check-in magasinier
+        # (`ReservationCheckinView` / `ReturnCheckinPermission`) : exposé en
+        # écriture ici, il serait modifiable par tout rôle autorisé à éditer
+        # une réservation, et remis à zéro à chaque réécriture des lignes.
+        read_only_fields = [
+            "id",
+            "quantite_retour_ok",
+            "quantite_retour_manquant",
+            "quantite_retour_casse",
+        ]
 
 
 #: Traduction du type d'incident vers le vocabulaire applicatif de
@@ -200,23 +212,56 @@ ORDRE_GRAVITE_INCIDENT = (
 )
 
 
+def etat_retour_du_checkin(ligne):
+    """État déduit du pointage de check-in retour (SCRUM-94), ou None.
+
+    Retourne None tant qu'aucun check-in n'a été posé, pour distinguer
+    « pas encore pointé » de « pointé, tout est OK ».
+    """
+
+    pointe = (
+        ligne.quantite_retour_ok
+        + ligne.quantite_retour_manquant
+        + ligne.quantite_retour_casse
+    )
+
+    if pointe <= 0:
+        return None
+
+    if ligne.quantite_retour_casse > 0:
+        return "casse"
+
+    if ligne.quantite_retour_manquant > 0:
+        return "manquant"
+
+    return "ok"
+
+
 def sync_ligne_etat_retour(ligne):
-    """Recalcule `etat_retour` à partir de tous les incidents de la ligne.
+    """Recalcule `etat_retour` depuis les incidents, puis depuis le check-in.
 
     Recalculé plutôt que déduit du dernier incident écrit : une modification
     ou une suppression doit ramener la ligne à son état réel, sinon elle reste
-    figée sur un incident qui n'existe plus. Le type le plus grave l'emporte,
-    et l'absence d'incident remet la ligne à l'état « non renseigné ».
+    figée sur un incident qui n'existe plus. Le type le plus grave l'emporte.
+
+    Deux fonctionnalités écrivent cette colonne — le journal d'incidents
+    (SCRUM-93) et le check-in retour (SCRUM-94). Sans ce repli, supprimer le
+    dernier incident d'une ligne effaçait aussi l'état posé par un check-in,
+    alors que le pointage, lui, existe toujours.
     """
 
     types = set(ligne.incidents.values_list("type", flat=True))
-    ligne.etat_retour = ""
+    etat = ""
 
     for type_incident in ORDRE_GRAVITE_INCIDENT:
         if type_incident in types:
-            ligne.etat_retour = ETAT_RETOUR_PAR_TYPE[type_incident]
+            etat = ETAT_RETOUR_PAR_TYPE[type_incident]
             break
 
+    if not etat:
+        etat = etat_retour_du_checkin(ligne) or ""
+
+    ligne.etat_retour = etat
     ligne.save(update_fields=["etat_retour", "updated_at"])
 
 
@@ -428,6 +473,30 @@ class ReservationTransitionSerializer(serializers.Serializer):
         default="",
         help_text="Commentaire facultatif lié à la transition.",
     )
+
+
+class CheckinLigneSerializer(serializers.Serializer):
+    """Une ligne de check-in retour (SCRUM-94) : OK / manquant / cassé + commentaire.
+
+    La validation de la somme (== quantité demandée) se fait au niveau de la
+    vue, une fois la ligne de réservation résolue par `id`.
+
+    `commentaire` n'a volontairement pas de valeur par défaut : absent du
+    payload, il reste absent de `validated_data`, et la vue laisse alors
+    intact le commentaire déjà saisi sur la ligne de réservation.
+    """
+
+    id = serializers.IntegerField(required=True)
+    ok = serializers.IntegerField(required=True, min_value=0)
+    manquant = serializers.IntegerField(required=True, min_value=0)
+    casse = serializers.IntegerField(required=True, min_value=0)
+    commentaire = serializers.CharField(required=False, allow_blank=True)
+
+
+class ReservationCheckinSerializer(serializers.Serializer):
+    """Payload du check-in retour d'une réservation (POST checkin)."""
+
+    lignes = CheckinLigneSerializer(many=True, required=True)
 
 
 class ReservationSerializer(serializers.ModelSerializer):
