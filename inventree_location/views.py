@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.mail import send_mail
 from django.db.models import Q, Sum
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
@@ -31,6 +32,8 @@ from .models import (
     Prestation,
     RentableItem,
     Reservation,
+    ReturnIncident,
+    ReturnIncidentType,
     StatutReservation,
 )
 from .permissions import (
@@ -40,6 +43,7 @@ from .permissions import (
     ManifestationPermission,
     PrestationPermission,
     ReservationPermission,
+    ReturnCheckinPermission,
     RoleBasedPermission,
 )
 from .serializers import (
@@ -53,10 +57,18 @@ from .serializers import (
     RentableItemSerializer,
     ReservationSerializer,
     ReservationTransitionSerializer,
+    ReturnIncidentHistorySerializer,
+    ReturnIncidentSerializer,
     UserSerializer,
     geocode_candidates,
+    sync_ligne_etat_retour,
 )
 from .stock import _as_date, compute_prestation_stock, compute_stock_availability
+from .services.return_report import build_return_report
+from .services.return_report_pdf import (
+    PdfEngineUnavailable,
+    generate_return_report_pdf,
+)
 from .services.workflow_service import (
     get_available_transitions,
     transition_reservation_status,
@@ -450,6 +462,160 @@ class ReservationTransitionView(APIView):
         )
 
         return Response(result, status=status.HTTP_200_OK)
+
+
+class ReturnIncidentListCreateView(generics.ListCreateAPIView):
+    """Liste et crée les incidents de retour (manquant / cassé)."""
+
+    permission_classes = [ReturnCheckinPermission]
+    serializer_class = ReturnIncidentSerializer
+
+    def get_queryset(self):
+        """Retourne les incidents, filtrés par réservation et type."""
+
+        queryset = (
+            ReturnIncident.objects.select_related(
+                "line__part", "line__reservation", "reported_by"
+            )
+            .all()
+            .order_by("-reported_at")
+        )
+
+        # Validé plutôt que passé tel quel : `?reservation=abc` remontait
+        # jusqu'au ORM et sortait en 500 au lieu d'un 400.
+        reservation_id = parse_optional_int_param(self.request, "reservation")
+
+        if reservation_id is not None:
+            queryset = queryset.filter(line__reservation_id=reservation_id)
+
+        incident_type = self.request.query_params.get("type")
+
+        if incident_type:
+            queryset = queryset.filter(type=incident_type)
+
+        return queryset
+
+
+class ReturnIncidentHistoryView(generics.ListAPIView):
+    """Retourne les incidents de retour des 90 derniers jours.
+
+    Filtres cumulables : `type`, `object` (nom d'article) et `event` (nom de
+    manifestation), tous en recherche partielle insensible à la casse.
+    """
+
+    permission_classes = [ReturnCheckinPermission]
+    serializer_class = ReturnIncidentHistorySerializer
+
+    #: Profondeur d'historique exposée par la vue (SCRUM-100).
+    HISTORY_DAYS = 90
+
+    def get_queryset(self):
+        cutoff = timezone.now() - timedelta(days=self.HISTORY_DAYS)
+        queryset = (
+            ReturnIncident.objects.filter(reported_at__gte=cutoff)
+            .select_related(
+                "line__part",
+                "line__reservation__prestation__manifestation",
+                "reported_by",
+            )
+            .order_by("-reported_at")
+        )
+
+        incident_type = self.request.query_params.get("type")
+        if incident_type:
+            # Un type inconnu renvoyait 200 avec une liste vide : sur une vue
+            # de suivi qualité, une faute de frappe se lisait « aucun incident ».
+            if incident_type not in ReturnIncidentType.values:
+                raise ValidationError({
+                    "type": (
+                        "Type d'incident inconnu : "
+                        f"{', '.join(ReturnIncidentType.values)} attendus."
+                    )
+                })
+
+            queryset = queryset.filter(type=incident_type)
+
+        object_name = self.request.query_params.get("object")
+        if object_name:
+            queryset = queryset.filter(line__part__name__icontains=object_name)
+
+        event_name = self.request.query_params.get("event")
+        if event_name:
+            queryset = queryset.filter(
+                line__reservation__prestation__manifestation__nom__icontains=event_name
+            )
+
+        return queryset
+
+
+class ReturnIncidentDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Détail, mise à jour et suppression d'un incident de retour."""
+
+    permission_classes = [ReturnCheckinPermission]
+    serializer_class = ReturnIncidentSerializer
+    queryset = ReturnIncident.objects.select_related(
+        "line__part", "line__reservation", "reported_by"
+    )
+
+    def perform_destroy(self, instance):
+        """Supprime l'incident puis réaligne l'état de retour de la ligne.
+
+        Sans ça, supprimer le dernier incident d'une ligne la laissait
+        indéfiniment marquée « manquant » ou « cassé ».
+        """
+
+        ligne = instance.line
+        super().perform_destroy(instance)
+        sync_ligne_etat_retour(ligne)
+
+
+class ReturnReportView(APIView):
+    """Rapport synthétique du retour d'une réservation (JSON)."""
+
+    permission_classes = [ReturnCheckinPermission]
+
+    def get(self, request, pk, *args, **kwargs):
+        """Retourne le récap retour : rendu / manquant / cassé / détruit."""
+        try:
+            report = build_return_report(pk)
+        except ValueError:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(report, status=status.HTTP_200_OK)
+
+
+class ReturnReportPdfView(APIView):
+    """Export PDF imprimable du rapport de retour."""
+
+    permission_classes = [ReturnCheckinPermission]
+
+    def get(self, request, pk, *args, **kwargs):
+        """Génère et renvoie le PDF du rapport de retour."""
+        try:
+            pdf_buffer = generate_return_report_pdf(pk)
+        except ValueError:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except PdfEngineUnavailable as error:
+            # L'absence du moteur PDF ne concerne que cet export : elle ne doit
+            # pas ressortir en 500 opaque.
+            return Response(
+                {"detail": str(error)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        response = HttpResponse(
+            pdf_buffer.getvalue(),
+            content_type="application/pdf",
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="rapport-retour-{pk}.pdf"'
+        )
+        return response
 
 
 class ConflictsListView(APIView):

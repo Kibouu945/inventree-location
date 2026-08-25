@@ -12,6 +12,7 @@ from .models import (
     Profile,
     RentableItem,
     Reservation,
+    ReturnIncident,
 )
 
 
@@ -95,6 +96,18 @@ class LigneReservationAdmin(admin.ModelAdmin):
     search_fields = ("part__name", "part__IPN")
 
 
+class ReturnIncidentAdmin(admin.ModelAdmin):
+    list_display = (
+        "line",
+        "type",
+        "qty",
+        "reported_at",
+        "reported_by",
+    )
+    list_filter = ("type",)
+    search_fields = ("line__part__name", "line__reservation__numero", "comment")
+
+
 _register(Groupe, GroupeAdmin)
 _register(Profile, ProfileAdmin)
 _register(RentableItem, RentableItemAdmin)
@@ -104,3 +117,4 @@ _register(Lieu, LieuAdmin)
 _register(LignePrestation, LignePrestationAdmin)
 _register(Reservation, ReservationAdmin)
 _register(LigneReservation, LigneReservationAdmin)
+_register(ReturnIncident, ReturnIncidentAdmin)

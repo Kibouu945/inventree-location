@@ -77,3 +77,9 @@ class DeliveryPermission(RoleBasedPermission):
     """Lecture pour tous (dont livreur) ; aucune écriture ouverte cette itération."""
 
     write_roles = (roles.ADMIN, roles.GESTIONNAIRE)
+
+
+class ReturnCheckinPermission(RoleBasedPermission):
+    """Check-in retour ligne par ligne (OK / manquant / cassé) : rôle magasinier."""
+
+    write_roles = (roles.ADMIN, roles.MAGASINIER)
