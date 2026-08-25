@@ -6,12 +6,14 @@ from .models import (
     ConflictHistory,
     Groupe,
     Lieu,
+    LignePrestation,
     LigneReservation,
     Manifestation,
     Prestation,
     Profile,
     RentableItem,
     Reservation,
+    ReturnIncident,
 )
 
 
@@ -43,7 +45,14 @@ class ProfileAdmin(admin.ModelAdmin):
 
 
 class RentableItemAdmin(admin.ModelAdmin):
-    list_display = ("part", "is_rentable", "consommable", "caution", "seuil_alerte_bas")
+    list_display = (
+        "part",
+        "is_rentable",
+        "consommable",
+        "caution",
+        "seuil_alerte_bas",
+        "seuil_alerte_haut",
+    )
     list_filter = ("is_rentable", "consommable")
     search_fields = ("part__name", "part__IPN")
 
@@ -55,15 +64,19 @@ class ManifestationAdmin(admin.ModelAdmin):
 
 
 class PrestationAdmin(admin.ModelAdmin):
-    list_display = ("nom", "manifestation", "date_debut", "date_fin")
-    list_filter = ("manifestation",)
+    list_display = ("nom", "manifestation", "lieu", "date_debut", "date_fin")
+    list_filter = ("manifestation", "lieu")
     search_fields = ("nom",)
 
 
 class LieuAdmin(admin.ModelAdmin):
-    list_display = ("nom", "prestation", "adresse", "latitude", "longitude", "capacite")
-    list_filter = ("prestation",)
+    list_display = ("nom", "adresse", "latitude", "longitude", "capacite")
     search_fields = ("nom", "adresse")
+
+
+class LignePrestationAdmin(admin.ModelAdmin):
+    list_display = ("prestation", "part", "quantite")
+    search_fields = ("part__name", "part__IPN")
 
 
 class ReservationAdmin(admin.ModelAdmin):
@@ -82,6 +95,18 @@ class LigneReservationAdmin(admin.ModelAdmin):
         "etat_retour",
     )
     search_fields = ("part__name", "part__IPN")
+
+
+class ReturnIncidentAdmin(admin.ModelAdmin):
+    list_display = (
+        "line",
+        "type",
+        "qty",
+        "reported_at",
+        "reported_by",
+    )
+    list_filter = ("type",)
+    search_fields = ("line__part__name", "line__reservation__numero", "comment")
 
 
 class ConflictHistoryAdmin(admin.ModelAdmin):
@@ -108,6 +133,8 @@ _register(RentableItem, RentableItemAdmin)
 _register(Manifestation, ManifestationAdmin)
 _register(Prestation, PrestationAdmin)
 _register(Lieu, LieuAdmin)
+_register(LignePrestation, LignePrestationAdmin)
 _register(Reservation, ReservationAdmin)
 _register(LigneReservation, LigneReservationAdmin)
+_register(ReturnIncident, ReturnIncidentAdmin)
 _register(ConflictHistory, ConflictHistoryAdmin)

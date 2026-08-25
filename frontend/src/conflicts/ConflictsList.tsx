@@ -17,6 +17,12 @@ import { useState } from 'react';
 import { ReservationForm } from '../reservation/ReservationForm';
 import { canWriteReservations } from '../roles';
 
+interface Shortage {
+  part_id: number;
+  part_name: string;
+  missing_quantity: number;
+}
+
 interface ConflictItem {
   id: number;
   numero: string;
@@ -27,6 +33,8 @@ interface ConflictItem {
   demandeur_nom: string;
   conflict_count: number;
   conflicting_reservation_ids: number[];
+  /** Articles en pénurie et quantité manquante (CON-01). */
+  shortages: Shortage[];
 }
 
 interface ModalState {
@@ -100,12 +108,9 @@ export function ConflictsList({
   }
 
   async function resolveConflict(item: ConflictHistoryItem) {
-    await context.api.patch(
-      `${CONFLICTS_HISTORY_URL}${item.id}/resolve/`,
-      {
-        note: 'Resolved from conflicts panel'
-      }
-    );
+    await context.api.patch(`${CONFLICTS_HISTORY_URL}${item.id}/resolve/`, {
+      note: 'Resolved from conflicts panel'
+    });
     await historyQuery.refetch();
     await query.refetch();
   }
@@ -138,11 +143,12 @@ export function ConflictsList({
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Réservation</Table.Th>
-              <Table.Th>Demandeur</Table.Th>
+              <Table.Th>Gérant interne</Table.Th>
               <Table.Th>Événement</Table.Th>
               <Table.Th>Début</Table.Th>
               <Table.Th>Fin</Table.Th>
-              <Table.Th>Conflits</Table.Th>
+              <Table.Th>Manque</Table.Th>
+              <Table.Th>Résas liées</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -169,6 +175,18 @@ export function ConflictsList({
                   {conflict.date_retour_prevue
                     ? new Date(conflict.date_retour_prevue).toLocaleString()
                     : '—'}
+                </Table.Td>
+                <Table.Td>
+                  {/* Une pénurie peut venir du seul prévisionnel d'une
+                      prestation : c'est l'article manquant qui porte
+                      l'information, pas le nombre de réservations. */}
+                  <Group gap={4} wrap='wrap'>
+                    {conflict.shortages.map((shortage) => (
+                      <Badge key={shortage.part_id} color='red' variant='light'>
+                        {shortage.part_name} −{shortage.missing_quantity}
+                      </Badge>
+                    ))}
+                  </Group>
                 </Table.Td>
                 <Table.Td>{conflict.conflict_count}</Table.Td>
               </Table.Tr>
@@ -239,7 +257,9 @@ export function ConflictsList({
           <Table.Tbody>
             {historyQuery.data?.map((item) => (
               <Table.Tr key={item.id}>
-                <Table.Td>{item.conflict_type === 'stock' ? 'Stock' : 'Lieu'}</Table.Td>
+                <Table.Td>
+                  {item.conflict_type === 'stock' ? 'Stock' : 'Lieu'}
+                </Table.Td>
                 <Table.Td>
                   <Badge color={item.state === 'open' ? 'red' : 'green'}>
                     {item.state === 'open' ? 'Ouvert' : 'Résolu'}
@@ -249,14 +269,22 @@ export function ConflictsList({
                 <Table.Td>
                   {item.conflict_type === 'stock'
                     ? `${item.part_name || 'Article inconnu'} (manquant: ${item.details?.missing_quantity ?? 0})`
-                    : item.details?.adresse || item.location_key || 'Lieu non renseigné'}
+                    : item.details?.adresse ||
+                      item.location_key ||
+                      'Lieu non renseigné'}
                 </Table.Td>
                 <Table.Td>
-                  {item.period_start ? new Date(item.period_start).toLocaleDateString() : '—'}
+                  {item.period_start
+                    ? new Date(item.period_start).toLocaleDateString()
+                    : '—'}
                   {' → '}
-                  {item.period_end ? new Date(item.period_end).toLocaleDateString() : '—'}
+                  {item.period_end
+                    ? new Date(item.period_end).toLocaleDateString()
+                    : '—'}
                 </Table.Td>
-                <Table.Td>{new Date(item.created_at).toLocaleString()}</Table.Td>
+                <Table.Td>
+                  {new Date(item.created_at).toLocaleString()}
+                </Table.Td>
                 <Table.Td>
                   {item.state === 'open' ? (
                     <Button

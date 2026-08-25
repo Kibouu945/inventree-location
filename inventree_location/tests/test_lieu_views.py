@@ -1,7 +1,7 @@
 """Tests des endpoints de gestion des lieux et du géocodage (SCRUM-62).
 
 Couvre :
-- `LieuListCreateView`   : liste, filtres (`prestation`, `search`), création ;
+- `LieuListCreateView`   : liste, filtre (`search`), création ;
 - `LieuDetailView`       : lecture, mise à jour des coordonnées GPS, suppression ;
 - `LieuSerializer`       : validation des bornes latitude/longitude ;
 - `GeocodeAddressView`   : appel Nominatim mocké (succès / aucun résultat /
@@ -13,16 +13,14 @@ On suit le même pattern que `test_views.py` : `APIRequestFactory` +
 
 from __future__ import annotations
 
-from datetime import timedelta
 from urllib.error import URLError
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from inventree_location.models import Groupe, Lieu, Manifestation, Prestation
+from inventree_location.models import Lieu
 from inventree_location.views import (
     GeocodeAddressView,
     LieuDetailView,
@@ -57,28 +55,8 @@ def user(db):
 
 
 @pytest.fixture
-def prestation(db, user):
-    now = timezone.now()
-    groupe = Groupe.objects.create(nom="Jambville", code="JAM")
-    manifestation = Manifestation.objects.create(
-        nom="Camp été 2026",
-        date_debut=now,
-        date_fin=now + timedelta(days=7),
-        organisateur=user,
-        groupe=groupe,
-    )
-    return Prestation.objects.create(
-        manifestation=manifestation,
-        nom="Installation",
-        date_debut=now,
-        date_fin=now + timedelta(hours=4),
-    )
-
-
-@pytest.fixture
-def lieu(prestation):
+def lieu(db):
     return Lieu.objects.create(
-        prestation=prestation,
         nom="Terrain central",
         adresse="1 rue du camp",
         latitude="48.856600",
@@ -136,18 +114,13 @@ class TestLieuListCreate:
         assert len(response.data["results"]) == 1
         assert response.data["results"][0]["nom"] == "Terrain central"
 
-    def test_filter_by_prestation(self, factory, user, lieu, prestation):
-        request = factory.get(LIEUX_URL, {"prestation": prestation.pk})
+    def test_search_by_address(self, factory, user, lieu):
+        request = factory.get(LIEUX_URL, {"search": "rue du camp"})
         force_authenticate(request, user=user)
         response = LieuListCreateView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data["results"]) == 1
-
-        request = factory.get(LIEUX_URL, {"prestation": prestation.pk + 999})
-        force_authenticate(request, user=user)
-        response = LieuListCreateView.as_view()(request)
-        assert len(response.data["results"]) == 0
 
     def test_search_by_name(self, factory, user, lieu):
         request = factory.get(LIEUX_URL, {"search": "central"})
@@ -160,9 +133,8 @@ class TestLieuListCreate:
         response = LieuListCreateView.as_view()(request)
         assert len(response.data["results"]) == 0
 
-    def test_create_persists_lieu(self, factory, user, prestation):
+    def test_create_persists_lieu(self, factory, user):
         payload = {
-            "prestation": prestation.pk,
             "nom": "Entrée nord",
             "adresse": "Porte A",
             "latitude": "45.764000",
@@ -175,6 +147,23 @@ class TestLieuListCreate:
 
         assert response.status_code == status.HTTP_201_CREATED
         assert Lieu.objects.filter(nom="Entrée nord").exists()
+
+    def test_create_rounds_high_precision_coordinates(self, factory, user):
+        # Coordonnées collées depuis une carte (7+ décimales) → arrondies,
+        # pas de 400.
+        payload = {
+            "nom": "Coords précises",
+            "latitude": "45.7640485",
+            "longitude": "4.8357123",
+        }
+        request = factory.post(LIEUX_URL, payload, format="json")
+        force_authenticate(request, user=user)
+        response = LieuListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        lieu = Lieu.objects.get(nom="Coords précises")
+        assert str(lieu.latitude) == "45.764049"
+        assert str(lieu.longitude) == "4.835712"
 
 
 # ---------------------------------------------------------------------------
@@ -193,10 +182,8 @@ class TestLieuSerializerValidation:
             ("longitude", "-181.000000"),
         ],
     )
-    def test_out_of_range_coordinates_rejected(
-        self, factory, user, prestation, field, value
-    ):
-        payload = {"prestation": prestation.pk, "nom": "Hors bornes", field: value}
+    def test_out_of_range_coordinates_rejected(self, factory, user, field, value):
+        payload = {"nom": "Hors bornes", field: value}
         request = factory.post(LIEUX_URL, payload, format="json")
         force_authenticate(request, user=user)
         response = LieuListCreateView.as_view()(request)
@@ -256,8 +243,35 @@ class TestGeocodeAddressView:
         response = GeocodeAddressView.as_view()(request)
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
-    def test_success_returns_coordinates(self, factory, user, monkeypatch):
-        body = b'[{"display_name": "Paris, France", "lat": "48.8566", "lon": "2.3522"}]'
+    def test_success_returns_candidates(self, factory, user, monkeypatch):
+        body = (
+            b'[{"display_name": "Champ de Mars, Paris", '
+            b'"lat": "48.8561", "lon": "2.2978"}, '
+            b'{"display_name": "Espace sportif du Champs de Mars, Creil", '
+            b'"lat": "49.2476", "lon": "2.4740"}]'
+        )
+        monkeypatch.setattr(
+            "inventree_location.serializers.urlopen",
+            lambda *a, **k: _FakeNominatimResponse(body),
+        )
+
+        request = factory.get(GEOCODE_URL, {"address": "Champ de Mars Paris"})
+        force_authenticate(request, user=user)
+        response = GeocodeAddressView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        results = response.data["results"]
+        assert len(results) == 2
+        assert results[0]["display_name"] == "Champ de Mars, Paris"
+        assert results[0]["latitude"] == "48.8561"
+        assert results[0]["longitude"] == "2.2978"
+        assert results[1]["display_name"].startswith("Espace sportif")
+
+    def test_high_precision_coordinates_rounded_to_6_decimals(
+        self, factory, user, monkeypatch
+    ):
+        # Nominatim renvoie souvent 7+ décimales → dépasse decimal_places=6.
+        body = b'[{"display_name": "Paris", "lat": "48.85684857", "lon": "2.35222450"}]'
         monkeypatch.setattr(
             "inventree_location.serializers.urlopen",
             lambda *a, **k: _FakeNominatimResponse(body),
@@ -268,9 +282,8 @@ class TestGeocodeAddressView:
         response = GeocodeAddressView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["latitude"] == "48.8566"
-        assert response.data["longitude"] == "2.3522"
-        assert response.data["source"] == "OpenStreetMap Nominatim"
+        assert response.data["results"][0]["latitude"] == "48.856849"
+        assert response.data["results"][0]["longitude"] == "2.352225"
 
     def test_no_result_returns_404(self, factory, user, monkeypatch):
         monkeypatch.setattr(

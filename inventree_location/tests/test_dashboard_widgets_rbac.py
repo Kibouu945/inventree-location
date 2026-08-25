@@ -20,7 +20,17 @@ User = get_user_model()
 CATALOG = "inventree-location-catalog"
 RESERVATIONS = "inventree-location-reservations"
 CONFLICTS = "inventree-location-conflicts"
-ALL_WIDGETS = {CATALOG, RESERVATIONS, CONFLICTS}
+ORGANISATION = "inventree-location-organisation"
+STOCK_ALERTS = "inventree-location-stock-alerts"
+DELIVERIES = "inventree-location-deliveries"
+
+#: Dérivé du mapping et non figé en dur : un widget ajouté à
+#: ``DASHBOARD_WIDGET_ROLES`` sans toucher ce test faisait échouer cinq cas d'un
+#: coup, sans que la régression concerne les rôles.
+ALL_WIDGETS = set(roles.DASHBOARD_WIDGET_ROLES)
+#: Widgets vus par un lecteur : tous sauf les tournées livreur, réservées aux
+#: rôles qui les exécutent.
+LECTEUR_WIDGETS = ALL_WIDGETS - {DELIVERIES}
 
 
 def _make_user(username, role=None, *, is_staff=False, is_superuser=False):
@@ -62,10 +72,12 @@ class TestVisibleDashboardWidgetKeys:
         [
             (roles.ADMIN, ALL_WIDGETS),
             (roles.GESTIONNAIRE, ALL_WIDGETS),
-            (roles.LECTEUR, ALL_WIDGETS),
-            (roles.MAGASINIER, {CATALOG, RESERVATIONS}),
-            (roles.ORGANISATEUR, {RESERVATIONS}),
-            (roles.LIVREUR, {RESERVATIONS}),
+            (roles.LECTEUR, LECTEUR_WIDGETS),
+            # Le magasinier suit la disponibilité future et l'inventaire :
+            # les alertes de seuil le concernent (US-09).
+            (roles.MAGASINIER, {CATALOG, RESERVATIONS, STOCK_ALERTS}),
+            (roles.ORGANISATEUR, {RESERVATIONS, ORGANISATION}),
+            (roles.LIVREUR, {RESERVATIONS, DELIVERIES}),
             (roles.SAV, set()),
         ],
     )
@@ -74,11 +86,12 @@ class TestVisibleDashboardWidgetKeys:
 
         assert roles.visible_dashboard_widget_keys(user) == expected
 
-    def test_livreur_sees_reservations_but_not_conflicts(self):
+    def test_livreur_sees_reservations_and_deliveries_but_not_conflicts(self):
         user = _make_user("livreur1", role=roles.LIVREUR)
 
         keys = roles.visible_dashboard_widget_keys(user)
 
         assert RESERVATIONS in keys
+        assert DELIVERIES in keys
         assert CONFLICTS not in keys
         assert CATALOG not in keys

@@ -13,6 +13,9 @@ export interface LieuSummary {
   id: number;
   nom: string;
   adresse: string;
+  // DRF sérialise les DecimalField en chaîne (cf. organisation/types.ts).
+  latitude: string | null;
+  longitude: string | null;
 }
 
 export interface Prestation {
@@ -22,7 +25,9 @@ export interface Prestation {
   date_fin: string;
   manifestation: number;
   manifestation_nom: string;
-  lieux: LieuSummary[];
+  // ORG-02 : une prestation se déroule sur un seul lieu géolocalisé.
+  lieu: number | null;
+  lieu_detail: LieuSummary | null;
 }
 
 /** Réponse paginée DRF (PageNumberPagination). */

@@ -69,20 +69,22 @@ def location_setup(db):
         date_fin=now + timedelta(days=2),
     )
 
-    Lieu.objects.create(
-        prestation=prestation_a,
+    # ORG-02 : le lieu est autonome et c'est la prestation qui le référence.
+    prestation_a.lieu = Lieu.objects.create(
         nom="Lieu A",
         adresse="10 Rue de la Paix, Paris",
         latitude=48.8566,
         longitude=2.3522,
     )
-    Lieu.objects.create(
-        prestation=prestation_b,
+    prestation_a.save(update_fields=["lieu"])
+
+    prestation_b.lieu = Lieu.objects.create(
         nom="Lieu B",
         adresse="10 Rue de la Paix, Paris",
         latitude=48.8566,
         longitude=2.3522,
     )
+    prestation_b.save(update_fields=["lieu"])
 
     category = PartCategory.objects.create(name="Services")
     virtual_part = Part.objects.create(name="Nettoyage", category=category)
@@ -90,7 +92,6 @@ def location_setup(db):
         part=virtual_part,
         is_rentable=True,
         is_virtual=True,
-        stock_total=0,
     )
 
     requester = User.objects.create_user(username="requester", password="pwd")
@@ -113,7 +114,7 @@ def location_setup(db):
 
 
 @pytest.mark.django_db
-def test_location_conflict_blocks_save_and_creates_history(location_setup):
+def test_location_conflict_is_journalised(location_setup):
     candidate = Reservation.objects.create(
         prestation=location_setup["prestation_b"],
         demandeur=location_setup["requester"],
@@ -123,8 +124,9 @@ def test_location_conflict_blocks_save_and_creates_history(location_setup):
     )
     candidate.lignes.create(part=location_setup["virtual_part"], quantite_demandee=1)
 
-    with pytest.raises(serializers.ValidationError):
-        ReservationSerializer()._validate_stock_conflicts_on_save(candidate)
+    # Le conflit de lieu se trace sans bloquer : l'arbitrage a lieu à la
+    # validation, pas à l'enregistrement de la demande.
+    ReservationSerializer()._register_conflict_history(candidate)
 
     history = ConflictHistory.objects.filter(
         reservation=candidate,
@@ -136,14 +138,18 @@ def test_location_conflict_blocks_save_and_creates_history(location_setup):
 
 @pytest.mark.django_db
 def test_location_conflict_not_detected_when_address_differs(location_setup):
-    Lieu.objects.filter(prestation=location_setup["prestation_b"]).update(
+    Lieu.objects.filter(pk=location_setup["prestation_b"].lieu_id).update(
         adresse="20 Avenue des Champs, Paris",
         latitude=48.8700,
         longitude=2.3100,
     )
+    # `.update()` ne touche pas l'objet en mémoire : sans relecture, la
+    # prestation garde son lieu d'origine en cache et le test mesurerait
+    # l'ancienne adresse.
+    prestation_b = Prestation.objects.get(pk=location_setup["prestation_b"].pk)
 
     candidate = Reservation.objects.create(
-        prestation=location_setup["prestation_b"],
+        prestation=prestation_b,
         demandeur=location_setup["requester"],
         statut=StatutReservation.SOUMISE,
         date_retrait_prevue=location_setup["now"] + timedelta(days=1, hours=9),
@@ -166,8 +172,7 @@ def test_conflict_history_filters_and_resolve(manager, location_setup):
     )
     reservation.lignes.create(part=location_setup["virtual_part"], quantite_demandee=1)
 
-    with pytest.raises(serializers.ValidationError):
-        ReservationSerializer()._validate_stock_conflicts_on_save(reservation)
+    ReservationSerializer()._register_conflict_history(reservation)
 
     history_item = ConflictHistory.objects.filter(reservation=reservation).first()
     assert history_item is not None

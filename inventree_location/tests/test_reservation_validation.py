@@ -118,9 +118,7 @@ class TestSoumissionStricte:
         assert "lignes" in response.data
 
     @pytest.mark.django_db
-    def test_refuse_sans_article_virtuel(
-        self, factory, user, prestation, materiel
-    ):
+    def test_refuse_sans_article_virtuel(self, factory, user, prestation, materiel):
         payload = {
             "statut": "soumise",
             "prestation": prestation.pk,

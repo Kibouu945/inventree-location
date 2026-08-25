@@ -126,14 +126,10 @@ class TestWorkflowService:
         assert log.comment == "OK pour le camp"
 
     @pytest.mark.django_db
-    def test_transition_vers_validee_renseigne_validateur(
-        self, make_reservation, user
-    ):
+    def test_transition_vers_validee_renseigne_validateur(self, make_reservation, user):
         reservation = make_reservation(StatutReservation.SOUMISE)
 
-        transition_reservation_status(
-            reservation, StatutReservation.VALIDEE, user=user
-        )
+        transition_reservation_status(reservation, StatutReservation.VALIDEE, user=user)
 
         reservation.refresh_from_db()
         assert reservation.validateur_id == user.pk
@@ -171,9 +167,7 @@ class TestWorkflowService:
             StatutReservation.RETOURNEE,
         ],
     )
-    def test_annulation_possible_depuis_tout_etat_actif(
-        self, make_reservation, depart
-    ):
+    def test_annulation_possible_depuis_tout_etat_actif(self, make_reservation, depart):
         reservation = make_reservation(depart)
 
         transition_reservation_status(reservation, StatutReservation.ANNULEE)
@@ -256,9 +250,7 @@ class TestTransitionEndpoint:
         assert reservation.statut == StatutReservation.BROUILLON
 
     @pytest.mark.django_db
-    def test_patch_statut_inconnu_renvoie_400(
-        self, factory, user, make_reservation
-    ):
+    def test_patch_statut_inconnu_renvoie_400(self, factory, user, make_reservation):
         reservation = make_reservation(StatutReservation.SOUMISE)
         request = factory.patch(
             TRANSITION_URL.format(pk=reservation.pk),
@@ -284,3 +276,48 @@ class TestTransitionEndpoint:
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert ReservationStatusLog.objects.count() == 0
+
+
+@pytest.mark.django_db
+class TestArbitrageRbac:
+    """Seuls gestionnaire / admin peuvent valider ou refuser (arbitrage)."""
+
+    def _organisateur(self):
+        from django.contrib.auth.models import Group
+
+        from inventree_location import roles
+
+        account = User.objects.create_user(username="orga", password="pwd12345")
+        account.groups.add(Group.objects.get(name=roles.ORGANISATEUR))
+        return account
+
+    @pytest.mark.parametrize("cible", ["validee", "refusee"])
+    def test_organisateur_ne_peut_pas_arbitrer(self, factory, make_reservation, cible):
+        reservation = make_reservation(StatutReservation.SOUMISE)
+        request = factory.patch(
+            TRANSITION_URL.format(pk=reservation.pk),
+            {"statut": cible},
+            format="json",
+        )
+        force_authenticate(request, user=self._organisateur())
+
+        response = ReservationTransitionView.as_view()(request, pk=reservation.pk)
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        reservation.refresh_from_db()
+        assert reservation.statut == StatutReservation.SOUMISE
+
+    def test_gestionnaire_peut_valider(self, factory, user, make_reservation):
+        reservation = make_reservation(StatutReservation.SOUMISE)
+        request = factory.patch(
+            TRANSITION_URL.format(pk=reservation.pk),
+            {"statut": StatutReservation.VALIDEE},
+            format="json",
+        )
+        force_authenticate(request, user=user)
+
+        response = ReservationTransitionView.as_view()(request, pk=reservation.pk)
+
+        assert response.status_code == status.HTTP_200_OK
+        reservation.refresh_from_db()
+        assert reservation.statut == StatutReservation.VALIDEE

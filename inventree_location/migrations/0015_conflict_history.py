@@ -4,10 +4,9 @@ import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("part", "0001_initial"),
-        ("inventree_location", "0007_rentableitem_stock_total"),
+        ("inventree_location", "0014_reservation_indexes_and_archiving"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
@@ -26,11 +25,15 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "created_at",
-                    models.DateTimeField(auto_now_add=True, verbose_name="date de création"),
+                    models.DateTimeField(
+                        auto_now_add=True, verbose_name="date de création"
+                    ),
                 ),
                 (
                     "updated_at",
-                    models.DateTimeField(auto_now=True, verbose_name="date de modification"),
+                    models.DateTimeField(
+                        auto_now=True, verbose_name="date de modification"
+                    ),
                 ),
                 (
                     "conflict_type",
@@ -54,24 +57,40 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "period_start",
-                    models.DateTimeField(blank=True, null=True, verbose_name="début période"),
+                    models.DateTimeField(
+                        blank=True, null=True, verbose_name="début période"
+                    ),
                 ),
                 (
                     "period_end",
-                    models.DateTimeField(blank=True, null=True, verbose_name="fin période"),
+                    models.DateTimeField(
+                        blank=True, null=True, verbose_name="fin période"
+                    ),
                 ),
                 (
                     "location_key",
-                    models.CharField(blank=True, default="", max_length=255, verbose_name="clé de lieu"),
+                    models.CharField(
+                        blank=True,
+                        default="",
+                        max_length=255,
+                        verbose_name="clé de lieu",
+                    ),
                 ),
-                ("details", models.JSONField(blank=True, default=dict, verbose_name="détails")),
+                (
+                    "details",
+                    models.JSONField(blank=True, default=dict, verbose_name="détails"),
+                ),
                 (
                     "resolved_at",
-                    models.DateTimeField(blank=True, null=True, verbose_name="résolu le"),
+                    models.DateTimeField(
+                        blank=True, null=True, verbose_name="résolu le"
+                    ),
                 ),
                 (
                     "resolution_note",
-                    models.TextField(blank=True, default="", verbose_name="note de résolution"),
+                    models.TextField(
+                        blank=True, default="", verbose_name="note de résolution"
+                    ),
                 ),
                 (
                     "conflicting_reservation",
@@ -124,11 +143,15 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="conflicthistory",
-            index=models.Index(fields=["conflict_type", "state"], name="conflict_type_state_idx"),
+            index=models.Index(
+                fields=["conflict_type", "state"], name="conflict_type_state_idx"
+            ),
         ),
         migrations.AddIndex(
             model_name="conflicthistory",
-            index=models.Index(fields=["reservation", "state"], name="conflict_resa_state_idx"),
+            index=models.Index(
+                fields=["reservation", "state"], name="conflict_resa_state_idx"
+            ),
         ),
         migrations.AddIndex(
             model_name="conflicthistory",

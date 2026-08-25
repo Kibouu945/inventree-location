@@ -190,3 +190,23 @@ export function enrichLignesFromCatalog(
     return { ...ligne, partName: info.name, isVirtual: info.is_virtual };
   });
 }
+
+/** Vrai si la réservation attend un arbitrage (seul « soumise » l'ouvre). */
+export function canArbitrateReservation(statut: string): boolean {
+  return statut === 'soumise';
+}
+
+/** Vrai tant que la réservation est modifiable (avant validation). */
+export function isReservationEditable(statut: string): boolean {
+  return statut === 'brouillon' || statut === 'soumise';
+}
+
+/** Message d'une transition ratée : le `detail` backend, sinon un générique. */
+export function transitionErrorMessage(error: unknown): string {
+  const detail = (error as { response?: { data?: { detail?: unknown } } })
+    ?.response?.data?.detail;
+
+  return typeof detail === 'string'
+    ? detail
+    : "Le statut n'a pas pu être changé.";
+}

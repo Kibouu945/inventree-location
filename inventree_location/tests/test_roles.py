@@ -208,3 +208,34 @@ def test_user_roles_helper():
     assert roles.user_roles(user) == {roles.GESTIONNAIRE}
     assert roles.user_has_any_role(user, [roles.ADMIN, roles.GESTIONNAIRE]) is True
     assert roles.user_has_any_role(user, [roles.LECTEUR]) is False
+
+
+@pytest.mark.django_db
+def test_sees_only_deliverable_reservations_pure_livreur():
+    user = make_user("livreur-pur", roles.LIVREUR)
+    assert roles.sees_only_deliverable_reservations(user) is True
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "role",
+    [roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR, roles.MAGASINIER, roles.SAV],
+)
+def test_sees_only_deliverable_reservations_false_for_managers(role):
+    user = make_user(f"full-{role}", role)
+    assert roles.sees_only_deliverable_reservations(user) is False
+
+
+@pytest.mark.django_db
+def test_sees_only_deliverable_reservations_livreur_with_broader_role():
+    # Un livreur qui cumule un rôle à visibilité complète n'est pas restreint.
+    user = make_user("livreur-gest", roles.LIVREUR)
+    user.groups.add(Group.objects.get(name=roles.GESTIONNAIRE))
+    assert roles.sees_only_deliverable_reservations(user) is False
+
+
+@pytest.mark.django_db
+def test_sees_only_deliverable_reservations_false_for_superuser():
+    root = User.objects.create_superuser(username="root-livreur", password="pwd12345")
+    root.groups.add(Group.objects.get(name=roles.LIVREUR))
+    assert roles.sees_only_deliverable_reservations(root) is False

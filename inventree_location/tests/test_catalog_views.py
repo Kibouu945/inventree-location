@@ -7,13 +7,27 @@ câblage du drapeau louable sur RentableItem.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
-from inventree_location.models import RentableItem
+from inventree_location.models import (
+    Groupe,
+    LignePrestation,
+    LigneReservation,
+    Lieu,
+    Manifestation,
+    Prestation,
+    RentableItem,
+    Reservation,
+    StatutReservation,
+)
+from inventree_location.tests.factories import mettre_en_stock
 from inventree_location.views import (
     CatalogPagination,
     CatalogPartDetailView,
@@ -292,3 +306,229 @@ class TestRentablePartDetail:
         assert response.status_code == status.HTTP_200_OK
         assert response.data["is_rentable"] is False
         assert RentableItem.objects.get(part=parts["tente"]).is_rentable is False
+
+
+class TestCatalogStockAvailable:
+    """CAT-04 : quantité disponible exposée dans le catalogue."""
+
+    @pytest.fixture
+    def presta_context(self, db):
+        # Heure locale : cf. la fixture `base` de test_stock.py.
+        now = timezone.localtime().replace(hour=8, minute=0, second=0, microsecond=0)
+        user = User.objects.create_user(username="carla", password="pwd12345")
+        groupe = Groupe.objects.create(nom="Jambville", code="JAM")
+        manifestation = Manifestation.objects.create(
+            nom="Camp",
+            date_debut=now,
+            date_fin=now + timedelta(days=10),
+            organisateur=user,
+            groupe=groupe,
+        )
+        lieu = Lieu.objects.create(nom="Terrain")
+        return {
+            "now": now,
+            "user": user,
+            "manifestation": manifestation,
+            "lieu": lieu,
+        }
+
+    def _prestation(self, ctx, *, hours, part=None, qty=0):
+        presta = Prestation.objects.create(
+            manifestation=ctx["manifestation"],
+            lieu=ctx["lieu"],
+            nom="Autre",
+            date_debut=ctx["now"],
+            date_fin=ctx["now"] + timedelta(hours=hours),
+        )
+        if part is not None:
+            LignePrestation.objects.create(prestation=presta, part=part, quantite=qty)
+        return presta
+
+    def _reservation(self, ctx, presta, part, qty):
+        resa = Reservation.objects.create(
+            prestation=presta,
+            demandeur=ctx["user"],
+            statut=StatutReservation.VALIDEE,
+            date_retrait_prevue=ctx["now"],
+            date_retour_prevue=ctx["now"] + timedelta(hours=4),
+        )
+        LigneReservation.objects.create(
+            reservation=resa, part=part, quantite_demandee=qty
+        )
+        return resa
+
+    @pytest.mark.django_db
+    def test_list_exposes_stock_available_for_given_period(
+        self, factory, user, categorie, presta_context
+    ):
+        part = Part.objects.create(name="Tente", category=categorie)
+        RentableItem.objects.create(part=part)
+        mettre_en_stock(part, 10)
+        self._prestation(presta_context, hours=3, part=part, qty=6)
+
+        request = factory.get(
+            CATALOG_URL,
+            {
+                "date_debut": presta_context["now"].isoformat(),
+                "date_fin": (presta_context["now"] + timedelta(hours=2)).isoformat(),
+            },
+        )
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        by_name = {row["name"]: row for row in response.data["results"]}
+        assert by_name["Tente"]["stock_available"] == 4
+
+    @pytest.mark.django_db
+    def test_list_defaults_to_today_when_no_period_given(
+        self, factory, user, categorie, presta_context
+    ):
+        part = Part.objects.create(name="Table", category=categorie)
+        RentableItem.objects.create(part=part)
+        mettre_en_stock(part, 10)
+        self._prestation(presta_context, hours=3, part=part, qty=7)
+
+        request = factory.get(CATALOG_URL)
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        by_name = {row["name"]: row for row in response.data["results"]}
+        assert by_name["Table"]["stock_available"] == 3
+
+    @pytest.mark.django_db
+    def test_virtual_part_reports_zero_stock_available(
+        self, factory, user, categorie
+    ):
+        service = Part.objects.create(name="Nettoyage", category=categorie)
+        RentableItem.objects.create(part=service, is_virtual=True)
+
+        request = factory.get(CATALOG_URL, {"virtual": "true"})
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        assert response.data["results"][0]["stock_available"] == 0
+
+    @pytest.mark.django_db
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"date_debut": "pas-une-date", "date_fin": "2026-12-27"},
+            {"date_debut": "9999-99-99"},
+            {"date_fin": "12/26/2026"},
+        ],
+    )
+    def test_list_rejects_malformed_period_with_400(
+        self, factory, user, categorie, params
+    ):
+        """Une date invalide est une erreur du client, pas un 500."""
+
+        Part.objects.create(name="Chaise", category=categorie)
+
+        request = factory.get(CATALOG_URL, params)
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        assert response.status_code == 400
+
+    @pytest.mark.django_db
+    def test_list_treats_empty_period_as_absent(self, factory, user, categorie):
+        """`?date_debut=&date_fin=` équivaut à ne pas filtrer (et non à un 500)."""
+
+        part = Part.objects.create(name="Tabouret", category=categorie)
+        RentableItem.objects.create(part=part)
+        mettre_en_stock(part, 4)
+
+        request = factory.get(CATALOG_URL, {"date_debut": "", "date_fin": ""})
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        assert response.status_code == 200
+        by_name = {row["name"]: row for row in response.data["results"]}
+        assert by_name["Tabouret"]["stock_available"] == 4
+
+    @pytest.mark.django_db
+    def test_detail_exposes_stock_available(
+        self, factory, user, categorie, presta_context
+    ):
+        part = Part.objects.create(name="Barrière", category=categorie)
+        RentableItem.objects.create(part=part)
+        mettre_en_stock(part, 5)
+        self._prestation(presta_context, hours=3, part=part, qty=2)
+
+        request = factory.get(
+            f"/plugin/inventree-location/catalog/{part.pk}/",
+            {
+                "date_debut": presta_context["now"].isoformat(),
+                "date_fin": (presta_context["now"] + timedelta(hours=2)).isoformat(),
+            },
+        )
+        force_authenticate(request, user=user)
+
+        response = CatalogPartDetailView.as_view()(request, pk=part.pk)
+
+        assert response.data["stock_available"] == 3
+
+    @pytest.mark.django_db
+    def test_list_deducts_existing_reservations(
+        self, factory, user, categorie, presta_context
+    ):
+        """Deux réservations du même article se partagent bien le stock."""
+
+        part = Part.objects.create(name="Tente", category=categorie)
+        RentableItem.objects.create(part=part)
+        mettre_en_stock(part, 10)
+        presta = self._prestation(presta_context, hours=4)
+        self._reservation(presta_context, presta, part, 4)
+        self._reservation(presta_context, presta, part, 3)
+
+        request = factory.get(
+            CATALOG_URL,
+            {
+                "date_debut": presta_context["now"].isoformat(),
+                "date_fin": (presta_context["now"] + timedelta(hours=2)).isoformat(),
+            },
+        )
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        by_name = {row["name"]: row for row in response.data["results"]}
+        assert by_name["Tente"]["stock_available"] == 3
+
+    @pytest.mark.django_db
+    def test_list_can_exclude_the_reservation_being_edited(
+        self, factory, user, categorie, presta_context
+    ):
+        """`?exclude_reservation=` rend à l'édition ses propres quantités."""
+
+        part = Part.objects.create(name="Tente", category=categorie)
+        RentableItem.objects.create(part=part)
+        mettre_en_stock(part, 10)
+        presta = self._prestation(presta_context, hours=4)
+        resa = self._reservation(presta_context, presta, part, 4)
+
+        request = factory.get(CATALOG_URL, {"exclude_reservation": str(resa.pk)})
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        by_name = {row["name"]: row for row in response.data["results"]}
+        assert by_name["Tente"]["stock_available"] == 10
+
+    @pytest.mark.django_db
+    def test_list_rejects_malformed_exclude_reservation_with_400(
+        self, factory, user, categorie
+    ):
+        Part.objects.create(name="Chaise", category=categorie)
+
+        request = factory.get(CATALOG_URL, {"exclude_reservation": "abc"})
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        assert response.status_code == 400

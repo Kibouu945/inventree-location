@@ -4,7 +4,6 @@ import {
 } from '@inventreedb/ui';
 import {
   Alert,
-  Badge,
   Button,
   Group,
   Image,
@@ -16,6 +15,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
+import { PartKindBadge } from './PartKindBadge';
 import type { CatalogPart } from './types';
 
 const DETAIL_URL = '/plugin/inventree-location/catalog/';
@@ -68,13 +68,11 @@ function PartDetailPanel({ context }: { context: InvenTreePluginContext }) {
           <Title order={4}>{part.name}</Title>
           <Text c='dimmed'>{part.category_name || 'Sans catégorie'}</Text>
         </Stack>
-        {part.consommable ? (
-          <Badge color='orange'>Consommable</Badge>
-        ) : part.rentable ? (
-          <Badge color='green'>Louable</Badge>
-        ) : (
-          <Badge color='gray'>Non-louable</Badge>
-        )}
+        <PartKindBadge
+          isVirtual={part.is_virtual}
+          consommable={part.consommable}
+          rentable={part.rentable}
+        />
       </Group>
 
       {part.image_url ? (
@@ -93,7 +91,9 @@ function PartDetailPanel({ context }: { context: InvenTreePluginContext }) {
       <Group grow>
         <Stack gap={4}>
           <Text fw={600}>Stock disponible</Text>
-          <Text>{part.stock_available ?? 0}</Text>
+          {/* Un service n'a pas de stock physique : « 0 » se lirait comme une
+              rupture, alors qu'il n'y a rien à décompter. */}
+          <Text>{part.is_virtual ? '—' : (part.stock_available ?? 0)}</Text>
         </Stack>
         <Stack gap={4}>
           <Text fw={600}>Référence</Text>

@@ -2,6 +2,7 @@
 
 from rest_framework import serializers
 
+from inventree_location.conflicts import detect_reservation_conflicts
 from inventree_location.models import (
     ReservationStatusLog,
     StatutReservation,
@@ -61,6 +62,19 @@ def transition_reservation_status(reservation, new_status, user=None, comment=""
             "requested_status": new_status,
             "available_transitions": available_transitions,
         })
+
+    # Valider une réservation en conflit non forcé est refusé (forced passe).
+    if new_status == StatutReservation.VALIDEE and not reservation.forced:
+        conflict_result = detect_reservation_conflicts(reservation)
+
+        if conflict_result["has_conflict"]:
+            raise serializers.ValidationError({
+                "detail": (
+                    "Validation refusée : conflit de stock détecté. "
+                    "Résolvez le conflit ou passez forced=true."
+                ),
+                "conflicts": conflict_result["conflicts"],
+            })
 
     reservation.statut = new_status
 

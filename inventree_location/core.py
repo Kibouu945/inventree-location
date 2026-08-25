@@ -72,18 +72,33 @@ class InvenTreeLocation(
             ConflictsListView,
             ConflictHistoryListView,
             ConflictHistoryResolveView,
+            DeliveryListView,
             ExampleView,
             GeocodeAddressView,
+            GroupeListView,
             LieuDetailView,
             LieuListCreateView,
-            PrestationListView,
+            ManifestationDetailView,
+            ManifestationListCreateView,
+            PrestationDetailView,
+            PrestationListCreateView,
+            PrestationStockPreviewView,
+            PrestationStockView,
             RentableFlagBulkUpdateView,
             RentablePartDetailView,
+            ReservationCheckinView,
             ReservationConflictCheckView,
             ReservationDetailView,
             ReservationListCreateView,
+            ReservationRetourView,
             ReservationTransitionView,
             StockAvailabilityCheckView,
+            ReturnIncidentDetailView,
+            ReturnIncidentHistoryView,
+            ReturnIncidentListCreateView,
+            ReturnReportPdfView,
+            ReturnReportView,
+            StockAlertListView,
             UserListView,
         )
 
@@ -123,7 +138,43 @@ class InvenTreeLocation(
                 ReservationTransitionView.as_view(),
                 name="reservation-transition",
             ),
+            path(
+                "reservations/<int:pk>/retour/",
+                ReservationRetourView.as_view(),
+                name="reservation-retour",
+            ),
+            path(
+                "reservations/<int:pk>/checkin/",
+                ReservationCheckinView.as_view(),
+                name="reservation-checkin",
+            ),
+            path(
+                "returns/incidents/",
+                ReturnIncidentListCreateView.as_view(),
+                name="return-incident-list",
+            ),
+            path(
+                "returns/history/",
+                ReturnIncidentHistoryView.as_view(),
+                name="return-incident-history",
+            ),
+            path(
+                "returns/incidents/<int:pk>/",
+                ReturnIncidentDetailView.as_view(),
+                name="return-incident-detail",
+            ),
+            path(
+                "returns/reports/<int:pk>/",
+                ReturnReportView.as_view(),
+                name="return-report",
+            ),
+            path(
+                "returns/reports/<int:pk>/pdf/",
+                ReturnReportPdfView.as_view(),
+                name="return-report-pdf",
+            ),
             path("conflicts/", ConflictsListView.as_view(), name="conflict-list"),
+            path("deliveries/", DeliveryListView.as_view(), name="delivery-list"),
             path(
                 "reservations/<int:pk>/conflicts/",
                 ReservationConflictCheckView.as_view(),
@@ -135,9 +186,39 @@ class InvenTreeLocation(
                 name="reservation-stock-check",
             ),
             path(
+                "manifestations/",
+                ManifestationListCreateView.as_view(),
+                name="manifestation-list-create",
+            ),
+            path(
+                "manifestations/<int:pk>/",
+                ManifestationDetailView.as_view(),
+                name="manifestation-detail",
+            ),
+            path(
                 "prestations/",
-                PrestationListView.as_view(),
-                name="prestation-list",
+                PrestationListCreateView.as_view(),
+                name="prestation-list-create",
+            ),
+            path(
+                "prestations/stock-preview/",
+                PrestationStockPreviewView.as_view(),
+                name="prestation-stock-preview",
+            ),
+            path(
+                "prestations/<int:pk>/",
+                PrestationDetailView.as_view(),
+                name="prestation-detail",
+            ),
+            path(
+                "prestations/<int:pk>/stock/",
+                PrestationStockView.as_view(),
+                name="prestation-stock",
+            ),
+            path(
+                "groupes/",
+                GroupeListView.as_view(),
+                name="groupe-list",
             ),
             path(
                 "users/",
@@ -153,6 +234,11 @@ class InvenTreeLocation(
                 "conflicts/history/<int:pk>/resolve/",
                 ConflictHistoryResolveView.as_view(),
                 name="conflicts-history-resolve",
+            ),
+            path(
+                "alerts/stock/",
+                StockAlertListView.as_view(),
+                name="stock-alert-list",
             ),
         ]
 
@@ -217,6 +303,31 @@ class InvenTreeLocation(
                 "source": self.plugin_static_file(
                     "Catalog.js:renderInvenTreeLocationCatalog"
                 ),
+                # Seul widget à ne pas déclarer sa taille, il retombait sur la
+                # boîte par défaut : un tableau de 5 colonnes y tenait dans une
+                # colonne, illisible. Même gabarit que les autres écrans.
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-organisation"):
+            items.append({
+                "key": "inventree-location-organisation",
+                "title": "Organisation",
+                "description": ("Gestion des manifestations, prestations et lieux"),
+                "icon": "ti:calendar-cog:outline",
+                "source": self.plugin_static_file(
+                    "Organisation.js:renderInvenTreeLocationOrganisation"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
                 "context": {
                     "settings": self.get_settings_dict(),
                 },
@@ -232,6 +343,24 @@ class InvenTreeLocation(
                     "Reservations.js:renderInvenTreeLocationReservations"
                 ),
                 # Liste dense (filtres + tableau + modale)
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-deliveries"):
+            items.append({
+                "key": "inventree-location-deliveries",
+                "title": "Tournées livreur",
+                "description": "Livraisons à effectuer, filtrables par date / lieu / statut",
+                "icon": "ti:truck-delivery:outline",
+                "source": self.plugin_static_file(
+                    "Deliveries.js:renderInvenTreeLocationDeliveries"
+                ),
                 "options": {
                     "width": 12,
                     "height": 8,
@@ -268,18 +397,22 @@ class InvenTreeLocation(
                 },
             })
 
-        return items
-
-    def get_ui_spotlight_actions(self, request, context, **kwargs):
-        """Return a list of custom spotlight actions to be made available."""
-        return [
-            {
-                "key": "sample-spotlight-action",
-                "title": "Hello Action",
-                "description": "Hello from InvenTreeLocation",
-                "icon": "ti:heart-handshake:outline",
+        if visible("inventree-location-stock-alerts"):
+            items.append({
+                "key": "inventree-location-stock-alerts",
+                "title": "Alertes stock",
+                "description": "Seuils bas/hauts et tension projetée",
+                "icon": "ti:bell-ringing:outline",
                 "source": self.plugin_static_file(
-                    "Spotlight.js:InvenTreeLocationSpotlightAction"
+                    "Dashboard.js:renderInvenTreeLocationDashboardItem"
                 ),
-            }
-        ]
+                "options": {
+                    "width": 12,
+                    "height": 6,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        return items
