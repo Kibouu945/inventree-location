@@ -317,7 +317,7 @@ export function ReservationsList({
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Numéro</Table.Th>
-              <Table.Th>Demandeur</Table.Th>
+              <Table.Th>Gérant interne</Table.Th>
               <Table.Th>Événement</Table.Th>
               <Table.Th>Retrait prévu</Table.Th>
               <Table.Th>Retour prévu</Table.Th>

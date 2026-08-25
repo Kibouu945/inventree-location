@@ -35,6 +35,7 @@ from .models import (
 )
 from .permissions import (
     CatalogPermission,
+    DeliveryPermission,
     LieuPermission,
     ManifestationPermission,
     PrestationPermission,
@@ -43,6 +44,7 @@ from .permissions import (
 )
 from .serializers import (
     CatalogPartSerializer,
+    DeliverySerializer,
     ExampleSerializer,
     GroupeSerializer,
     LieuSerializer,
@@ -59,6 +61,32 @@ from .services.workflow_service import (
     get_available_transitions,
     transition_reservation_status,
 )
+
+
+def _parse_csv_int_values(values):
+    """Parse les valeurs CSV / répétables en une liste d'entiers uniques."""
+
+    parsed = []
+    seen = set()
+
+    for value in values:
+        for chunk in value.split(","):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+
+            try:
+                candidate = int(chunk)
+            except ValueError:
+                continue
+
+            if candidate in seen:
+                continue
+
+            seen.add(candidate)
+            parsed.append(candidate)
+
+    return parsed
 
 
 class ExampleView(APIView):
@@ -185,32 +213,6 @@ class ReservationListCreateView(generics.ListCreateAPIView):
     serializer_class = ReservationSerializer
     permission_classes = [ReservationPermission]
 
-    @staticmethod
-    def _parse_csv_int_values(values):
-        """Parse les valeurs CSV / répétables en une liste d'entiers uniques."""
-
-        parsed = []
-        seen = set()
-
-        for value in values:
-            for chunk in value.split(","):
-                chunk = chunk.strip()
-                if not chunk:
-                    continue
-
-                try:
-                    candidate = int(chunk)
-                except ValueError:
-                    continue
-
-                if candidate in seen:
-                    continue
-
-                seen.add(candidate)
-                parsed.append(candidate)
-
-        return parsed
-
     def get_queryset(self):
         """Retourne les réservations, filtrées par statut, période et recherche."""
 
@@ -230,7 +232,7 @@ class ReservationListCreateView(generics.ListCreateAPIView):
         if statuts:
             queryset = queryset.filter(statut__in=statuts)
 
-        categories = self._parse_csv_int_values(
+        categories = _parse_csv_int_values(
             self.request.query_params.getlist("categories")
         )
 
@@ -258,6 +260,65 @@ class ReservationListCreateView(generics.ListCreateAPIView):
                 | Q(demandeur__first_name__icontains=search)
                 | Q(demandeur__last_name__icontains=search)
             )
+
+        return queryset
+
+
+class DeliveryListView(generics.ListAPIView):
+    """Tournée livreur : réservations à livrer / livrées, enrichies (US livreur).
+
+    Paramètres de filtre :
+    - statut    : filtre exact sur le statut (répétable). Absent : validée +
+                  livrée (« à livrer » et « livré » sur la période observée).
+    - date_from : réservations dont le retour prévu est >= à cette date
+    - date_to   : réservations dont le retrait prévu est <= à cette date
+    - lieu      : filtre sur le lieu de la prestation (CSV / répétable)
+
+    Tri par date de retrait prévue croissante (ordre d'une tournée), à la
+    différence de `reservations/` triée par date de demande décroissante.
+    """
+
+    serializer_class = DeliverySerializer
+    permission_classes = [DeliveryPermission]
+
+    #: Statuts affichés par défaut quand `statut` n'est pas fourni.
+    DEFAULT_STATUTS = (StatutReservation.VALIDEE, StatutReservation.LIVREE)
+
+    def get_queryset(self):
+        """Retourne les réservations à livrer, filtrées par statut, période et lieu."""
+
+        queryset = (
+            Reservation.objects.select_related(
+                "prestation",
+                "prestation__lieu",
+                "prestation__manifestation",
+                "prestation__manifestation__organisateur",
+            )
+            .prefetch_related("lignes__part")
+            .all()
+            .order_by("date_retrait_prevue")
+        )
+
+        # Un livreur pur ne voit que les réservations validées.
+        if roles.sees_only_deliverable_reservations(self.request.user):
+            queryset = queryset.filter(statut=StatutReservation.VALIDEE)
+        else:
+            statuts = self.request.query_params.getlist("statut")
+            queryset = queryset.filter(statut__in=statuts or self.DEFAULT_STATUTS)
+
+        date_from = self.request.query_params.get("date_from")
+        date_to = self.request.query_params.get("date_to")
+
+        if date_from:
+            queryset = queryset.filter(date_retour_prevue__gte=date_from)
+
+        if date_to:
+            queryset = queryset.filter(date_retrait_prevue__lte=date_to)
+
+        lieux = _parse_csv_int_values(self.request.query_params.getlist("lieu"))
+
+        if lieux:
+            queryset = queryset.filter(prestation__lieu_id__in=lieux)
 
         return queryset
 
