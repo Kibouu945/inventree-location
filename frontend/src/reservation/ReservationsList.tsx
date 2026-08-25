@@ -44,6 +44,9 @@ import type { Page, Reservation } from './types';
 
 const RESERVATIONS_URL = '/plugin/inventree-location/reservations/';
 
+// Taille de page demandée au serveur (`LimitOffsetPagination`, SCRUM-101).
+const PAGE_SIZE = 50;
+
 const STATUT_COLORS: Record<string, string> = {
   brouillon: 'gray',
   soumise: 'blue',
@@ -120,6 +123,7 @@ export function ReservationsList({
   });
   const [filters, setFilters] =
     useState<ReservationFiltersState>(initialFilters);
+  const [offset, setOffset] = useState(0);
   const [debouncedSearch] = useDebouncedValue(filters.search, 300);
 
   const effectiveFilters = useMemo(
@@ -129,9 +133,20 @@ export function ReservationsList({
 
   useEffect(() => {
     syncUrl(effectiveFilters);
+    // Changer de filtre remet à la première page : rester à l'offset courant
+    // affichait une page vide dès que le nouveau filtre rendait moins de
+    // résultats que l'offset.
+    setOffset(0);
   }, [effectiveFilters]);
 
-  const params = buildReservationQuery(effectiveFilters);
+  // La liste est paginée côté serveur depuis SCRUM-101 : sans ces contrôles,
+  // le widget affichait les 50 premières réservations sans rien dire des
+  // suivantes.
+  const params = {
+    ...buildReservationQuery(effectiveFilters),
+    limit: String(PAGE_SIZE),
+    offset: String(offset)
+  };
 
   const categoriesQuery = useQuery<
     CategoryResponseItem[] | { results: CategoryResponseItem[] }
@@ -166,6 +181,11 @@ export function ReservationsList({
   const rows = Array.isArray(query.data)
     ? query.data
     : (query.data?.results ?? []);
+  const total = Array.isArray(query.data)
+    ? query.data.length
+    : (query.data?.count ?? rows.length);
+  const hasPrevious = offset > 0;
+  const hasNext = offset + rows.length < total;
 
   // Livreur / magasinier / sav / lecteur : lecture seule (cf. permissions.py).
   const canWrite = canWriteReservations(context);
@@ -499,6 +519,32 @@ export function ReservationsList({
             })}
           </Table.Tbody>
         </Table>
+      )}
+
+      {total > 0 && (
+        <Group justify='space-between'>
+          <Text size='sm' c='dimmed'>
+            {offset + 1}–{offset + rows.length} sur {total}
+          </Text>
+          <Group gap='xs'>
+            <Button
+              size='xs'
+              variant='default'
+              disabled={!hasPrevious}
+              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+            >
+              Précédent
+            </Button>
+            <Button
+              size='xs'
+              variant='default'
+              disabled={!hasNext}
+              onClick={() => setOffset(offset + PAGE_SIZE)}
+            >
+              Suivant
+            </Button>
+          </Group>
+        </Group>
       )}
 
       <Modal

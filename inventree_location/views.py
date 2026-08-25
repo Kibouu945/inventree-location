@@ -15,7 +15,7 @@ from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
-from rest_framework.pagination import PageNumberPagination
+from rest_framework.pagination import LimitOffsetPagination, PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -137,6 +137,11 @@ class LieuPagination(PageNumberPagination):
     max_page_size = 100
 
 
+class ReservationPagination(LimitOffsetPagination):
+    default_limit = 50
+    max_limit = 200
+
+
 class CatalogPagination(PageNumberPagination):
     """Pagination for catalog results."""
 
@@ -228,6 +233,7 @@ class ReservationListCreateView(generics.ListCreateAPIView):
 
     serializer_class = ReservationSerializer
     permission_classes = [ReservationPermission]
+    pagination_class = ReservationPagination
 
     def get_queryset(self):
         """Retourne les réservations, filtrées par statut, période et recherche."""
@@ -239,7 +245,11 @@ class ReservationListCreateView(generics.ListCreateAPIView):
             .order_by("-date_demande")
         )
 
-        # Un livreur pur ne voit que les réservations validées.
+        include_archived = self.request.query_params.get("include_archived")
+
+        if str(include_archived).lower() not in {"1", "true", "yes"}:
+            queryset = queryset.filter(is_archived=False)
+
         if roles.sees_only_deliverable_reservations(self.request.user):
             queryset = queryset.filter(statut=StatutReservation.VALIDEE)
 
