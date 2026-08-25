@@ -4,7 +4,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("inventree_location", "0010_remove_rentableitem_stock_total"),
+        ("inventree_location", "0013_ligne_reservation_checkin_fields"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
