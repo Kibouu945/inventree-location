@@ -8,6 +8,7 @@ import {
   Loader,
   Modal,
   MultiSelect,
+  Pagination,
   Stack,
   Table,
   Text,
@@ -17,8 +18,18 @@ import {
 import { DatePickerInput } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
+import { ownsKeys, syncOwnedParams } from '../urlState';
+import {
+  buildRamassageQuery,
+  DEFAULT_RAMASSAGE_FILTERS,
+  parseRamassageFilters,
+  RAMASSAGE_URL_KEYS,
+  type RamassageFiltersState,
+  serializeRamassageFilters,
+  totalRamassagePages
+} from './ramassageParams';
 import type { BonRamassageResponse, Page, Ramassage } from './types';
 
 const RAMASSAGES_URL = '/plugin/inventree-location/ramassages/';
@@ -47,6 +58,23 @@ interface BonModalState {
   reservationId?: number;
 }
 
+const ownsRamassageKey = ownsKeys(RAMASSAGE_URL_KEYS);
+
+function syncUrl(filters: RamassageFiltersState) {
+  syncOwnedParams(
+    ownsRamassageKey,
+    new URLSearchParams(serializeRamassageFilters(filters))
+  );
+}
+
+function initialFilters(): RamassageFiltersState {
+  if (typeof window === 'undefined') {
+    return DEFAULT_RAMASSAGE_FILTERS;
+  }
+
+  return parseRamassageFilters(window.location.search);
+}
+
 function formatDateTime(value: string | null): string {
   if (!value) {
     return '—';
@@ -59,37 +87,6 @@ function formatDateTime(value: string | null): string {
   }
 
   return date.toLocaleString();
-}
-
-function buildQuery(
-  search: string,
-  lieu: string,
-  statuts: string[],
-  dateRange: [string | null, string | null]
-): Record<string, string | string[]> {
-  const params: Record<string, string | string[]> = {};
-
-  if (search.trim()) {
-    params.search = search.trim();
-  }
-
-  if (lieu.trim()) {
-    params.lieu = lieu.trim();
-  }
-
-  if (statuts.length > 0) {
-    params.statut = statuts;
-  }
-
-  if (dateRange[0]) {
-    params.date_from = dateRange[0];
-  }
-
-  if (dateRange[1]) {
-    params.date_to = dateRange[1];
-  }
-
-  return params;
 }
 
 function lieuLabel(ramassage: Ramassage): string {
@@ -204,27 +201,44 @@ export function RamassagesList({
 }: {
   context: InvenTreePluginContext;
 }) {
-  const [search, setSearch] = useState('');
-  const [debouncedSearch] = useDebouncedValue(search, 300);
-
-  const [lieu, setLieu] = useState('');
-  const [debouncedLieu] = useDebouncedValue(lieu, 300);
-
-  const [statuts, setStatuts] = useState<string[]>([]);
-  const [dateRange, setDateRange] = useState<[string | null, string | null]>([
-    null,
-    null
-  ]);
+  const [filters, setFilters] = useState<RamassageFiltersState>(initialFilters);
+  // Les deux champs texte sont pilotés localement puis débattus : sans ça,
+  // chaque frappe déclencherait une requête et une réécriture d'URL.
+  const [debouncedSearch] = useDebouncedValue(filters.search, 300);
+  const [debouncedLieu] = useDebouncedValue(filters.lieu, 300);
 
   const [bonModal, setBonModal] = useState<BonModalState>({ open: false });
 
-  const params = buildQuery(debouncedSearch, debouncedLieu, statuts, dateRange);
+  useEffect(() => {
+    syncUrl(filters);
+  }, [filters]);
 
-  const query = useQuery<Ramassage[] | Page<Ramassage>>(
+  function update(patch: Partial<RamassageFiltersState>) {
+    // Tout changement de filtre (hors page) réinitialise la pagination.
+    const resetsPage = !('page' in patch);
+
+    setFilters((current) => ({
+      ...current,
+      ...patch,
+      ...(resetsPage ? { page: 1 } : {})
+    }));
+  }
+
+  const params = buildRamassageQuery({
+    ...filters,
+    search: debouncedSearch,
+    lieu: debouncedLieu
+  });
+
+  const query = useQuery<Page<Ramassage>>(
     {
       queryKey: ['ramassages', params],
       queryFn: async () => {
-        const response = await context.api.get(RAMASSAGES_URL, { params });
+        const response = await context.api.get(RAMASSAGES_URL, {
+          params,
+          // Clés répétées `statut=a&statut=b` (le backend lit getlist).
+          paramsSerializer: { indexes: null }
+        });
         return response.data;
       }
     },
@@ -246,9 +260,9 @@ export function RamassagesList({
     context.queryClient
   );
 
-  const rows = Array.isArray(query.data)
-    ? query.data
-    : (query.data?.results ?? []);
+  const rows = query.data?.results ?? [];
+  const count = query.data?.count ?? 0;
+  const pages = totalRamassagePages(count);
 
   return (
     <Stack gap='md'>
@@ -262,16 +276,16 @@ export function RamassagesList({
         <TextInput
           label='Recherche'
           placeholder='Numéro, prestation, demandeur…'
-          value={search}
-          onChange={(event) => setSearch(event.currentTarget.value)}
+          value={filters.search}
+          onChange={(event) => update({ search: event.currentTarget.value })}
           w={260}
         />
 
         <TextInput
           label='Lieu'
           placeholder='Nom ou adresse du lieu'
-          value={lieu}
-          onChange={(event) => setLieu(event.currentTarget.value)}
+          value={filters.lieu}
+          onChange={(event) => update({ lieu: event.currentTarget.value })}
           w={240}
         />
 
@@ -279,8 +293,8 @@ export function RamassagesList({
           label='Statut'
           placeholder='Tous'
           data={STATUT_OPTIONS}
-          value={statuts}
-          onChange={setStatuts}
+          value={filters.statuts}
+          onChange={(statuts) => update({ statuts })}
           clearable
           w={240}
         />
@@ -289,8 +303,8 @@ export function RamassagesList({
           type='range'
           label='Date de ramassage'
           placeholder='Du — au'
-          value={dateRange}
-          onChange={setDateRange}
+          value={filters.dateRange}
+          onChange={(dateRange) => update({ dateRange })}
           clearable
           w={260}
         />
@@ -357,6 +371,20 @@ export function RamassagesList({
         </Table>
       )}
 
+      <Group justify='space-between'>
+        <Text size='sm' c='dimmed'>
+          {count} ramassage(s)
+        </Text>
+
+        {pages > 1 && (
+          <Pagination
+            total={pages}
+            value={filters.page}
+            onChange={(page) => update({ page })}
+          />
+        )}
+      </Group>
+
       <Modal
         opened={bonModal.open}
         onClose={() => setBonModal({ open: false })}
@@ -373,11 +401,31 @@ export function RamassagesList({
           </Alert>
         ) : bonQuery.data ? (
           <Stack gap='md'>
-            <Group justify='flex-end'>
+            {/* Sans ces règles, `window.print()` imprime tout le dashboard —
+                même approche que DeliveryNote (bon de livraison). */}
+            <style>{`
+              @media print {
+                body * { visibility: hidden; }
+                .ramassage-print-area, .ramassage-print-area * {
+                  visibility: visible;
+                }
+                .ramassage-print-area {
+                  position: absolute;
+                  top: 0;
+                  left: 0;
+                  width: 100%;
+                }
+                .ramassage-print-hide { display: none !important; }
+              }
+            `}</style>
+
+            <Group justify='flex-end' className='ramassage-print-hide'>
               <Button onClick={() => window.print()}>Imprimer</Button>
             </Group>
 
-            <BonRamassageContent bon={bonQuery.data} />
+            <div className='ramassage-print-area'>
+              <BonRamassageContent bon={bonQuery.data} />
+            </div>
           </Stack>
         ) : null}
       </Modal>

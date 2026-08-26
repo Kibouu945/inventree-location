@@ -9,6 +9,7 @@ import {
   Loader,
   Modal,
   NumberInput,
+  Pagination,
   Stack,
   Table,
   Text,
@@ -21,6 +22,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { canManageBackOffice } from '../roles';
+import { apiErrorMessage } from './apiError';
 import type {
   BackOfficePart,
   BackOfficePartFormValues,
@@ -28,6 +30,9 @@ import type {
 } from './partTypes';
 
 const PARTS_URL = '/plugin/inventree-location/backoffice/parts/';
+
+//: Doit rester aligné sur `BackOfficePagination.page_size` côté serveur.
+const PAGE_SIZE = 20;
 
 interface ModalState {
   open: boolean;
@@ -45,10 +50,8 @@ function emptyForm(): BackOfficePartFormValues {
     virtual: false,
     is_rentable: true,
     consommable: false,
-    stock_total: 0,
     seuil_alerte_bas: null,
     seuil_alerte_haut: null,
-    alertes_desactivees: false,
     stock_initial: 0
   };
 }
@@ -64,10 +67,8 @@ function formFromPart(part: BackOfficePart): BackOfficePartFormValues {
     virtual: part.virtual,
     is_rentable: part.is_rentable,
     consommable: part.consommable,
-    stock_total: part.stock_total ?? 0,
     seuil_alerte_bas: part.seuil_alerte_bas,
     seuil_alerte_haut: part.seuil_alerte_haut,
-    alertes_desactivees: part.alertes_desactivees,
     stock_initial: 0
   };
 }
@@ -97,6 +98,7 @@ export function PartsBackOffice({
 
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
+  const [page, setPage] = useState(1);
 
   const [modalState, setModalState] = useState<ModalState>({ open: false });
   const [formValues, setFormValues] = useState<BackOfficePartFormValues>(
@@ -107,14 +109,19 @@ export function PartsBackOffice({
 
   const partsQuery = useQuery<Page<BackOfficePart>>(
     {
-      queryKey: ['backoffice-parts', debouncedSearch],
+      queryKey: ['backoffice-parts', debouncedSearch, page],
       enabled: canAccess,
       queryFn: async () => {
-        const response = await context.api.get(PARTS_URL, {
-          params: debouncedSearch.trim()
-            ? { search: debouncedSearch.trim() }
-            : {}
-        });
+        const params: Record<string, string> = {
+          page: String(page),
+          page_size: String(PAGE_SIZE)
+        };
+
+        if (debouncedSearch.trim()) {
+          params.search = debouncedSearch.trim();
+        }
+
+        const response = await context.api.get(PARTS_URL, { params });
 
         return response.data;
       }
@@ -123,6 +130,15 @@ export function PartsBackOffice({
   );
 
   const rows = partsQuery.data?.results ?? [];
+  const count = partsQuery.data?.count ?? 0;
+  const pages = Math.max(1, Math.ceil(count / PAGE_SIZE));
+
+  function updateSearch(value: string) {
+    // Changer la recherche renvoie en première page : rester sur la page 3
+    // d'un résultat qui n'en compte plus qu'une afficherait une liste vide.
+    setSearch(value);
+    setPage(1);
+  }
 
   function updateField<K extends keyof BackOfficePartFormValues>(
     field: K,
@@ -171,10 +187,8 @@ export function PartsBackOffice({
         virtual: formValues.virtual,
         is_rentable: formValues.is_rentable,
         consommable: formValues.consommable,
-        stock_total: formValues.stock_total,
         seuil_alerte_bas: formValues.seuil_alerte_bas,
         seuil_alerte_haut: formValues.seuil_alerte_haut,
-        alertes_desactivees: formValues.alertes_desactivees,
         stock_initial: formValues.stock_initial
       };
 
@@ -187,19 +201,7 @@ export function PartsBackOffice({
       await partsQuery.refetch();
       closeModal();
     } catch (error: unknown) {
-      const apiError = error as {
-        response?: { data?: Record<string, unknown> | string };
-      };
-
-      const data = apiError.response?.data;
-
-      if (typeof data === 'string') {
-        setFormError(data);
-      } else if (data) {
-        setFormError(JSON.stringify(data));
-      } else {
-        setFormError("Impossible d'enregistrer la Part.");
-      }
+      setFormError(apiErrorMessage(error, "Impossible d'enregistrer la Part."));
     } finally {
       setSaving(false);
     }
@@ -211,9 +213,12 @@ export function PartsBackOffice({
         active: !part.active
       });
 
+      setFormError('');
       await partsQuery.refetch();
-    } catch {
-      setFormError("Impossible de modifier l'état de la Part.");
+    } catch (error: unknown) {
+      setFormError(
+        apiErrorMessage(error, "Impossible de modifier l'état de la Part.")
+      );
     }
   }
 
@@ -239,7 +244,7 @@ export function PartsBackOffice({
         label='Recherche'
         placeholder='Nom, NOI, description…'
         value={search}
-        onChange={(event) => setSearch(event.currentTarget.value)}
+        onChange={(event) => updateSearch(event.currentTarget.value)}
         w={320}
       />
 
@@ -269,7 +274,7 @@ export function PartsBackOffice({
               <Table.Th>NOI</Table.Th>
               <Table.Th>État</Table.Th>
               <Table.Th>Type</Table.Th>
-              <Table.Th>Stock</Table.Th>
+              <Table.Th>Stock InvenTree</Table.Th>
               <Table.Th>Seuil bas</Table.Th>
               <Table.Th>Actions</Table.Th>
             </Table.Tr>
@@ -309,9 +314,7 @@ export function PartsBackOffice({
                   </Group>
                 </Table.Td>
 
-                <Table.Td>
-                  {part.stock_total_inventree} / {part.stock_total}
-                </Table.Td>
+                <Table.Td>{part.stock_total}</Table.Td>
 
                 <Table.Td>{part.seuil_alerte_bas ?? '—'}</Table.Td>
 
@@ -340,6 +343,16 @@ export function PartsBackOffice({
           </Table.Tbody>
         </Table>
       )}
+
+      <Group justify='space-between'>
+        <Text size='sm' c='dimmed'>
+          {count} Part(s)
+        </Text>
+
+        {pages > 1 && (
+          <Pagination total={pages} value={page} onChange={setPage} />
+        )}
+      </Group>
 
       <Modal
         opened={modalState.open}
@@ -434,40 +447,21 @@ export function PartsBackOffice({
                 updateField('consommable', event.currentTarget.checked)
               }
             />
-
-            <Checkbox
-              label='Alertes désactivées'
-              checked={formValues.alertes_desactivees}
-              onChange={(event) =>
-                updateField('alertes_desactivees', event.currentTarget.checked)
-              }
-            />
           </Group>
 
-          <Group grow>
-            <NumberInput
-              label='Quantité louable'
-              min={0}
-              value={formValues.stock_total}
-              onChange={(value) =>
-                updateField('stock_total', numberOrZero(value))
-              }
-            />
-
-            <NumberInput
-              label='Stock initial à ajouter'
-              min={0}
-              description={
-                modalState.part
-                  ? 'Ajoute une nouvelle ligne de stock si > 0.'
-                  : 'Crée le stock initial si > 0.'
-              }
-              value={formValues.stock_initial}
-              onChange={(value) =>
-                updateField('stock_initial', numberOrZero(value))
-              }
-            />
-          </Group>
+          <NumberInput
+            label='Stock initial à ajouter'
+            min={0}
+            description={
+              modalState.part
+                ? 'Ajoute une ligne de stock InvenTree si > 0. Le stock existant ne se modifie pas ici.'
+                : 'Crée le stock initial dans InvenTree si > 0.'
+            }
+            value={formValues.stock_initial}
+            onChange={(value) =>
+              updateField('stock_initial', numberOrZero(value))
+            }
+          />
 
           <Group grow>
             <NumberInput

@@ -5,6 +5,7 @@ import {
   canArbitrateReservations,
   canCheckinReturns,
   canDeclareRetour,
+  canManageBackOffice,
   canWriteCatalog,
   canWriteReservations,
   hasAnyRole,
@@ -138,5 +139,28 @@ describe('canDeclareRetour', () => {
   it('le magasinier n’arbitre pas', () => {
     const ctx = makeContext({ groups: groups('magasinier') });
     expect(canArbitrateReservations(ctx)).toBe(false);
+  });
+});
+
+// Les back-offices (utilisateurs, Parts) sont réservés à l'admin : ce sont les
+// seuls écrans qui créent des comptes et posent des rôles.
+describe('canManageBackOffice', () => {
+  it.each([
+    ['admin', true],
+    ['gestionnaire', false],
+    ['magasinier', false],
+    ['livreur', false],
+    ['organisateur', false],
+    ['sav', false],
+    ['lecteur', false],
+    ['acheteur', false]
+  ])('%s -> %s', (role, expected) => {
+    expect(canManageBackOffice(makeContext({ groups: groups(role) }))).toBe(
+      expected
+    );
+  });
+
+  it('ouvert au superutilisateur sans rôle plugin', () => {
+    expect(canManageBackOffice(makeContext({ is_superuser: true }))).toBe(true);
   });
 });

@@ -425,6 +425,11 @@ class RamassageListView(generics.ListAPIView):
             .order_by("date_retour_prevue")
         )
 
+        # Un livreur pur ne voit que les réservations validées, comme sur
+        # `reservations/` et `deliveries/` (cf. roles.py).
+        if roles.sees_only_deliverable_reservations(self.request.user):
+            queryset = queryset.filter(statut=StatutReservation.VALIDEE)
+
         date_from = self.request.query_params.get("date_from")
         date_to = self.request.query_params.get("date_to")
         lieu = self.request.query_params.get("lieu")
@@ -492,6 +497,17 @@ class BonRamassageView(APIView):
         )
 
         if reservation is None:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Même restriction que la liste : un livreur pur n'imprime pas le bon
+        # d'une réservation qu'il n'a pas le droit de voir.
+        if (
+            roles.sees_only_deliverable_reservations(request.user)
+            and reservation.statut != StatutReservation.VALIDEE
+        ):
             return Response(
                 {"detail": "Réservation introuvable."},
                 status=status.HTTP_404_NOT_FOUND,
@@ -1479,7 +1495,11 @@ class CatalogPartListView(APIView):
 
         from part.models import Part
 
-        queryset = Part.objects.select_related("category").all().order_by("name")
+        queryset = (
+            Part.objects.select_related("category", "rentable_info")
+            .all()
+            .order_by("name")
+        )
 
         search = request.query_params.get("search")
         category = request.query_params.get("category")
@@ -1515,7 +1535,6 @@ class CatalogPartListView(APIView):
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(queryset, request)
 
-        self._attach_rentable_items(page)
         annotate_stock_available(
             page,
             parse_optional_date_param(request, "date_debut"),
@@ -1526,16 +1545,6 @@ class CatalogPartListView(APIView):
         serializer = self.serializer_class(page, many=True)
 
         return paginator.get_paginated_response(serializer.data)
-
-    def _attach_rentable_items(self, parts):
-        """Attache RentableItem aux objets Part sans utiliser de reverse relation fragile."""
-
-        part_ids = [part.id for part in parts]
-        rentable_items = RentableItem.objects.filter(part_id__in=part_ids)
-        rentable_by_part_id = {item.part_id: item for item in rentable_items}
-
-        for part in parts:
-            part._location_rentable_info = rentable_by_part_id.get(part.id)
 
     def _parse_ids(self, ids):
         """Parse une liste d'identifiants de Part séparés par des virgules."""
@@ -1590,20 +1599,12 @@ class CatalogPartListView(APIView):
         if rentable_value is None:
             rentable_value = True
 
-        matching_part_ids = RentableItem.objects.filter(
-            is_rentable=rentable_value
-        ).values_list("part_id", flat=True)
+        if rentable_value:
+            return queryset.filter(
+                Q(rentable_info__is_rentable=True) | Q(rentable_info__isnull=True)
+            )
 
-        if not rentable_value:
-            return queryset.filter(pk__in=matching_part_ids)
-
-        # rentable=true : les Part marquées louables, plus celles sans extension
-        # RentableItem (louables par défaut).
-        extended_part_ids = RentableItem.objects.values_list("part_id", flat=True)
-
-        return queryset.filter(
-            Q(pk__in=matching_part_ids) | ~Q(pk__in=extended_part_ids)
-        )
+        return queryset.filter(rentable_info__is_rentable=False)
 
     def _filter_virtual(self, queryset, virtual):
         """Filtre optionnel sur le drapeau article virtuel de RentableItem.
@@ -1618,14 +1619,12 @@ class CatalogPartListView(APIView):
         if virtual_value is None:
             return queryset
 
-        virtual_part_ids = RentableItem.objects.filter(is_virtual=True).values_list(
-            "part_id", flat=True
-        )
-
         if virtual_value:
-            return queryset.filter(pk__in=virtual_part_ids)
+            return queryset.filter(rentable_info__is_virtual=True)
 
-        return queryset.exclude(pk__in=virtual_part_ids)
+        return queryset.filter(
+            Q(rentable_info__is_virtual=False) | Q(rentable_info__isnull=True)
+        )
 
 
 class CatalogPartDetailView(APIView):
@@ -1639,7 +1638,11 @@ class CatalogPartDetailView(APIView):
 
         from part.models import Part
 
-        part = Part.objects.select_related("category").filter(pk=pk).first()
+        part = (
+            Part.objects.select_related("category", "rentable_info")
+            .filter(pk=pk)
+            .first()
+        )
 
         if part is None:
             return Response(
@@ -1647,7 +1650,6 @@ class CatalogPartDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        part._location_rentable_info = RentableItem.objects.filter(part_id=pk).first()
         annotate_stock_available(
             [part],
             parse_optional_date_param(request, "date_debut"),

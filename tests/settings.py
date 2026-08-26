@@ -47,6 +47,25 @@ TEMPLATES = [
     }
 ]
 
+# InvenTree active les validateurs de mot de passe par défaut de Django. Le
+# back-office utilisateurs (SCRUM-108) s'appuie dessus : sans eux ici, un test
+# de politique de mot de passe passerait au vert alors que la prod refuserait
+# le compte.
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        "NAME": (
+            "django.contrib.auth.password_validation."
+            "UserAttributeSimilarityValidator"
+        )
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 8},
+    },
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
 # InvenTree expose ses endpoints derrière `TokenAuthentication` ; on garde le
 # même garde-fou ici pour que les tests reflètent la prod (401 sans token, pas 403).
 REST_FRAMEWORK = {

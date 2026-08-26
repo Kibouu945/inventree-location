@@ -561,12 +561,20 @@ class ReservationSerializer(serializers.ModelSerializer):
         return self._user_label(obj.demandeur)
 
     def get_validateur_nom(self, obj):
-        """Nom lisible du validateur."""
+        """Nom lisible du validateur (vide tant que la réservation n'est pas validée)."""
 
         return self._user_label(obj.validateur)
 
     def validate(self, attrs):
-        """Règles métier : permissives en brouillon, strictes au-delà."""
+        """Règles métier : permissives en brouillon, strictes au-delà.
+
+        Une réservation en statut `brouillon` peut être sauvegardée
+        incomplète. Dès qu'elle est soumise (ou plus), le demandeur, la
+        prestation, la période, au moins une ligne et au moins un article
+        virtuel (ex: prestation de nettoyage) deviennent obligatoires, la
+        période doit couvrir au minimum les dates de la prestation, et les
+        objets référencés doivent être actifs et louables.
+        """
 
         statut = attrs.get(
             "statut", getattr(self.instance, "statut", StatutReservation.BROUILLON)
@@ -580,6 +588,9 @@ class ReservationSerializer(serializers.ModelSerializer):
                 return attrs[field]
             return getattr(self.instance, field, None) if self.instance else None
 
+        # `demandeur` et `prestation` sont des FK non-nullables : leur
+        # présence est déjà garantie par la validation de champ de DRF avant
+        # que `validate()` ne soit appelée.
         prestation = effective("prestation")
         date_retrait = effective("date_retrait_prevue")
         date_retour = effective("date_retour_prevue")
@@ -629,23 +640,21 @@ class ReservationSerializer(serializers.ModelSerializer):
                 for ligne in lignes
             ]
 
-            inactive_part_ids = RentableItem.objects.filter(
-                part_id__in=part_ids,
-                part__active=False,
-            ).values_list("part_id", flat=True)
+            # Les trois règles portent sur la même clé : on les cumule au lieu
+            # de les écraser, sinon un objet inactif remontait « il manque un
+            # article virtuel » — un message qui ne désigne pas le problème.
+            lignes_errors = []
 
-            if inactive_part_ids:
-                errors["lignes"] = (
+            if self._has_inactive_part(part_ids):
+                lignes_errors.append(
                     "Un objet non actif ne peut pas être ajouté à une réservation."
                 )
 
-            non_rentable_part_ids = RentableItem.objects.filter(
+            if RentableItem.objects.filter(
                 part_id__in=part_ids,
                 is_rentable=False,
-            ).values_list("part_id", flat=True)
-
-            if non_rentable_part_ids:
-                errors["lignes"] = (
+            ).exists():
+                lignes_errors.append(
                     "Un objet non louable ne peut pas être ajouté à une réservation."
                 )
 
@@ -653,15 +662,31 @@ class ReservationSerializer(serializers.ModelSerializer):
                 part_id__in=part_ids,
                 is_virtual=True,
             ).exists():
-                errors["lignes"] = (
+                lignes_errors.append(
                     "Au moins un article virtuel (ex: prestation de nettoyage) "
                     "est obligatoire pour soumettre la réservation."
                 )
+
+            if lignes_errors:
+                errors["lignes"] = lignes_errors
 
         if errors:
             raise serializers.ValidationError(errors)
 
         return attrs
+
+    @staticmethod
+    def _has_inactive_part(part_ids) -> bool:
+        """Vrai si au moins une des Parts est désactivée côté InvenTree.
+
+        Le contrôle porte sur `Part.active` et non sur `RentableItem` : une
+        Part sans extension louable l'est par défaut, mais elle peut très bien
+        être désactivée — passer par `RentableItem` laissait filtrer ces Parts.
+        """
+
+        from part.models import Part
+
+        return Part.objects.filter(pk__in=part_ids, active=False).exists()
 
     @transaction.atomic
     def create(self, validated_data):
@@ -702,7 +727,13 @@ class ReservationSerializer(serializers.ModelSerializer):
         ])
 
     def _validate_stock_conflicts_if_needed(self, reservation):
-        """Refuse la validation d'une réservation en conflit de stock non forcé."""
+        """Refuse la validation d'une réservation en conflit de stock non forcé.
+
+        La règle ne s'applique qu'au passage en statut « validée » : une
+        réservation `forced=True` peut être validée malgré les conflits
+        (US-03 : « Forcer malgré les conflits »). Levée dans la transaction
+        de create/update, la ValidationError annule donc la sauvegarde.
+        """
 
         if reservation.statut != StatutReservation.VALIDEE or reservation.forced:
             return
@@ -781,9 +812,13 @@ class RamassageSerializer(serializers.ModelSerializer):
         }
 
     def get_nb_objets(self, obj):
-        """Nombre de lignes à ramasser."""
+        """Nombre de lignes à ramasser.
 
-        return obj.lignes.count()
+        `len()` sur le prefetch plutôt que `.count()`, qui repartirait en base
+        une fois par ligne de la liste.
+        """
+
+        return len(obj.lignes.all())
 
     def get_quantite_totale(self, obj):
         """Quantité totale à ramasser."""
@@ -828,7 +863,9 @@ class BonRamassageSerializer(RamassageSerializer):
 
         lignes = []
 
-        for ligne in obj.lignes.select_related("part").all():
+        # Pas de `select_related` ici : la vue a déjà préchargé `lignes__part`,
+        # et le rajouter annulerait ce prefetch au profit d'une requête neuve.
+        for ligne in obj.lignes.all():
             lignes.append({
                 "part": ligne.part_id,
                 "part_nom": ligne.part.name,
@@ -1121,19 +1158,6 @@ class CatalogPartSerializer(serializers.Serializer):
     seuil_alerte_bas = serializers.SerializerMethodField()
     seuil_alerte_haut = serializers.SerializerMethodField()
 
-    def _rentable_info(self, obj):
-        """Récupère l'extension RentableItem attachée par la vue catalogue."""
-
-        attached = getattr(obj, "_location_rentable_info", None)
-
-        if attached is not None:
-            return attached
-
-        try:
-            return getattr(obj, "rentable_info", None)
-        except Exception:
-            return None
-
     def get_stock_available(self, obj):
         """Stock disponible de la Part, exposé à 0 si non renseigné."""
 
@@ -1160,12 +1184,17 @@ class CatalogPartSerializer(serializers.Serializer):
         return None
 
     def get_rentable(self, obj):
-        """Drapeau louable issu de RentableItem."""
+        """Drapeau louable issu de RentableItem.
+
+        Une Part désactivée côté InvenTree n'est jamais louable, quels que
+        soient ses drapeaux plugin (SCRUM-111 : « Désactiver » dans le
+        back-office doit sortir l'objet du catalogue louable).
+        """
 
         if not bool(getattr(obj, "active", True)):
             return False
 
-        rentable_info = self._rentable_info(obj)
+        rentable_info = getattr(obj, "rentable_info", None)
 
         if rentable_info is None:
             return True
@@ -1175,7 +1204,7 @@ class CatalogPartSerializer(serializers.Serializer):
     def get_consommable(self, obj):
         """Drapeau consommable issu de RentableItem."""
 
-        rentable_info = self._rentable_info(obj)
+        rentable_info = getattr(obj, "rentable_info", None)
 
         if rentable_info is None:
             return False
@@ -1183,9 +1212,9 @@ class CatalogPartSerializer(serializers.Serializer):
         return bool(rentable_info.consommable)
 
     def get_is_virtual(self, obj):
-        """Drapeau article virtuel issu de RentableItem."""
+        """Drapeau article virtuel issu de RentableItem (False par défaut)."""
 
-        rentable_info = self._rentable_info(obj)
+        rentable_info = getattr(obj, "rentable_info", None)
 
         if rentable_info is None:
             return False
@@ -1202,7 +1231,7 @@ class CatalogPartSerializer(serializers.Serializer):
     def get_seuil_alerte_bas(self, obj):
         """Seuil bas configurable du part (null par défaut)."""
 
-        rentable_info = self._rentable_info(obj)
+        rentable_info = getattr(obj, "rentable_info", None)
 
         if rentable_info is None:
             return None
@@ -1212,7 +1241,7 @@ class CatalogPartSerializer(serializers.Serializer):
     def get_seuil_alerte_haut(self, obj):
         """Seuil haut configurable du part (null par défaut)."""
 
-        rentable_info = self._rentable_info(obj)
+        rentable_info = getattr(obj, "rentable_info", None)
 
         if rentable_info is None:
             return None
@@ -1232,7 +1261,7 @@ class GroupeSerializer(serializers.ModelSerializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
-    """Sérialiseur léger d'un utilisateur InvenTree."""
+    """Sérialiseur léger d'un utilisateur InvenTree (sélecteur demandeur)."""
 
     class Meta:
         """Configuration du serializer User."""

@@ -1,11 +1,6 @@
 /** Types de l'API SCRUM-111 back-office Parts. */
 
-export interface Page<T> {
-  count: number;
-  next: string | null;
-  previous: string | null;
-  results: T[];
-}
+export type { Page } from './types';
 
 export interface BackOfficePart {
   id: number;
@@ -17,13 +12,12 @@ export interface BackOfficePart {
   salable: boolean;
   virtual: boolean;
   pack: boolean;
-  stock_total_inventree: number;
+  /** Stock physique louable selon InvenTree — lecture seule. */
+  stock_total: number;
   is_rentable: boolean;
   consommable: boolean;
-  stock_total: number;
   seuil_alerte_bas: number | null;
   seuil_alerte_haut: number | null;
-  alertes_desactivees: boolean;
 }
 
 export interface BackOfficePartFormValues {
@@ -36,9 +30,8 @@ export interface BackOfficePartFormValues {
   virtual: boolean;
   is_rentable: boolean;
   consommable: boolean;
-  stock_total: number;
   seuil_alerte_bas: number | null;
   seuil_alerte_haut: number | null;
-  alertes_desactivees: boolean;
+  /** Quantité à mettre en stock : crée un StockItem InvenTree. */
   stock_initial: number;
 }

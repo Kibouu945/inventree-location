@@ -6,6 +6,11 @@ Objectif :
 - créer un stock initial via StockItem ;
 - exposer une API simple réservée aux admins.
 
+Le stock n'est **pas** un champ de ce formulaire : il appartient à InvenTree et
+se lit via `conflicts.get_part_total_stock`. Le seul levier offert ici est
+`stock_initial`, qui crée un `StockItem` — c'est-à-dire du vrai stock InvenTree,
+pas un compteur parallèle (cf. `0010_remove_rentableitem_stock_total`).
+
 Note importante :
 Sur certaines versions InvenTree, un save() sur Part peut déclencher une tâche
 interne Django-Q qui plante avec KeyError('func') si la queue a été corrompue.
@@ -14,12 +19,23 @@ Pour l'édition, on utilise donc QuerySet.update() afin d'éviter ce déclenchem
 
 from django.db import transaction
 from django.db.models import Q
-from rest_framework import generics, serializers, status
-from rest_framework.pagination import PageNumberPagination
-from rest_framework.response import Response
+from rest_framework import generics, serializers
 
-from .backoffice import BackOfficePermission
+from .backoffice import BackOfficePagination, BackOfficePermission
+from .conflicts import get_part_total_stock
 from .models import RentableItem
+
+
+#: Champs du formulaire → champs du modèle `part.Part`.
+PART_FIELDS = {
+    "NOI": "IPN",
+    "name": "name",
+    "description": "description",
+    "link": "link",
+    "active": "active",
+    "salable": "salable",
+    "virtual": "virtual",
+}
 
 
 def _model_has_field(model, field_name: str) -> bool:
@@ -28,34 +44,27 @@ def _model_has_field(model, field_name: str) -> bool:
     return any(field.name == field_name for field in model._meta.fields)
 
 
-def _set_if_field_exists(instance, field_name: str, value):
-    """Affecte une valeur uniquement si le champ existe sur le modèle."""
-
-    if _model_has_field(instance.__class__, field_name):
-        setattr(instance, field_name, value)
-
-
 def _get_default_stock_location():
-    """Retourne ou crée un emplacement de stock par défaut."""
+    """Retourne l'emplacement de stock par défaut, ou None s'il n'y en a pas.
+
+    On ne crée pas d'emplacement fantôme : le rangement du matériel est une
+    décision d'exploitation, pas un effet de bord d'un formulaire.
+    """
 
     try:
         from stock.models import StockLocation
-    except Exception:
+    except ImportError:
         return None
 
-    location = StockLocation.objects.order_by("pk").first()
-
-    if location is not None:
-        return location
-
-    try:
-        return StockLocation.objects.create(name="Stock location")
-    except Exception:
-        return None
+    return StockLocation.objects.order_by("pk").first()
 
 
 def _create_stock_item(part, quantity):
-    """Crée un StockItem initial pour la Part."""
+    """Crée un StockItem initial pour la Part.
+
+    Un échec n'est pas silencieux : l'admin a saisi une quantité, il doit
+    savoir si elle est entrée en stock ou non.
+    """
 
     if quantity is None:
         return None
@@ -63,15 +72,22 @@ def _create_stock_item(part, quantity):
     try:
         quantity = float(quantity)
     except (TypeError, ValueError):
-        return None
+        raise serializers.ValidationError({
+            "stock_initial": "Quantité invalide."
+        }) from None
 
     if quantity <= 0:
         return None
 
     try:
         from stock.models import StockItem
-    except Exception:
-        return None
+    except ImportError:
+        raise serializers.ValidationError({
+            "stock_initial": (
+                "Le stock InvenTree n'est pas accessible : impossible de créer "
+                "le stock initial."
+            )
+        }) from None
 
     location = _get_default_stock_location()
 
@@ -83,30 +99,7 @@ def _create_stock_item(part, quantity):
     if location is not None and _model_has_field(StockItem, "location"):
         payload["location"] = location
 
-    try:
-        return StockItem.objects.create(**payload)
-    except Exception:
-        return None
-
-
-def _get_stock_total(part):
-    """Calcule le stock total existant d'une Part."""
-
-    try:
-        from stock.models import StockItem
-    except Exception:
-        return 0
-
-    try:
-        total = 0
-
-        for item in StockItem.objects.filter(part=part):
-            quantity = getattr(item, "quantity", 0) or 0
-            total += float(quantity)
-
-        return total
-    except Exception:
-        return 0
+    return StockItem.objects.create(**payload)
 
 
 def _is_pack(part) -> bool:
@@ -127,37 +120,14 @@ def _is_pack(part) -> bool:
     return False
 
 
-def _part_update_payload(part_model, data: dict) -> dict:
-    """Construit un payload update uniquement avec les champs existants."""
+def _part_update_payload(data: dict) -> dict:
+    """Traduit les champs du formulaire présents en payload `Part.update()`."""
 
-    payload = {}
-
-    mapping = {
-        "NOI": "IPN",
-        "name": "name",
-        "description": "description",
-        "link": "link",
-        "active": "active",
-        "salable": "salable",
-        "virtual": "virtual",
+    return {
+        model_field: data[input_field]
+        for input_field, model_field in PART_FIELDS.items()
+        if input_field in data
     }
-
-    for input_field, model_field in mapping.items():
-        if input_field not in data:
-            continue
-
-        if _model_has_field(part_model, model_field):
-            payload[model_field] = data[input_field]
-
-    return payload
-
-
-class PartBackOfficePagination(PageNumberPagination):
-    """Pagination de la liste Parts back-office."""
-
-    page_size = 20
-    page_size_query_param = "page_size"
-    max_page_size = 100
 
 
 class PartBackOfficeSerializer(serializers.Serializer):
@@ -178,28 +148,24 @@ class PartBackOfficeSerializer(serializers.Serializer):
 
     # Infos calculées
     pack = serializers.BooleanField(read_only=True)
-    stock_total_inventree = serializers.FloatField(read_only=True)
+    #: Stock physique louable selon InvenTree — jamais saisi ici.
+    stock_total = serializers.IntegerField(read_only=True)
 
     # RentableItem
     is_rentable = serializers.BooleanField(required=False, default=True)
     consommable = serializers.BooleanField(required=False, default=False)
-    stock_total = serializers.IntegerField(required=False, min_value=0, default=0)
     seuil_alerte_bas = serializers.IntegerField(
         required=False,
         allow_null=True,
         min_value=0,
     )
-
-    # Champs préparés pour le front SCRUM-111.
-    # Persistés uniquement si les colonnes existent dans le modèle.
     seuil_alerte_haut = serializers.IntegerField(
         required=False,
         allow_null=True,
         min_value=0,
     )
-    alertes_desactivees = serializers.BooleanField(required=False, default=False)
 
-    # Stock initial / stock additionnel
+    # Stock initial : crée un StockItem InvenTree (pas un compteur local).
     stock_initial = serializers.FloatField(required=False, min_value=0, default=0)
 
     def to_representation(self, part):
@@ -217,34 +183,45 @@ class PartBackOfficeSerializer(serializers.Serializer):
             "salable": bool(getattr(part, "salable", False)),
             "virtual": bool(getattr(part, "virtual", False)),
             "pack": _is_pack(part),
-            "stock_total_inventree": _get_stock_total(part),
+            "stock_total": get_part_total_stock(part),
             "is_rentable": bool(rentable_item.is_rentable) if rentable_item else False,
             "consommable": bool(rentable_item.consommable) if rentable_item else False,
-            "stock_total": rentable_item.stock_total if rentable_item else 0,
             "seuil_alerte_bas": rentable_item.seuil_alerte_bas
             if rentable_item
             else None,
-            "seuil_alerte_haut": getattr(
-                rentable_item,
-                "seuil_alerte_haut",
-                None,
-            )
+            "seuil_alerte_haut": rentable_item.seuil_alerte_haut
             if rentable_item
             else None,
-            "alertes_desactivees": getattr(
-                rentable_item,
-                "alertes_desactivees",
-                False,
-            )
-            if rentable_item
-            else False,
         }
+
+    def _effective(self, attrs, field, default=False):
+        """Valeur du champ après application du patch.
+
+        En PATCH partiel, un champ absent vaut celui de l'objet en base : le
+        lire à `False` faisait passer les règles métier à côté de l'état réel.
+        """
+
+        if field in attrs:
+            return attrs[field]
+
+        if self.instance is None:
+            return default
+
+        if field in {"virtual", "active", "salable"}:
+            return getattr(self.instance, field, default)
+
+        rentable_item = RentableItem.objects.filter(part=self.instance).first()
+
+        if rentable_item is None:
+            return default
+
+        return getattr(rentable_item, field, default)
 
     def validate(self, attrs):
         """Règles métier SCRUM-111."""
 
-        consommable = attrs.get("consommable", False)
-        virtual = attrs.get("virtual", False)
+        consommable = bool(self._effective(attrs, "consommable"))
+        virtual = bool(self._effective(attrs, "virtual"))
 
         current_pack = _is_pack(self.instance) if self.instance is not None else False
 
@@ -258,8 +235,8 @@ class PartBackOfficeSerializer(serializers.Serializer):
                 "virtual": "Un consommable ne doit pas être déclaré comme virtuel."
             })
 
-        seuil_bas = attrs.get("seuil_alerte_bas")
-        seuil_haut = attrs.get("seuil_alerte_haut")
+        seuil_bas = self._effective(attrs, "seuil_alerte_bas", default=None)
+        seuil_haut = self._effective(attrs, "seuil_alerte_haut", default=None)
 
         if seuil_bas is not None and seuil_haut is not None and seuil_bas > seuil_haut:
             raise serializers.ValidationError({
@@ -284,49 +261,26 @@ class PartBackOfficeSerializer(serializers.Serializer):
             "is_rentable": validated_data.pop("is_rentable", True),
             "consommable": validated_data.pop("consommable", False),
             "is_virtual": virtual,
-            "stock_total": validated_data.pop("stock_total", 0),
             "seuil_alerte_bas": validated_data.pop("seuil_alerte_bas", None),
+            "seuil_alerte_haut": validated_data.pop("seuil_alerte_haut", None),
         }
 
-        seuil_alerte_haut = validated_data.pop("seuil_alerte_haut", None)
-        alertes_desactivees = validated_data.pop("alertes_desactivees", False)
-
-        noi = validated_data.pop("NOI", "")
-
-        part = Part()
-
-        _set_if_field_exists(part, "IPN", noi)
-        _set_if_field_exists(part, "name", validated_data.get("name", ""))
-        _set_if_field_exists(
-            part,
-            "description",
-            validated_data.get("description", ""),
+        part = Part(
+            IPN=validated_data.get("NOI", ""),
+            name=validated_data.get("name", ""),
+            description=validated_data.get("description", ""),
+            link=validated_data.get("link", ""),
+            active=validated_data.get("active", True),
+            salable=validated_data.get("salable", False),
+            virtual=virtual,
         )
-        _set_if_field_exists(part, "link", validated_data.get("link", ""))
-        _set_if_field_exists(part, "active", validated_data.get("active", True))
-        _set_if_field_exists(part, "salable", validated_data.get("salable", False))
-        _set_if_field_exists(part, "virtual", validated_data.get("virtual", False))
-
-        # Champs souvent présents dans InvenTree.
-        _set_if_field_exists(part, "component", False)
-        _set_if_field_exists(part, "purchaseable", False)
-        _set_if_field_exists(part, "assembly", False)
-        _set_if_field_exists(part, "trackable", False)
 
         part.save()
 
-        rentable_item = RentableItem.objects.create(
+        RentableItem.objects.create(
             part=part,
             **rentable_data,
         )
-
-        if _model_has_field(RentableItem, "seuil_alerte_haut"):
-            rentable_item.seuil_alerte_haut = seuil_alerte_haut
-
-        if _model_has_field(RentableItem, "alertes_desactivees"):
-            rentable_item.alertes_desactivees = alertes_desactivees
-
-        rentable_item.save()
 
         _create_stock_item(part, stock_initial)
 
@@ -347,10 +301,8 @@ class PartBackOfficeSerializer(serializers.Serializer):
         rentable_fields = [
             "is_rentable",
             "consommable",
-            "stock_total",
             "seuil_alerte_bas",
             "seuil_alerte_haut",
-            "alertes_desactivees",
         ]
 
         rentable_data = {}
@@ -362,7 +314,7 @@ class PartBackOfficeSerializer(serializers.Serializer):
         if "virtual" in validated_data:
             rentable_data["is_virtual"] = validated_data["virtual"]
 
-        part_payload = _part_update_payload(Part, validated_data)
+        part_payload = _part_update_payload(validated_data)
 
         if part_payload:
             Part.objects.filter(pk=part.pk).update(**part_payload)
@@ -371,8 +323,7 @@ class PartBackOfficeSerializer(serializers.Serializer):
         rentable_item, _created = RentableItem.objects.get_or_create(part=part)
 
         for field, value in rentable_data.items():
-            if _model_has_field(RentableItem, field):
-                setattr(rentable_item, field, value)
+            setattr(rentable_item, field, value)
 
         rentable_item.save()
 
@@ -388,7 +339,7 @@ class PartBackOfficeListCreateView(generics.ListCreateAPIView):
 
     permission_classes = [BackOfficePermission]
     serializer_class = PartBackOfficeSerializer
-    pagination_class = PartBackOfficePagination
+    pagination_class = BackOfficePagination
 
     def get_queryset(self):
         """Liste filtrable des Parts."""
@@ -408,18 +359,6 @@ class PartBackOfficeListCreateView(generics.ListCreateAPIView):
 
         return queryset
 
-    def create(self, request, *args, **kwargs):
-        """Création avec réponse complète."""
-
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        part = serializer.save()
-
-        return Response(
-            self.get_serializer(part).data,
-            status=status.HTTP_201_CREATED,
-        )
-
 
 class PartBackOfficeDetailView(generics.RetrieveUpdateAPIView):
     """Détail / édition d'une Part depuis le back-office."""
@@ -433,19 +372,3 @@ class PartBackOfficeDetailView(generics.RetrieveUpdateAPIView):
         from part.models import Part
 
         return Part.objects.all()
-
-    def update(self, request, *args, **kwargs):
-        """PATCH / PUT avec réponse complète."""
-
-        partial = kwargs.pop("partial", False)
-        instance = self.get_object()
-
-        serializer = self.get_serializer(
-            instance,
-            data=request.data,
-            partial=partial,
-        )
-        serializer.is_valid(raise_exception=True)
-        part = serializer.save()
-
-        return Response(self.get_serializer(part).data, status=status.HTTP_200_OK)

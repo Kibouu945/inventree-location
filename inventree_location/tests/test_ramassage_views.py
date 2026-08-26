@@ -158,6 +158,48 @@ class TestRamassageList:
         assert _get(factory, user).data["count"] == 0
 
 
+class TestRamassageRoles:
+    """Un livreur pur ne voit que les réservations validées (cf. roles.py)."""
+
+    @pytest.fixture
+    def livreur(self, db):
+        from django.contrib.auth.models import Group
+
+        from inventree_location import roles
+
+        account = User.objects.create_user(username="dave", password="pwd12345")
+        account.groups.add(Group.objects.get(name=roles.LIVREUR))
+        return account
+
+    def test_livreur_voit_la_reservation_validee(self, factory, livreur, reservation):
+        assert _get(factory, livreur).data["count"] == 1
+
+    def test_livreur_ne_voit_pas_un_brouillon(self, factory, livreur, reservation):
+        reservation.statut = StatutReservation.BROUILLON
+        reservation.save(update_fields=["statut"])
+
+        assert _get(factory, livreur).data["count"] == 0
+
+    def test_livreur_ne_peut_pas_imprimer_le_bon_dun_brouillon(
+        self, factory, livreur, reservation
+    ):
+        reservation.statut = StatutReservation.BROUILLON
+        reservation.save(update_fields=["statut"])
+
+        request = factory.get(f"{RAMASSAGES_URL}{reservation.pk}/bon/")
+        force_authenticate(request, user=livreur)
+
+        response = BonRamassageView.as_view()(request, pk=reservation.pk)
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_gestionnaire_voit_le_brouillon(self, factory, user, reservation):
+        reservation.statut = StatutReservation.BROUILLON
+        reservation.save(update_fields=["statut"])
+
+        assert _get(factory, user).data["count"] == 1
+
+
 class TestBonRamassage:
     def test_bon_contient_le_lieu_et_les_lignes(self, factory, user, reservation):
         request = factory.get(f"{RAMASSAGES_URL}{reservation.pk}/bon/")

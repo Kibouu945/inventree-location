@@ -1,5 +1,13 @@
 /** Types de l'API SCRUM-108 back-office utilisateurs. */
 
+/** Réponse paginée DRF, commune aux deux listes back-office. */
+export interface Page<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
+
 export interface BackOfficeRole {
   name: string;
   label: string;

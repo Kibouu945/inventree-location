@@ -9,6 +9,7 @@ import {
   Loader,
   Modal,
   MultiSelect,
+  Pagination,
   PasswordInput,
   Stack,
   Table,
@@ -21,14 +22,19 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { canManageBackOffice } from '../roles';
+import { apiErrorMessage } from './apiError';
 import type {
   BackOfficeRole,
   BackOfficeUser,
-  BackOfficeUserFormValues
+  BackOfficeUserFormValues,
+  Page
 } from './types';
 
 const USERS_URL = '/plugin/inventree-location/backoffice/users/';
 const ROLES_URL = '/plugin/inventree-location/backoffice/roles/';
+
+//: Doit rester aligné sur `BackOfficePagination.page_size` côté serveur.
+const PAGE_SIZE = 20;
 
 interface ModalState {
   open: boolean;
@@ -78,6 +84,7 @@ export function UsersBackOffice({
 
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
+  const [page, setPage] = useState(1);
 
   const [modalState, setModalState] = useState<ModalState>({ open: false });
   const [formValues, setFormValues] = useState<BackOfficeUserFormValues>(
@@ -86,16 +93,21 @@ export function UsersBackOffice({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
 
-  const usersQuery = useQuery<BackOfficeUser[]>(
+  const usersQuery = useQuery<Page<BackOfficeUser>>(
     {
-      queryKey: ['backoffice-users', debouncedSearch],
+      queryKey: ['backoffice-users', debouncedSearch, page],
       enabled: canAccess,
       queryFn: async () => {
-        const response = await context.api.get(USERS_URL, {
-          params: debouncedSearch.trim()
-            ? { search: debouncedSearch.trim() }
-            : {}
-        });
+        const params: Record<string, string> = {
+          page: String(page),
+          page_size: String(PAGE_SIZE)
+        };
+
+        if (debouncedSearch.trim()) {
+          params.search = debouncedSearch.trim();
+        }
+
+        const response = await context.api.get(USERS_URL, { params });
 
         return response.data;
       }
@@ -119,6 +131,17 @@ export function UsersBackOffice({
     value: role.name,
     label: role.label
   }));
+
+  const rows = usersQuery.data?.results ?? [];
+  const count = usersQuery.data?.count ?? 0;
+  const pages = Math.max(1, Math.ceil(count / PAGE_SIZE));
+
+  function updateSearch(value: string) {
+    // Changer la recherche renvoie en première page : rester sur la page 3
+    // d'un résultat qui n'en compte plus qu'une afficherait une liste vide.
+    setSearch(value);
+    setPage(1);
+  }
 
   function openCreateModal() {
     setFormError('');
@@ -179,19 +202,9 @@ export function UsersBackOffice({
       await usersQuery.refetch();
       closeModal();
     } catch (error: unknown) {
-      const apiError = error as {
-        response?: { data?: Record<string, unknown> | string };
-      };
-
-      const data = apiError.response?.data;
-
-      if (typeof data === 'string') {
-        setFormError(data);
-      } else if (data) {
-        setFormError(JSON.stringify(data));
-      } else {
-        setFormError("Impossible d'enregistrer l'utilisateur.");
-      }
+      setFormError(
+        apiErrorMessage(error, "Impossible d'enregistrer l'utilisateur.")
+      );
     } finally {
       setSaving(false);
     }
@@ -203,9 +216,15 @@ export function UsersBackOffice({
         is_active: !user.is_active
       });
 
+      setFormError('');
       await usersQuery.refetch();
-    } catch {
-      setFormError("Impossible de modifier l'état de l'utilisateur.");
+    } catch (error: unknown) {
+      setFormError(
+        apiErrorMessage(
+          error,
+          "Impossible de modifier l'état de l'utilisateur."
+        )
+      );
     }
   }
 
@@ -231,9 +250,17 @@ export function UsersBackOffice({
         label='Recherche'
         placeholder='Username, prénom, nom ou email…'
         value={search}
-        onChange={(event) => setSearch(event.currentTarget.value)}
+        onChange={(event) => updateSearch(event.currentTarget.value)}
         w={320}
       />
+
+      {/* Affiché hors modale aussi : un échec d'activation / désactivation se
+          produit depuis le tableau, où la modale est fermée. */}
+      {formError && !modalState.open && (
+        <Alert color='red' title='Erreur'>
+          {formError}
+        </Alert>
+      )}
 
       {usersQuery.isError && (
         <Alert color='red' title='Erreur'>
@@ -245,7 +272,7 @@ export function UsersBackOffice({
         <Group justify='center' p='xl'>
           <Loader />
         </Group>
-      ) : (usersQuery.data ?? []).length === 0 ? (
+      ) : rows.length === 0 ? (
         <Text c='dimmed'>Aucun utilisateur trouvé.</Text>
       ) : (
         <Table striped highlightOnHover>
@@ -260,7 +287,7 @@ export function UsersBackOffice({
           </Table.Thead>
 
           <Table.Tbody>
-            {(usersQuery.data ?? []).map((user) => (
+            {rows.map((user) => (
               <Table.Tr key={user.id}>
                 <Table.Td>
                   <Stack gap={0}>
@@ -320,6 +347,16 @@ export function UsersBackOffice({
           </Table.Tbody>
         </Table>
       )}
+
+      <Group justify='space-between'>
+        <Text size='sm' c='dimmed'>
+          {count} utilisateur(s)
+        </Text>
+
+        {pages > 1 && (
+          <Pagination total={pages} value={page} onChange={setPage} />
+        )}
+      </Group>
 
       <Modal
         opened={modalState.open}
