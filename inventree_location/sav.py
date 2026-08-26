@@ -83,14 +83,24 @@ def get_unavailable_stock_quantity(part_id: int) -> int:
 
 
 def get_real_available_stock(part_id: int) -> int:
-    """Stock réellement disponible pour les futures réservations."""
+    """Stock réellement disponible pour les futures réservations.
+
+    Le stock théorique vient d'InvenTree (`StockItem`), pas d'un compteur du
+    plugin : `RentableItem.stock_total` n'existe plus, un compteur parallèle
+    divergeant en silence dès qu'une casse ou un inventaire est saisi côté
+    InvenTree.
+    """
+
+    from .conflicts import get_part_total_stock
 
     rentable_item = RentableItem.objects.filter(part_id=part_id).first()
 
     if rentable_item is None:
         return 0
 
-    theoretical_stock = int(rentable_item.stock_total or 0)
+    theoretical_stock = get_part_total_stock(
+        rentable_item.part, rentable_item=rentable_item
+    )
     unavailable_stock = get_unavailable_stock_quantity(part_id)
 
     return max(theoretical_stock - unavailable_stock, 0)

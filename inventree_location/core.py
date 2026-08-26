@@ -86,6 +86,8 @@ class InvenTreeLocation(
             CatalogPartDetailView,
             CatalogPartListView,
             ConflictsListView,
+            ConflictHistoryListView,
+            ConflictHistoryResolveView,
             DeliveryListView,
             ExampleView,
             GeocodeAddressView,
@@ -107,6 +109,7 @@ class InvenTreeLocation(
             ReservationListCreateView,
             ReservationRetourView,
             ReservationTransitionView,
+            StockAvailabilityCheckView,
             ReturnIncidentDetailView,
             ReturnIncidentHistoryView,
             ReturnIncidentListCreateView,
@@ -195,6 +198,11 @@ class InvenTreeLocation(
                 name="reservation-conflict-check",
             ),
             path(
+                "reservations/check-stock/",
+                StockAvailabilityCheckView.as_view(),
+                name="reservation-stock-check",
+            ),
+            path(
                 "manifestations/",
                 ManifestationListCreateView.as_view(),
                 name="manifestation-list-create",
@@ -233,6 +241,16 @@ class InvenTreeLocation(
                 "users/",
                 UserListView.as_view(),
                 name="user-list",
+            ),
+            path(
+                "conflicts/history/",
+                ConflictHistoryListView.as_view(),
+                name="conflicts-history-list",
+            ),
+            path(
+                "conflicts/history/<int:pk>/resolve/",
+                ConflictHistoryResolveView.as_view(),
+                name="conflicts-history-resolve",
             ),
             path(
                 "ramassages/",

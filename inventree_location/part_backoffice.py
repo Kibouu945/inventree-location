@@ -183,7 +183,10 @@ class PartBackOfficeSerializer(serializers.Serializer):
     # RentableItem
     is_rentable = serializers.BooleanField(required=False, default=True)
     consommable = serializers.BooleanField(required=False, default=False)
-    stock_total = serializers.IntegerField(required=False, min_value=0, default=0)
+    # Le stock n'est plus saisissable ici : il appartient à InvenTree
+    # (`StockItem`). `stock_initial` reste accepté pour poser le stock de
+    # départ, ce qui crée un vrai StockItem plutôt qu'un compteur parallèle.
+    stock_total = serializers.IntegerField(read_only=True)
     seuil_alerte_bas = serializers.IntegerField(
         required=False,
         allow_null=True,
@@ -220,7 +223,7 @@ class PartBackOfficeSerializer(serializers.Serializer):
             "stock_total_inventree": _get_stock_total(part),
             "is_rentable": bool(rentable_item.is_rentable) if rentable_item else False,
             "consommable": bool(rentable_item.consommable) if rentable_item else False,
-            "stock_total": rentable_item.stock_total if rentable_item else 0,
+            "stock_total": _get_stock_total(part),
             "seuil_alerte_bas": rentable_item.seuil_alerte_bas
             if rentable_item
             else None,
@@ -284,7 +287,6 @@ class PartBackOfficeSerializer(serializers.Serializer):
             "is_rentable": validated_data.pop("is_rentable", True),
             "consommable": validated_data.pop("consommable", False),
             "is_virtual": virtual,
-            "stock_total": validated_data.pop("stock_total", 0),
             "seuil_alerte_bas": validated_data.pop("seuil_alerte_bas", None),
         }
 
@@ -347,7 +349,6 @@ class PartBackOfficeSerializer(serializers.Serializer):
         rentable_fields = [
             "is_rentable",
             "consommable",
-            "stock_total",
             "seuil_alerte_bas",
             "seuil_alerte_haut",
             "alertes_desactivees",

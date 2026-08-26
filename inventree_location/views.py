@@ -13,6 +13,7 @@ from django.db import transaction
 from django.db.models import Q, Sum
 from django.http import HttpResponse
 from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import LimitOffsetPagination, PageNumberPagination
@@ -21,11 +22,15 @@ from rest_framework.views import APIView
 
 from .conflicts import (
     CONFLICT_STATUSES,
+    compute_part_availability,
     detect_reservation_conflicts,
     list_current_conflicts,
 )
 from . import roles
 from .models import (
+    ConflictHistory,
+    ConflictState,
+    ConflictType,
     Groupe,
     Lieu,
     LigneReservation,
@@ -478,6 +483,103 @@ class ReservationTransitionView(APIView):
         )
 
         return Response(result, status=status.HTTP_200_OK)
+
+
+class StockAvailabilityCheckView(APIView):
+    """Verifie en temps reel la disponibilite stock d'un article sur une periode."""
+
+    permission_classes = [ReservationPermission]
+
+    def get(self, request, *args, **kwargs):
+        from part.models import Part
+
+        part_id = request.query_params.get("part")
+        quantity = request.query_params.get("quantity", "1")
+        start_raw = request.query_params.get("date_retrait_prevue")
+        end_raw = request.query_params.get("date_retour_prevue")
+        reservation_raw = request.query_params.get("reservation")
+
+        if not part_id or not start_raw or not end_raw:
+            return Response(
+                {
+                    "detail": (
+                        "Les parametres part, date_retrait_prevue et "
+                        "date_retour_prevue sont obligatoires."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            part_id = int(part_id)
+            quantity = max(int(quantity), 1)
+        except ValueError:
+            return Response(
+                {"detail": "Les parametres part et quantity doivent etre numeriques."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        start = parse_datetime(start_raw) or parse_date(start_raw)
+        end = parse_datetime(end_raw) or parse_date(end_raw)
+
+        if start is None or end is None:
+            return Response(
+                {
+                    "detail": (
+                        "Les dates fournies sont invalides. "
+                        "Utilisez un format ISO 8601."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        part = Part.objects.filter(pk=part_id).first()
+
+        if part is None:
+            return Response(
+                {"detail": "Article introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        exclude_reservation_id = None
+
+        if reservation_raw:
+            try:
+                exclude_reservation_id = int(reservation_raw)
+            except ValueError:
+                return Response(
+                    {"detail": "Le parametre reservation doit etre numerique."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        availability = compute_part_availability(
+            part,
+            quantity,
+            start,
+            end,
+            exclude_resa_id=exclude_reservation_id,
+        )
+
+        return Response(
+            {
+                "part_id": part.pk,
+                "part_name": getattr(part, "name", str(part)),
+                "requested_quantity": quantity,
+                "total_stock": availability["total_stock"],
+                "already_reserved_quantity": availability["already_reserved_quantity"],
+                "available_quantity": availability["available_quantity"],
+                "missing_quantity": availability["missing_quantity"],
+                "is_virtual": availability["is_virtual"],
+                "has_conflict": availability["has_conflict"],
+                "tension_level": availability["tension_level"],
+                "occupation_rate": availability["occupation_rate"],
+            },
+            status=(
+                status.HTTP_409_CONFLICT
+                if availability["has_conflict"]
+                else status.HTTP_200_OK
+            ),
+        )
 
 
 class ReservationRetourView(APIView):
@@ -1187,6 +1289,110 @@ class ConflictsListView(APIView):
         """Retourne les réservations en conflit triées par date de retrait prévue."""
 
         return Response(list_current_conflicts(), status=status.HTTP_200_OK)
+
+
+class ConflictHistoryListView(APIView):
+    """Liste l'historique des conflits (ouverts et resolus)."""
+
+    permission_classes = [ReservationPermission]
+
+    def get(self, request, *args, **kwargs):
+        conflict_type = request.query_params.get("type", "all")
+        state = request.query_params.get("state", "all")
+        reservation_id = request.query_params.get("reservation")
+
+        queryset = (
+            ConflictHistory.objects.select_related(
+                "reservation",
+                "conflicting_reservation",
+                "resolved_by",
+                "part",
+            )
+            .all()
+            .order_by("-created_at")
+        )
+
+        if conflict_type in {ConflictType.STOCK, ConflictType.LOCATION}:
+            queryset = queryset.filter(conflict_type=conflict_type)
+
+        if state in {ConflictState.OPEN, ConflictState.RESOLVED}:
+            queryset = queryset.filter(state=state)
+
+        if reservation_id and str(reservation_id).isdigit():
+            queryset = queryset.filter(reservation_id=int(reservation_id))
+
+        payload = []
+        for item in queryset:
+            payload.append({
+                "id": item.pk,
+                "conflict_type": item.conflict_type,
+                "state": item.state,
+                "reservation_id": item.reservation_id,
+                "reservation_numero": item.reservation.numero,
+                "conflicting_reservation_id": item.conflicting_reservation_id,
+                "part_id": item.part_id,
+                "part_name": getattr(item.part, "name", "") if item.part_id else "",
+                "period_start": item.period_start,
+                "period_end": item.period_end,
+                "location_key": item.location_key,
+                "details": item.details,
+                "created_at": item.created_at,
+                "resolved_at": item.resolved_at,
+                "resolved_by": (
+                    item.resolved_by.get_full_name() or item.resolved_by.username
+                    if item.resolved_by
+                    else ""
+                ),
+                "resolution_note": item.resolution_note,
+            })
+
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class ConflictHistoryResolveView(APIView):
+    """Marque une entree d'historique de conflit comme resolue."""
+
+    permission_classes = [ReservationPermission]
+
+    def patch(self, request, pk, *args, **kwargs):
+        conflict = ConflictHistory.objects.filter(pk=pk).first()
+
+        if conflict is None:
+            return Response(
+                {"detail": "Conflit introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if conflict.state == ConflictState.RESOLVED:
+            return Response(
+                {"detail": "Conflit deja resolu."},
+                status=status.HTTP_200_OK,
+            )
+
+        conflict.state = ConflictState.RESOLVED
+        conflict.resolved_at = timezone.now()
+        conflict.resolved_by = request.user
+        conflict.resolution_note = str(request.data.get("note", "")).strip()
+        conflict.save(
+            update_fields=[
+                "state",
+                "resolved_at",
+                "resolved_by",
+                "resolution_note",
+                "updated_at",
+            ]
+        )
+
+        return Response(
+            {
+                "id": conflict.pk,
+                "state": conflict.state,
+                "resolved_at": conflict.resolved_at,
+                "resolved_by": conflict.resolved_by.username,
+                "resolution_note": conflict.resolution_note,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class StockAlertListView(APIView):

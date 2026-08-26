@@ -45,7 +45,6 @@ function emptyForm(): BackOfficePartFormValues {
     virtual: false,
     is_rentable: true,
     consommable: false,
-    stock_total: 0,
     seuil_alerte_bas: null,
     seuil_alerte_haut: null,
     alertes_desactivees: false,
@@ -64,7 +63,6 @@ function formFromPart(part: BackOfficePart): BackOfficePartFormValues {
     virtual: part.virtual,
     is_rentable: part.is_rentable,
     consommable: part.consommable,
-    stock_total: part.stock_total ?? 0,
     seuil_alerte_bas: part.seuil_alerte_bas,
     seuil_alerte_haut: part.seuil_alerte_haut,
     alertes_desactivees: part.alertes_desactivees,
@@ -171,7 +169,6 @@ export function PartsBackOffice({
         virtual: formValues.virtual,
         is_rentable: formValues.is_rentable,
         consommable: formValues.consommable,
-        stock_total: formValues.stock_total,
         seuil_alerte_bas: formValues.seuil_alerte_bas,
         seuil_alerte_haut: formValues.seuil_alerte_haut,
         alertes_desactivees: formValues.alertes_desactivees,
@@ -309,9 +306,7 @@ export function PartsBackOffice({
                   </Group>
                 </Table.Td>
 
-                <Table.Td>
-                  {part.stock_total_inventree} / {part.stock_total}
-                </Table.Td>
+                <Table.Td>{part.stock_total_inventree}</Table.Td>
 
                 <Table.Td>{part.seuil_alerte_bas ?? '—'}</Table.Td>
 
@@ -359,7 +354,9 @@ export function PartsBackOffice({
               label='NOI'
               placeholder='NOI-001'
               value={formValues.NOI}
-              onChange={(event) => updateField('NOI', event.currentTarget.value)}
+              onChange={(event) =>
+                updateField('NOI', event.currentTarget.value)
+              }
             />
 
             <TextInput
@@ -367,7 +364,9 @@ export function PartsBackOffice({
               placeholder='Table pliante'
               required
               value={formValues.name}
-              onChange={(event) => updateField('name', event.currentTarget.value)}
+              onChange={(event) =>
+                updateField('name', event.currentTarget.value)
+              }
             />
           </Group>
 
@@ -441,15 +440,9 @@ export function PartsBackOffice({
           </Group>
 
           <Group grow>
-            <NumberInput
-              label='Quantité louable'
-              min={0}
-              value={formValues.stock_total}
-              onChange={(value) =>
-                updateField('stock_total', numberOrZero(value))
-              }
-            />
-
+            {/* Le stock ne se saisit plus ici : il appartient à InvenTree et se
+                met à jour par les StockItem. Seul « stock initial » agit, en
+                créant une vraie ligne de stock. */}
             <NumberInput
               label='Stock initial à ajouter'
               min={0}

@@ -370,15 +370,13 @@ export function UsersBackOffice({
             label='Email'
             type='email'
             value={formValues.email}
-            onChange={(event) => updateField('email', event.currentTarget.value)}
+            onChange={(event) =>
+              updateField('email', event.currentTarget.value)
+            }
           />
 
           <PasswordInput
-            label={
-              modalState.user
-                ? 'Nouveau mot de passe'
-                : 'Mot de passe'
-            }
+            label={modalState.user ? 'Nouveau mot de passe' : 'Mot de passe'}
             description={
               modalState.user
                 ? 'Laisser vide pour conserver le mot de passe actuel.'

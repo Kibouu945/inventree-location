@@ -39,21 +39,6 @@ def normalize_to_datetime(value: DateOrDateTime, *, end: bool = False) -> dateti
     return dt
 
 
-def to_day_period(
-    start: DateOrDateTime,
-    end: DateOrDateTime,
-) -> tuple[datetime, datetime]:
-    """Normalise une période sur des bornes jour entier."""
-
-    start_dt = normalize_to_datetime(start)
-    end_dt = normalize_to_datetime(end, end=True)
-
-    return (
-        datetime.combine(start_dt.date(), time.min, tzinfo=start_dt.tzinfo),
-        datetime.combine(end_dt.date(), time.max, tzinfo=end_dt.tzinfo),
-    )
-
-
 def periods_overlap(
     start_a: DateOrDateTime,
     end_a: DateOrDateTime,
@@ -66,6 +51,25 @@ def periods_overlap(
     end_b = normalize_to_datetime(end_b, end=True)
 
     return start_a <= end_b and end_a >= start_b
+
+
+def to_day_period(
+    start: DateOrDateTime,
+    end: DateOrDateTime,
+) -> tuple[datetime, datetime]:
+    """Normalise une période en bornes jour entier.
+
+    La réservation est saisie en date/heure, mais le calcul de disponibilité
+    et de conflit se fait au jour entier (CDC).
+    """
+
+    start_dt = normalize_to_datetime(start)
+    end_dt = normalize_to_datetime(end, end=True)
+
+    start_day = datetime.combine(start_dt.date(), time.min, tzinfo=start_dt.tzinfo)
+    end_day = datetime.combine(end_dt.date(), time.max, tzinfo=end_dt.tzinfo)
+
+    return start_day, end_day
 
 
 def find_conflicting_reservations(
@@ -138,6 +142,75 @@ def tension_level(occupation_rate: float) -> str:
     if occupation_rate >= 50:
         return "blue"
     return "green"
+
+
+def compute_part_availability(
+    part,
+    requested_quantity: int,
+    start: DateOrDateTime,
+    end: DateOrDateTime,
+    *,
+    exclude_resa_id: Optional[int] = None,
+) -> dict:
+    """Disponibilité prévisionnelle d'un article sur une période, au jour entier.
+
+    S'appuie sur `compute_engagement_details`, le moteur d'engagement partagé
+    avec le catalogue et la fiche prestation. La version d'origine sommait les
+    seules `LigneReservation`, ce qui ignorait le prévisionnel des prestations
+    et redonnait deux disponibilités différentes pour un même article à la même
+    date — exactement le défaut corrigé côté develop.
+    """
+
+    from .models import RentableItem
+    from .stock import compute_engagement_details
+
+    rentable_item = RentableItem.objects.filter(part=part).first()
+
+    if rentable_item is not None and rentable_item.is_virtual:
+        return {
+            "is_virtual": True,
+            "total_stock": 0,
+            "already_reserved_quantity": 0,
+            "available_quantity": 0,
+            "missing_quantity": 0,
+            "has_conflict": False,
+            "occupation_rate": 0.0,
+            "tension_level": "green",
+            "conflicting_reservations": [],
+        }
+
+    total_stock = get_part_total_stock(part, rentable_item=rentable_item)
+
+    engagements = compute_engagement_details(
+        [part.pk],
+        start,
+        end,
+        exclude_reservation_id=exclude_resa_id,
+    ).get(part.pk, [])
+
+    reserved = sum(entry["quantite"] for entry in engagements)
+    available = total_stock - reserved
+    missing = max(requested_quantity - available, 0)
+    base = max(total_stock, 1)
+    occupation_rate = ((reserved + requested_quantity) / base) * 100
+
+    return {
+        "is_virtual": False,
+        "total_stock": total_stock,
+        "already_reserved_quantity": reserved,
+        "available_quantity": available,
+        "missing_quantity": missing,
+        "has_conflict": missing > 0,
+        "occupation_rate": occupation_rate,
+        "tension_level": tension_level(occupation_rate),
+        "conflicting_reservations": compute_conflicts(
+            part.pk,
+            requested_quantity,
+            start,
+            end,
+            exclude_resa_id=exclude_resa_id,
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -271,20 +344,17 @@ def detect_reservation_conflicts(reservation) -> dict:
         if rentable_item is not None and rentable_item.is_virtual:
             continue
 
-        total_stock = get_part_total_stock(part, rentable_item=rentable_item)
-
-        overlapping = compute_conflicts(
-            part.pk,
+        availability = compute_part_availability(
+            part,
             requested,
             start,
             end,
             exclude_resa_id=reservation.pk,
         )
 
-        # Même moteur d'engagement que le catalogue et la fiche prestation :
-        # sommer ici les seules lignes de réservation ignorait le prévisionnel
-        # des prestations et donnait deux disponibilités différentes pour un
-        # même article à la même date.
+        # `compute_part_availability` s'appuie déjà sur le moteur d'engagement
+        # partagé ; on ne recalcule ici que le détail nominatif, nécessaire
+        # pour désigner la prestation responsable d'une pénurie.
         engagements = compute_engagement_details(
             [part.pk],
             start,
@@ -292,20 +362,19 @@ def detect_reservation_conflicts(reservation) -> dict:
             exclude_reservation_id=reservation.pk,
         ).get(part.pk, [])
 
-        reserved = sum(entry["quantite"] for entry in engagements)
-        available = total_stock - reserved
-
-        if requested > available:
-            safe_available = max(available, 0)
+        if availability["has_conflict"]:
+            safe_available = max(availability["available_quantity"], 0)
 
             conflicts.append({
                 "part_id": part.pk,
                 "part_name": getattr(part, "name", str(part)),
                 "requested_quantity": requested,
-                "total_stock": total_stock,
-                "already_reserved_quantity": reserved,
-                "available_quantity": available,
-                "missing_quantity": requested - available,
+                "total_stock": availability["total_stock"],
+                "already_reserved_quantity": availability["already_reserved_quantity"],
+                "available_quantity": availability["available_quantity"],
+                "missing_quantity": availability["missing_quantity"],
+                "occupation_rate": availability["occupation_rate"],
+                "tension_level": availability["tension_level"],
                 "conflicting_reservations": [
                     {
                         "reservation_id": resa.pk,
@@ -313,7 +382,7 @@ def detect_reservation_conflicts(reservation) -> dict:
                         "statut": resa.statut,
                         "direct_link": RESERVATION_DIRECT_LINK.format(pk=resa.pk),
                     }
-                    for resa in overlapping
+                    for resa in availability["conflicting_reservations"]
                 ],
                 # Le stock peut être retenu par le seul prévisionnel d'une
                 # prestation, sans aucune réservation à montrer : sans ce
@@ -414,6 +483,176 @@ def list_current_conflicts() -> List[dict]:
         })
 
     return payload
+
+
+def register_stock_conflict_history(reservation, conflict_result: dict) -> None:
+    """Enregistre les conflits de stock détectés dans l'historique."""
+
+    from .models import ConflictHistory, ConflictState, ConflictType, Reservation
+
+    if not conflict_result.get("has_conflict"):
+        return
+
+    for conflict in conflict_result.get("conflicts", []):
+        conflicting_ids = [
+            item.get("reservation_id")
+            for item in conflict.get("conflicting_reservations", [])
+            if item.get("reservation_id")
+        ]
+
+        if not conflicting_ids:
+            conflicting_ids = [None]
+
+        for conflicting_id in conflicting_ids:
+            conflicting_reservation = None
+
+            if conflicting_id is not None:
+                conflicting_reservation = Reservation.objects.filter(
+                    pk=conflicting_id
+                ).first()
+
+            ConflictHistory.objects.get_or_create(
+                conflict_type=ConflictType.STOCK,
+                state=ConflictState.OPEN,
+                reservation=reservation,
+                conflicting_reservation=conflicting_reservation,
+                part_id=conflict.get("part_id"),
+                period_start=reservation.date_retrait_prevue,
+                period_end=reservation.date_retour_prevue,
+                defaults={
+                    "details": {
+                        "part_name": conflict.get("part_name"),
+                        "requested_quantity": conflict.get("requested_quantity"),
+                        "available_quantity": conflict.get("available_quantity"),
+                        "missing_quantity": conflict.get("missing_quantity"),
+                        "occupation_rate": conflict.get("occupation_rate"),
+                        "tension_level": conflict.get("tension_level"),
+                    }
+                },
+            )
+
+
+def detect_location_reservation_conflicts(reservation) -> dict:
+    """Détecte les conflits de lieu (même adresse/GPS, même jour)."""
+
+    from .models import Reservation
+
+    empty = {"has_conflict": False, "reservation": reservation.pk, "conflicts": []}
+
+    start = reservation.date_retrait_prevue
+    end = reservation.date_retour_prevue
+
+    if not start or not end or not reservation.prestation_id:
+        return empty
+
+    # ORG-02 : une prestation se déroule sur un *seul* lieu. La version
+    # d'origine parcourait `prestation.lieux`, la relation inverse d'un
+    # `Lieu.prestation` supprimé depuis (migration 0008) — elle levait donc
+    # une AttributeError sur le schéma actuel.
+    current_place = reservation.prestation.lieu
+
+    if current_place is None:
+        return empty
+
+    period_start, period_end = to_day_period(start, end)
+
+    candidates = (
+        Reservation.objects.select_related(
+            "prestation", "prestation__lieu", "demandeur"
+        )
+        .filter(
+            statut__in=CONFLICT_STATUSES,
+            date_retrait_prevue__isnull=False,
+            date_retour_prevue__isnull=False,
+        )
+        .exclude(pk=reservation.pk)
+    )
+
+    conflicts = []
+
+    for candidate in candidates:
+        if not periods_overlap(
+            period_start,
+            period_end,
+            candidate.date_retrait_prevue,
+            candidate.date_retour_prevue,
+        ):
+            continue
+
+        existing_place = candidate.prestation.lieu
+
+        if existing_place is None:
+            continue
+
+        current_address = (current_place.adresse or "").strip().lower()
+        other_address = (existing_place.adresse or "").strip().lower()
+
+        same_address = bool(current_address and current_address == other_address)
+        same_gps = (
+            current_place.latitude is not None
+            and current_place.longitude is not None
+            and existing_place.latitude is not None
+            and existing_place.longitude is not None
+            and str(current_place.latitude) == str(existing_place.latitude)
+            and str(current_place.longitude) == str(existing_place.longitude)
+        )
+
+        if not same_address and not same_gps:
+            continue
+
+        conflicts.append({
+            "reservation_id": candidate.pk,
+            "numero": candidate.numero,
+            "statut": candidate.statut,
+            "prestation_nom": candidate.prestation.nom,
+            "lieu_nom": existing_place.nom,
+            "adresse": existing_place.adresse,
+            "latitude": existing_place.latitude,
+            "longitude": existing_place.longitude,
+        })
+
+    return {
+        "has_conflict": bool(conflicts),
+        "reservation": reservation.pk,
+        "conflicts": conflicts,
+    }
+
+
+def register_location_conflict_history(reservation, conflict_result: dict) -> None:
+    """Enregistre les conflits de lieu détectés dans l'historique."""
+
+    from .models import ConflictHistory, ConflictState, ConflictType, Reservation
+
+    if not conflict_result.get("has_conflict"):
+        return
+
+    for conflict in conflict_result.get("conflicts", []):
+        conflicting_reservation = Reservation.objects.filter(
+            pk=conflict.get("reservation_id")
+        ).first()
+
+        location_key = (
+            conflict.get("adresse") or ""
+        ).strip().lower() or f"{conflict.get('latitude')}:{conflict.get('longitude')}"
+
+        ConflictHistory.objects.get_or_create(
+            conflict_type=ConflictType.LOCATION,
+            state=ConflictState.OPEN,
+            reservation=reservation,
+            conflicting_reservation=conflicting_reservation,
+            period_start=reservation.date_retrait_prevue,
+            period_end=reservation.date_retour_prevue,
+            location_key=location_key,
+            defaults={
+                "details": {
+                    "prestation_nom": conflict.get("prestation_nom"),
+                    "lieu_nom": conflict.get("lieu_nom"),
+                    "adresse": conflict.get("adresse"),
+                    "latitude": str(conflict.get("latitude") or ""),
+                    "longitude": str(conflict.get("longitude") or ""),
+                }
+            },
+        )
 
 
 def count_current_conflicts() -> int:

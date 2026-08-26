@@ -23,14 +23,20 @@ CONFLICTS = "inventree-location-conflicts"
 ORGANISATION = "inventree-location-organisation"
 STOCK_ALERTS = "inventree-location-stock-alerts"
 DELIVERIES = "inventree-location-deliveries"
+RAMASSAGES = "inventree-location-ramassages"
+BACKOFFICE_USERS = "inventree-location-backoffice-users"
+BACKOFFICE_PARTS = "inventree-location-backoffice-parts"
 
 #: Dérivé du mapping et non figé en dur : un widget ajouté à
 #: ``DASHBOARD_WIDGET_ROLES`` sans toucher ce test faisait échouer cinq cas d'un
 #: coup, sans que la régression concerne les rôles.
 ALL_WIDGETS = set(roles.DASHBOARD_WIDGET_ROLES)
-#: Widgets vus par un lecteur : tous sauf les tournées livreur, réservées aux
-#: rôles qui les exécutent.
-LECTEUR_WIDGETS = ALL_WIDGETS - {DELIVERIES}
+#: Back-offices : administrateur seulement.
+BACKOFFICE_WIDGETS = {BACKOFFICE_USERS, BACKOFFICE_PARTS}
+#: Le gestionnaire voit tout le métier, mais pas les back-offices.
+GESTIONNAIRE_WIDGETS = ALL_WIDGETS - BACKOFFICE_WIDGETS
+#: Le lecteur ne voit pas non plus les écrans d'exécution terrain.
+LECTEUR_WIDGETS = GESTIONNAIRE_WIDGETS - {DELIVERIES, RAMASSAGES}
 
 
 def _make_user(username, role=None, *, is_staff=False, is_superuser=False):
@@ -71,14 +77,16 @@ class TestVisibleDashboardWidgetKeys:
         "role, expected",
         [
             (roles.ADMIN, ALL_WIDGETS),
-            (roles.GESTIONNAIRE, ALL_WIDGETS),
+            (roles.GESTIONNAIRE, GESTIONNAIRE_WIDGETS),
             (roles.LECTEUR, LECTEUR_WIDGETS),
             # Le magasinier suit la disponibilité future et l'inventaire :
             # les alertes de seuil le concernent (US-09).
-            (roles.MAGASINIER, {CATALOG, RESERVATIONS, STOCK_ALERTS}),
+            (roles.MAGASINIER, {CATALOG, RESERVATIONS, STOCK_ALERTS, RAMASSAGES}),
             (roles.ORGANISATEUR, {RESERVATIONS, ORGANISATION}),
-            (roles.LIVREUR, {RESERVATIONS, DELIVERIES}),
+            (roles.LIVREUR, {RESERVATIONS, DELIVERIES, RAMASSAGES}),
             (roles.SAV, set()),
+            # L'acheteur consulte le catalogue pour ses achats, rien de plus.
+            (roles.ACHETEUR, {CATALOG}),
         ],
     )
     def test_widgets_per_role(self, role, expected):

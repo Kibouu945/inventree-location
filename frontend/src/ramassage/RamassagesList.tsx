@@ -198,10 +198,7 @@ function lineFormFromBon(ligne: LigneBonRamassage112): RetourLineForm {
     ligne: ligne.id,
     partNom: ligne.part_nom,
     quantiteAttendue: lineExpectedQuantity(ligne),
-    quantite_ramassee:
-      ligne.quantite_ramassee ||
-      ligne.quantite_retournee ||
-      0,
+    quantite_ramassee: ligne.quantite_ramassee || ligne.quantite_retournee || 0,
     quantite_sav: ligne.quantite_sav || 0,
     quantite_detruite: ligne.quantite_detruite || 0,
     quantite_manquante: ligne.quantite_manquante || 0,
@@ -313,8 +310,8 @@ function BonRamassageContent({
       <Title order={5}>Retour terrain</Title>
 
       <Alert color='blue' title='SCRUM-112 — stock réel'>
-        Au ramassage, renseigner pour chaque article les quantités ramassées en bon
-        état, envoyées au SAV, détruites ou manquantes. Les quantités SAV,
+        Au ramassage, renseigner pour chaque article les quantités ramassées en
+        bon état, envoyées au SAV, détruites ou manquantes. Les quantités SAV,
         détruites et manquantes sortent du stock réellement disponible.
       </Alert>
 
@@ -457,7 +454,9 @@ function BonRamassageContent({
       <Textarea
         label='Commentaire global du retour'
         value={commentaireRetour}
-        onChange={(event) => onChangeCommentaireRetour(event.currentTarget.value)}
+        onChange={(event) =>
+          onChangeCommentaireRetour(event.currentTarget.value)
+        }
         placeholder='Ex : retour terrain saisi par le livreur, contrôle magasinier à prévoir…'
         autosize
         minRows={2}

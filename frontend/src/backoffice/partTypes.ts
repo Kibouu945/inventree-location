@@ -36,7 +36,8 @@ export interface BackOfficePartFormValues {
   virtual: boolean;
   is_rentable: boolean;
   consommable: boolean;
-  stock_total: number;
+  // Pas de `stock_total` : le stock appartient à InvenTree et le serveur
+  // l'expose en lecture seule. Seul `stock_initial` en crée.
   seuil_alerte_bas: number | null;
   seuil_alerte_haut: number | null;
   alertes_desactivees: boolean;
