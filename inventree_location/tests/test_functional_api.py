@@ -180,7 +180,7 @@ def test_reservation_list_filter_by_statut(prestation):
 
     response = client.get(f"{BASE}/reservations/", {"statut": "validee"})
     assert response.status_code == status.HTTP_200_OK
-    assert [row["id"] for row in response.data] == [validee.pk]
+    assert [row["id"] for row in response.data["results"]] == [validee.pk]
 
 
 def test_livreur_only_sees_validated_reservations(prestation):
@@ -204,7 +204,7 @@ def test_livreur_only_sees_validated_reservations(prestation):
     response = client.get(f"{BASE}/reservations/")
 
     assert response.status_code == status.HTTP_200_OK
-    assert [row["id"] for row in response.data] == [validee.pk]
+    assert [row["id"] for row in response.data["results"]] == [validee.pk]
 
 
 def test_gestionnaire_sees_all_reservation_statuses(prestation):
@@ -221,7 +221,7 @@ def test_gestionnaire_sees_all_reservation_statuses(prestation):
     response = client.get(f"{BASE}/reservations/")
 
     assert response.status_code == status.HTTP_200_OK
-    assert len(response.data) == 4
+    assert len(response.data["results"]) == 4
 
 
 def test_magasinier_cannot_create_reservation(prestation):

@@ -28,6 +28,12 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+# Export PDF du rapport de retour (SCRUM-99). Tenu à l'écart des dépendances
+# obligatoires : WeasyPrint tire des bibliothèques natives (pango, cairo)
+# absentes de l'image. Sans lui, seul l'endpoint d'export répond 503.
+pdf = [
+    "weasyprint>=61",
+]
 test = [
     "pytest",
     "pytest-django",

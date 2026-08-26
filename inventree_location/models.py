@@ -454,6 +454,7 @@ class Reservation(TimestampedModel):
     commentaire = models.TextField(
         blank=True, default="", verbose_name=_("commentaire")
     )
+    is_archived = models.BooleanField(default=False, verbose_name=_("archivée"))
 
     class Meta:
         app_label = "inventree_location"
@@ -465,6 +466,10 @@ class Reservation(TimestampedModel):
                 fields=["date_retrait_prevue", "date_retour_prevue", "statut"],
                 name="resa_periode_statut_idx",
             ),
+            models.Index(fields=["statut"], name="resa_statut_idx"),
+            models.Index(fields=["date_retrait_prevue"], name="resa_retrait_idx"),
+            models.Index(fields=["date_retour_prevue"], name="resa_retour_idx"),
+            models.Index(fields=["is_archived"], name="resa_archived_idx"),
         ]
 
     def __str__(self):
@@ -520,6 +525,17 @@ class LigneReservation(TimestampedModel):
     etat_retour = models.CharField(
         max_length=20, blank=True, default="", verbose_name=_("état du retour")
     )
+    # Détail du check-in retour (SCRUM-94) : la somme des 3 doit égaler
+    # quantite_demandee. quantite_retournee reste la vue agrégée (ok + casse).
+    quantite_retour_ok = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité retournée OK")
+    )
+    quantite_retour_manquant = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité manquante")
+    )
+    quantite_retour_casse = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité cassée")
+    )
     commentaire = models.TextField(
         blank=True, default="", verbose_name=_("commentaire")
     )
@@ -538,6 +554,53 @@ class LigneReservation(TimestampedModel):
 
     def __str__(self):
         return f"part#{self.part_id} x{self.quantite_demandee}"
+
+
+class ReturnIncidentType(models.TextChoices):
+    MISSING = "missing", _("Manquant")
+    BROKEN = "broken", _("Cassé")
+    DESTROYED = "destroyed", _("Détruit")
+
+
+class ReturnIncident(TimestampedModel):
+    line = models.ForeignKey(
+        LigneReservation,
+        on_delete=models.CASCADE,
+        related_name="incidents",
+        verbose_name=_("ligne de réservation"),
+    )
+    type = models.CharField(
+        max_length=20,
+        choices=ReturnIncidentType.choices,
+        verbose_name=_("type d'incident"),
+    )
+    qty = models.PositiveIntegerField(verbose_name=_("quantité"))
+    comment = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("commentaire"),
+    )
+    reported_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name=_("date de signalement"),
+    )
+    reported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reported_incidents",
+        verbose_name=_("signalé par"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-reported_at"]
+        verbose_name = _("incident de retour")
+        verbose_name_plural = _("incidents de retour")
+
+    def __str__(self):
+        return f"Incident #{self.pk} ({self.type}) — Ligne#{self.line_id}"
 
 
 class ReservationStatusLog(TimestampedModel):

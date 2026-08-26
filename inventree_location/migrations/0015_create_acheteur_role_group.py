@@ -23,7 +23,7 @@ def remove_role_groups(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("inventree_location", "0010_remove_rentableitem_stock_total"),
+        ("inventree_location", "0014_reservation_indexes_and_archiving"),
         ("auth", "0001_initial"),
     ]
 

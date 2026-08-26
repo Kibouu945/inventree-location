@@ -70,6 +70,7 @@ class InvenTreeLocation(
             CatalogPartDetailView,
             CatalogPartListView,
             ConflictsListView,
+            DeliveryListView,
             ExampleView,
             GeocodeAddressView,
             GroupeListView,
@@ -84,10 +85,17 @@ class InvenTreeLocation(
             RamassageListView,
             RentableFlagBulkUpdateView,
             RentablePartDetailView,
+            ReservationCheckinView,
             ReservationConflictCheckView,
             ReservationDetailView,
             ReservationListCreateView,
+            ReservationRetourView,
             ReservationTransitionView,
+            ReturnIncidentDetailView,
+            ReturnIncidentHistoryView,
+            ReturnIncidentListCreateView,
+            ReturnReportPdfView,
+            ReturnReportView,
             StockAlertListView,
             UserListView,
         )
@@ -128,6 +136,42 @@ class InvenTreeLocation(
                 ReservationTransitionView.as_view(),
                 name="reservation-transition",
             ),
+            path(
+                "reservations/<int:pk>/retour/",
+                ReservationRetourView.as_view(),
+                name="reservation-retour",
+            ),
+            path(
+                "reservations/<int:pk>/checkin/",
+                ReservationCheckinView.as_view(),
+                name="reservation-checkin",
+            ),
+            path(
+                "returns/incidents/",
+                ReturnIncidentListCreateView.as_view(),
+                name="return-incident-list",
+            ),
+            path(
+                "returns/history/",
+                ReturnIncidentHistoryView.as_view(),
+                name="return-incident-history",
+            ),
+            path(
+                "returns/incidents/<int:pk>/",
+                ReturnIncidentDetailView.as_view(),
+                name="return-incident-detail",
+            ),
+            path(
+                "returns/reports/<int:pk>/",
+                ReturnReportView.as_view(),
+                name="return-report",
+            ),
+            path(
+                "returns/reports/<int:pk>/pdf/",
+                ReturnReportPdfView.as_view(),
+                name="return-report-pdf",
+            ),
+            path("deliveries/", DeliveryListView.as_view(), name="delivery-list"),
             path(
                 "reservations/<int:pk>/conflicts/",
                 ReservationConflictCheckView.as_view(),
@@ -339,6 +383,24 @@ class InvenTreeLocation(
                 },
             })
 
+        if visible("inventree-location-deliveries"):
+            items.append({
+                "key": "inventree-location-deliveries",
+                "title": "Tournées livreur",
+                "description": "Livraisons à effectuer, filtrables par date / lieu / statut",
+                "icon": "ti:truck-delivery:outline",
+                "source": self.plugin_static_file(
+                    "Deliveries.js:renderInvenTreeLocationDeliveries"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
         if visible("inventree-location-conflicts"):
             conflicts_count = 0
 
@@ -421,18 +483,3 @@ class InvenTreeLocation(
             })
 
         return items
-
-    def get_ui_spotlight_actions(self, request, context, **kwargs):
-        """Return custom spotlight actions."""
-
-        return [
-            {
-                "key": "sample-spotlight-action",
-                "title": "Hello Action",
-                "description": "Hello from InvenTreeLocation",
-                "icon": "ti:heart-handshake:outline",
-                "source": self.plugin_static_file(
-                    "Spotlight.js:InvenTreeLocationSpotlightAction"
-                ),
-            }
-        ]

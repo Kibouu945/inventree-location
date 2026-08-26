@@ -8,6 +8,7 @@ from urllib.request import Request, urlopen
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -18,10 +19,13 @@ from .models import (
     LigneReservation,
     Lieu,
     Manifestation,
+    Profile,
     Reservation,
     ReservationStatusLog,
     Prestation,
     RentableItem,
+    ReturnIncident,
+    ReturnIncidentType,
     StatutManifestation,
     StatutReservation,
 )
@@ -127,6 +131,34 @@ def _round_coord(value):
     return text
 
 
+def _user_label(user):
+    """Nom lisible d'un utilisateur : « Prénom Nom (username) », sinon username."""
+
+    if user is None:
+        return ""
+
+    full_name = f"{user.first_name} {user.last_name}".strip()
+
+    return f"{full_name} ({user.username})" if full_name else user.username
+
+
+def _user_phone(user):
+    """Téléphone de l'utilisateur (via son `Profile`), vide si non renseigné.
+
+    `Profile` n'est jamais auto-créé (pas de signal) : l'accès reverse
+    OneToOne lève `Profile.DoesNotExist`, pas une `AttributeError` — un
+    `getattr(user, "location_profile", None)` ne l'attraperait pas.
+    """
+
+    if user is None:
+        return ""
+
+    try:
+        return user.location_profile.telephone
+    except Profile.DoesNotExist:
+        return ""
+
+
 class LigneReservationSerializer(serializers.ModelSerializer):
     """Sérialiseur d'une ligne de réservation."""
 
@@ -141,9 +173,255 @@ class LigneReservationSerializer(serializers.ModelSerializer):
             "quantite_livree",
             "quantite_retournee",
             "etat_retour",
+            "quantite_retour_ok",
+            "quantite_retour_manquant",
+            "quantite_retour_casse",
             "commentaire",
         ]
-        read_only_fields = ["id"]
+        # Le détail du retour n'appartient qu'au check-in magasinier
+        # (`ReservationCheckinView` / `ReturnCheckinPermission`) : exposé en
+        # écriture ici, il serait modifiable par tout rôle autorisé à éditer
+        # une réservation, et remis à zéro à chaque réécriture des lignes.
+        read_only_fields = [
+            "id",
+            "quantite_retour_ok",
+            "quantite_retour_manquant",
+            "quantite_retour_casse",
+        ]
+
+
+#: Traduction du type d'incident vers le vocabulaire applicatif de
+#: `LigneReservation.etat_retour` ("ok" | "manquant" | "casse", cf. models.py).
+#: Sans elle, la colonne porterait deux vocabulaires incompatibles selon
+#: qu'elle est écrite par un incident ou par le check-in retour.
+ETAT_RETOUR_PAR_TYPE = {
+    ReturnIncidentType.MISSING: "manquant",
+    ReturnIncidentType.BROKEN: "casse",
+    # « Détruit » n'a pas de valeur propre côté ligne : le vocabulaire de
+    # `etat_retour` s'arrête à ok / manquant / casse, et un objet détruit est
+    # un objet cassé du point de vue de la ligne. Le rapport de retour, lui,
+    # garde la distinction (la caution y remplace la valeur de remplacement).
+    ReturnIncidentType.DESTROYED: "casse",
+}
+
+#: Du plus grave au moins grave : le premier type présent gagne.
+ORDRE_GRAVITE_INCIDENT = (
+    ReturnIncidentType.DESTROYED,
+    ReturnIncidentType.BROKEN,
+    ReturnIncidentType.MISSING,
+)
+
+
+def etat_retour_du_checkin(ligne):
+    """État déduit du pointage de check-in retour (SCRUM-94), ou None.
+
+    Retourne None tant qu'aucun check-in n'a été posé, pour distinguer
+    « pas encore pointé » de « pointé, tout est OK ».
+    """
+
+    pointe = (
+        ligne.quantite_retour_ok
+        + ligne.quantite_retour_manquant
+        + ligne.quantite_retour_casse
+    )
+
+    if pointe <= 0:
+        return None
+
+    if ligne.quantite_retour_casse > 0:
+        return "casse"
+
+    if ligne.quantite_retour_manquant > 0:
+        return "manquant"
+
+    return "ok"
+
+
+def sync_ligne_etat_retour(ligne):
+    """Recalcule `etat_retour` depuis les incidents, puis depuis le check-in.
+
+    Recalculé plutôt que déduit du dernier incident écrit : une modification
+    ou une suppression doit ramener la ligne à son état réel, sinon elle reste
+    figée sur un incident qui n'existe plus. Le type le plus grave l'emporte.
+
+    Deux fonctionnalités écrivent cette colonne — le journal d'incidents
+    (SCRUM-93) et le check-in retour (SCRUM-94). Sans ce repli, supprimer le
+    dernier incident d'une ligne effaçait aussi l'état posé par un check-in,
+    alors que le pointage, lui, existe toujours.
+    """
+
+    types = set(ligne.incidents.values_list("type", flat=True))
+    etat = ""
+
+    for type_incident in ORDRE_GRAVITE_INCIDENT:
+        if type_incident in types:
+            etat = ETAT_RETOUR_PAR_TYPE[type_incident]
+            break
+
+    if not etat:
+        etat = etat_retour_du_checkin(ligne) or ""
+
+    ligne.etat_retour = etat
+    ligne.save(update_fields=["etat_retour", "updated_at"])
+
+
+class ReturnIncidentSerializer(serializers.ModelSerializer):
+    """Sérialiseur d'un incident de retour."""
+
+    # Déclaré explicitement : le `ChoiceField` implicite du ModelSerializer
+    # rejette la valeur avant tout `validate_type`, dont le message français
+    # n'atteignait donc jamais le client.
+    type = serializers.ChoiceField(
+        choices=ReturnIncidentType.choices,
+        error_messages={
+            "invalid_choice": "Type d'incident invalide : manquant ou cassé attendu."
+        },
+    )
+    qty = serializers.IntegerField(
+        min_value=1,
+        error_messages={"min_value": "La quantité signalée doit être d'au moins 1."},
+    )
+    line_part_name = serializers.CharField(source="line.part.name", read_only=True)
+    line_reservation_numero = serializers.CharField(
+        source="line.reservation.numero", read_only=True
+    )
+    reported_by_username = serializers.CharField(
+        source="reported_by.username", read_only=True, allow_null=True
+    )
+
+    class Meta:
+        """Configuration du serializer ReturnIncident."""
+
+        model = ReturnIncident
+        fields = [
+            "id",
+            "line",
+            "line_part_name",
+            "line_reservation_numero",
+            "type",
+            "qty",
+            "comment",
+            "reported_at",
+            "reported_by",
+            "reported_by_username",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "line_part_name",
+            "line_reservation_numero",
+            "reported_at",
+            "reported_by",
+            "reported_by_username",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate(self, attrs):
+        """Le cumul des incidents d'une ligne ne peut pas dépasser sa quantité.
+
+        Le plafond porte sur le cumul, pas sur l'incident isolé : deux
+        signalements de 3 sur une ligne de 3 passaient tous les deux, et la
+        ligne se retrouvait avec 6 unités en incident pour 3 engagées.
+        """
+
+        line = attrs.get("line") or getattr(self.instance, "line", None)
+
+        if line is not None:
+            qty = attrs.get("qty", getattr(self.instance, "qty", 0))
+            # `quantite_livree` n'est renseignée par aucun endpoint à ce jour :
+            # le plafond retombe alors sur la quantité demandée.
+            max_qty = line.quantite_livree or line.quantite_demandee
+
+            autres = line.incidents.all()
+
+            if self.instance is not None:
+                autres = autres.exclude(pk=self.instance.pk)
+
+            deja_signale = autres.aggregate(total=Sum("qty"))["total"] or 0
+
+            if deja_signale + qty > max_qty:
+                raise serializers.ValidationError({
+                    "qty": (
+                        f"La quantité signalée ({deja_signale + qty} au total) "
+                        f"dépasse la quantité disponible ({max_qty})."
+                    )
+                })
+
+        return attrs
+
+    def create(self, validated_data):
+        """Crée l'incident et met à jour l'état de retour de la ligne."""
+
+        request = self.context.get("request")
+        if request is not None and request.user.is_authenticated:
+            validated_data["reported_by"] = request.user
+
+        incident = super().create(validated_data)
+        self._reporter_sur_la_ligne(incident)
+
+        return incident
+
+    def update(self, instance, validated_data):
+        """Met à jour l'incident, puis réaligne l'état de retour de la ligne."""
+
+        incident = super().update(instance, validated_data)
+        self._reporter_sur_la_ligne(incident)
+
+        return incident
+
+    @staticmethod
+    def _reporter_sur_la_ligne(incident):
+        """Réaligne la ligne : état recalculé, commentaire jamais effacé."""
+
+        ligne = incident.line
+
+        # Le commentaire de la ligne appartient au magasinier : il n'est repris
+        # que si l'incident en fournit un, jamais remis à blanc.
+        if incident.comment:
+            ligne.commentaire = incident.comment
+            ligne.save(update_fields=["commentaire", "updated_at"])
+
+        sync_ligne_etat_retour(ligne)
+
+
+class ReturnIncidentHistorySerializer(ReturnIncidentSerializer):
+    """Incident enrichi du contexte réservation / manifestation (SCRUM-100).
+
+    Ces champs vivaient sur le sérialiseur partagé, ce qui coûtait cher :
+    `event_name` traverse `line.reservation.prestation.manifestation`, et seule
+    la vue historique avait le `select_related` correspondant. La liste et le
+    détail des incidents payaient deux requêtes de plus par incident pour des
+    champs qu'ils n'exposent pas.
+    """
+
+    part_name = serializers.CharField(source="line.part.name", read_only=True)
+    reservation_id = serializers.IntegerField(
+        source="line.reservation_id", read_only=True
+    )
+    reservation_number = serializers.CharField(
+        source="line.reservation.numero", read_only=True
+    )
+    event_name = serializers.CharField(
+        source="line.reservation.prestation.manifestation.nom", read_only=True
+    )
+
+    class Meta(ReturnIncidentSerializer.Meta):
+        """Ajoute le contexte d'affichage aux champs de base."""
+
+        fields = ReturnIncidentSerializer.Meta.fields + [
+            "part_name",
+            "reservation_id",
+            "reservation_number",
+            "event_name",
+        ]
+        read_only_fields = ReturnIncidentSerializer.Meta.read_only_fields + [
+            "part_name",
+            "reservation_id",
+            "reservation_number",
+            "event_name",
+        ]
 
 
 class ReservationStatusLogSerializer(serializers.ModelSerializer):
@@ -197,6 +475,43 @@ class ReservationTransitionSerializer(serializers.Serializer):
     )
 
 
+class CheckinLigneSerializer(serializers.Serializer):
+    """Une ligne de check-in retour (SCRUM-94) : OK / manquant / cassé + commentaire.
+
+    La validation de la somme (== quantité demandée) se fait au niveau de la
+    vue, une fois la ligne de réservation résolue par `id`.
+
+    `commentaire` n'a volontairement pas de valeur par défaut : absent du
+    payload, il reste absent de `validated_data`, et la vue laisse alors
+    intact le commentaire déjà saisi sur la ligne de réservation.
+    """
+
+    id = serializers.IntegerField(required=True)
+    ok = serializers.IntegerField(required=True, min_value=0)
+    manquant = serializers.IntegerField(required=True, min_value=0)
+    casse = serializers.IntegerField(required=True, min_value=0)
+    commentaire = serializers.CharField(required=False, allow_blank=True)
+
+
+class ReservationCheckinSerializer(serializers.Serializer):
+    """Payload du check-in retour d'une réservation (POST checkin)."""
+
+    lignes = CheckinLigneSerializer(many=True, required=True)
+
+
+class RetourLigneSerializer(serializers.Serializer):
+    """Une ligne du bon de réservation avec sa quantité rendue (SCRUM-95)."""
+
+    id = serializers.IntegerField(required=True)
+    quantite_rendue = serializers.IntegerField(required=True, min_value=0)
+
+
+class PrestationRetourSerializer(serializers.Serializer):
+    """Payload de déclaration du retour d'une prestation (POST retour)."""
+
+    lignes = RetourLigneSerializer(many=True, required=True)
+
+
 class ReservationSerializer(serializers.ModelSerializer):
     """Sérialiseur DRF pour le modèle Reservation, avec lignes imbriquées."""
 
@@ -238,12 +553,7 @@ class ReservationSerializer(serializers.ModelSerializer):
     def _user_label(user):
         """Nom lisible d'un utilisateur : « Prénom Nom (username) », sinon username."""
 
-        if user is None:
-            return ""
-
-        full_name = f"{user.first_name} {user.last_name}".strip()
-
-        return f"{full_name} ({user.username})" if full_name else user.username
+        return _user_label(user)
 
     def get_demandeur_nom(self, obj):
         """Nom lisible du demandeur."""
@@ -717,6 +1027,79 @@ class LieuSerializer(serializers.ModelSerializer):
 
         validated_data["latitude"] = result.get("latitude")
         validated_data["longitude"] = result.get("longitude")
+
+
+class DeliveryLigneSerializer(serializers.ModelSerializer):
+    """Ligne de matériel d'une livraison, avec le nom de l'article (lecture seule)."""
+
+    part_name = serializers.CharField(source="part.name", read_only=True)
+
+    class Meta:
+        """Configuration du serializer DeliveryLigne."""
+
+        model = LigneReservation
+        fields = ["id", "part", "part_name", "quantite_demandee"]
+        read_only_fields = fields
+
+
+class DeliverySerializer(serializers.ModelSerializer):
+    """Vue « tournée livreur » d'une réservation validée (US livreur).
+
+    Réutilise `Reservation` en lecture seule, enrichi des informations dont
+    un livreur a besoin pour organiser sa tournée : lieu géolocalisé,
+    contact de l'organisateur, matériel et quantité totale. Sérialiseur
+    dédié (plutôt qu'extension de `ReservationSerializer`) pour ne pas
+    changer la forme du payload consommé par le formulaire de réservation.
+    """
+
+    prestation_nom = serializers.CharField(source="prestation.nom", read_only=True)
+    demandeur_nom = serializers.SerializerMethodField()
+    lieu_detail = LieuSerializer(source="prestation.lieu", read_only=True)
+    organisateur_nom = serializers.SerializerMethodField()
+    organisateur_telephone = serializers.SerializerMethodField()
+    lignes = DeliveryLigneSerializer(many=True, read_only=True)
+    quantite_totale = serializers.SerializerMethodField()
+
+    class Meta:
+        """Configuration du serializer Delivery."""
+
+        model = Reservation
+        fields = [
+            "id",
+            "numero",
+            "statut",
+            "prestation_nom",
+            "demandeur_nom",
+            "lieu_detail",
+            "organisateur_nom",
+            "organisateur_telephone",
+            "date_retrait_prevue",
+            "date_retour_prevue",
+            "commentaire",
+            "lignes",
+            "quantite_totale",
+        ]
+        read_only_fields = fields
+
+    def get_demandeur_nom(self, obj):
+        """Nom lisible du demandeur (gérant interne)."""
+
+        return _user_label(obj.demandeur)
+
+    def get_organisateur_nom(self, obj):
+        """Nom lisible de l'organisateur de la manifestation."""
+
+        return _user_label(obj.prestation.manifestation.organisateur)
+
+    def get_organisateur_telephone(self, obj):
+        """Téléphone de l'organisateur, vide si non renseigné."""
+
+        return _user_phone(obj.prestation.manifestation.organisateur)
+
+    def get_quantite_totale(self, obj):
+        """Somme des quantités demandées sur toutes les lignes (déjà prefetchées)."""
+
+        return sum(ligne.quantite_demandee for ligne in obj.lignes.all())
 
 
 class CatalogPartSerializer(serializers.Serializer):
