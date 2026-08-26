@@ -20,6 +20,11 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
+import {
+  PRINT_AREA,
+  PRINT_HIDE,
+  PrintableModalStyles
+} from '../print/printableModal';
 import { ownsKeys, syncOwnedParams } from '../urlState';
 import {
   buildRamassageQuery,
@@ -401,29 +406,13 @@ export function RamassagesList({
           </Alert>
         ) : bonQuery.data ? (
           <Stack gap='md'>
-            {/* Sans ces règles, `window.print()` imprime tout le dashboard —
-                même approche que DeliveryNote (bon de livraison). */}
-            <style>{`
-              @media print {
-                body * { visibility: hidden; }
-                .ramassage-print-area, .ramassage-print-area * {
-                  visibility: visible;
-                }
-                .ramassage-print-area {
-                  position: absolute;
-                  top: 0;
-                  left: 0;
-                  width: 100%;
-                }
-                .ramassage-print-hide { display: none !important; }
-              }
-            `}</style>
+            <PrintableModalStyles />
 
-            <Group justify='flex-end' className='ramassage-print-hide'>
+            <Group justify='flex-end' className={PRINT_HIDE}>
               <Button onClick={() => window.print()}>Imprimer</Button>
             </Group>
 
-            <div className='ramassage-print-area'>
+            <div className={PRINT_AREA}>
               <BonRamassageContent bon={bonQuery.data} />
             </div>
           </Stack>

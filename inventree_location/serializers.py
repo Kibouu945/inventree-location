@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -19,7 +20,6 @@ from .models import (
     LigneReservation,
     Lieu,
     Manifestation,
-    Profile,
     Reservation,
     ReservationStatusLog,
     Prestation,
@@ -148,6 +148,15 @@ def _user_phone(user):
     `Profile` n'est jamais auto-créé (pas de signal) : l'accès reverse
     OneToOne lève `Profile.DoesNotExist`, pas une `AttributeError` — un
     `getattr(user, "location_profile", None)` ne l'attraperait pas.
+
+    On attrape `ObjectDoesNotExist`, la classe mère de Django, et non
+    `Profile.DoesNotExist` : dans le conteneur, le chargeur de plugins importe
+    `inventree_location.models` deux fois, si bien que le `Profile` de ce module
+    n'est pas celui auquel la relation inverse est rattachée. Un `except
+    Profile.DoesNotExist` ne filtrait donc rien et `/deliveries/` répondait 500
+    (« User has no location_profile. ») pour tout utilisateur sans profil. La
+    suite pytest ne peut pas voir ce cas : hors InvenTree, le module n'existe
+    qu'en un seul exemplaire.
     """
 
     if user is None:
@@ -155,7 +164,7 @@ def _user_phone(user):
 
     try:
         return user.location_profile.telephone
-    except Profile.DoesNotExist:
+    except ObjectDoesNotExist:
         return ""
 
 
