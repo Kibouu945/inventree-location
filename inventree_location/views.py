@@ -49,6 +49,7 @@ from .permissions import (
     RoleBasedPermission,
 )
 from .serializers import (
+    BonRamassageSerializer,
     CatalogPartSerializer,
     DeliverySerializer,
     ExampleSerializer,
@@ -57,6 +58,7 @@ from .serializers import (
     ManifestationSerializer,
     PrestationRetourSerializer,
     PrestationSerializer,
+    RamassageSerializer,
     RentableItemSerializer,
     ReservationCheckinSerializer,
     ReservationSerializer,
@@ -380,6 +382,147 @@ class ReservationDetailView(generics.RetrieveUpdateDestroyAPIView):
                 "detail": "Seule une réservation en brouillon peut être supprimée."
             })
         instance.delete()
+
+
+class RamassageListView(generics.ListAPIView):
+    """SCRUM-89 — Liste des ramassages à effectuer.
+
+    Un ramassage correspond à une réservation avec une date de retour prévue.
+
+    Filtres disponibles :
+    - date_from : ramassages dont la date de retour prévue est >= à cette date
+    - date_to   : ramassages dont la date de retour prévue est <= à cette date
+    - lieu      : recherche sur le nom ou l'adresse du lieu
+    - statut    : filtre sur un ou plusieurs statuts
+    - search    : recherche sur numéro, prestation, manifestation ou demandeur
+    """
+
+    serializer_class = RamassageSerializer
+    permission_classes = [ReservationPermission]
+    pagination_class = LieuPagination
+
+    def get_queryset(self):
+        """Retourne les réservations à ramasser."""
+
+        queryset = (
+            Reservation.objects.select_related(
+                "prestation",
+                "prestation__manifestation",
+                "prestation__lieu",
+                "demandeur",
+            )
+            .prefetch_related(
+                "lignes",
+            )
+            .filter(date_retour_prevue__isnull=False)
+            .exclude(
+                statut__in=[
+                    StatutReservation.ANNULEE,
+                    StatutReservation.REFUSEE,
+                    StatutReservation.CLOTUREE,
+                ]
+            )
+            .order_by("date_retour_prevue")
+        )
+
+        # Un livreur pur ne voit que les réservations validées, comme sur
+        # `reservations/` et `deliveries/` (cf. roles.py).
+        if roles.sees_only_deliverable_reservations(self.request.user):
+            queryset = queryset.filter(statut=StatutReservation.VALIDEE)
+
+        date_from = self.request.query_params.get("date_from")
+        date_to = self.request.query_params.get("date_to")
+        lieu = self.request.query_params.get("lieu")
+        search = self.request.query_params.get("search")
+        statuts = self.request.query_params.getlist("statut")
+
+        if not statuts:
+            statut_param = self.request.query_params.get("statut")
+
+            if statut_param:
+                statuts = [
+                    value.strip() for value in statut_param.split(",") if value.strip()
+                ]
+
+        if statuts:
+            queryset = queryset.filter(statut__in=statuts)
+
+        if date_from:
+            queryset = queryset.filter(date_retour_prevue__gte=date_from)
+
+        if date_to:
+            queryset = queryset.filter(date_retour_prevue__lte=date_to)
+
+        if lieu:
+            queryset = queryset.filter(
+                Q(prestation__lieu__nom__icontains=lieu)
+                | Q(prestation__lieu__adresse__icontains=lieu)
+            )
+
+        if search:
+            queryset = queryset.filter(
+                Q(numero__icontains=search)
+                | Q(prestation__nom__icontains=search)
+                | Q(prestation__manifestation__nom__icontains=search)
+                | Q(demandeur__username__icontains=search)
+                | Q(demandeur__first_name__icontains=search)
+                | Q(demandeur__last_name__icontains=search)
+            )
+
+        return queryset
+
+
+class BonRamassageView(APIView):
+    """SCRUM-89 — Bon de ramassage imprimable."""
+
+    permission_classes = [ReservationPermission]
+    serializer_class = BonRamassageSerializer
+
+    def get(self, request, pk, *args, **kwargs):
+        """Retourne les données nécessaires pour imprimer un bon de ramassage."""
+
+        reservation = (
+            Reservation.objects.select_related(
+                "prestation",
+                "prestation__manifestation",
+                "prestation__lieu",
+                "demandeur",
+            )
+            .prefetch_related(
+                "lignes",
+                "lignes__part",
+            )
+            .filter(pk=pk)
+            .first()
+        )
+
+        if reservation is None:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Même restriction que la liste : un livreur pur n'imprime pas le bon
+        # d'une réservation qu'il n'a pas le droit de voir.
+        if (
+            roles.sees_only_deliverable_reservations(request.user)
+            and reservation.statut != StatutReservation.VALIDEE
+        ):
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = self.serializer_class(reservation)
+
+        return Response(
+            {
+                "titre": f"Bon de ramassage {reservation.numero}",
+                "generated_at": timezone.now(),
+                "reservation": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class ReservationConflictCheckView(APIView):
@@ -1491,6 +1634,8 @@ class CatalogPartDetailView(APIView):
     serializer_class = CatalogPartSerializer
 
     def get(self, request, pk, *args, **kwargs):
+        """Retourne le détail d'un article du catalogue."""
+
         from part.models import Part
 
         part = (
@@ -1513,6 +1658,7 @@ class CatalogPartDetailView(APIView):
         )
 
         serializer = self.serializer_class(part)
+
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 

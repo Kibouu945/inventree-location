@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -19,7 +20,6 @@ from .models import (
     LigneReservation,
     Lieu,
     Manifestation,
-    Profile,
     Reservation,
     ReservationStatusLog,
     Prestation,
@@ -148,6 +148,15 @@ def _user_phone(user):
     `Profile` n'est jamais auto-créé (pas de signal) : l'accès reverse
     OneToOne lève `Profile.DoesNotExist`, pas une `AttributeError` — un
     `getattr(user, "location_profile", None)` ne l'attraperait pas.
+
+    On attrape `ObjectDoesNotExist`, la classe mère de Django, et non
+    `Profile.DoesNotExist` : dans le conteneur, le chargeur de plugins importe
+    `inventree_location.models` deux fois, si bien que le `Profile` de ce module
+    n'est pas celui auquel la relation inverse est rattachée. Un `except
+    Profile.DoesNotExist` ne filtrait donc rien et `/deliveries/` répondait 500
+    (« User has no location_profile. ») pour tout utilisateur sans profil. La
+    suite pytest ne peut pas voir ce cas : hors InvenTree, le module n'existe
+    qu'en un seul exemplaire.
     """
 
     if user is None:
@@ -155,7 +164,7 @@ def _user_phone(user):
 
     try:
         return user.location_profile.telephone
-    except Profile.DoesNotExist:
+    except ObjectDoesNotExist:
         return ""
 
 
@@ -571,8 +580,9 @@ class ReservationSerializer(serializers.ModelSerializer):
         Une réservation en statut `brouillon` peut être sauvegardée
         incomplète. Dès qu'elle est soumise (ou plus), le demandeur, la
         prestation, la période, au moins une ligne et au moins un article
-        virtuel (ex: prestation de nettoyage) deviennent obligatoires, et la
-        période doit couvrir au minimum les dates de la prestation.
+        virtuel (ex: prestation de nettoyage) deviennent obligatoires, la
+        période doit couvrir au minimum les dates de la prestation, et les
+        objets référencés doivent être actifs et louables.
         """
 
         statut = attrs.get(
@@ -600,6 +610,7 @@ class ReservationSerializer(serializers.ModelSerializer):
             errors["date_retrait_prevue"] = (
                 "La date de retrait est obligatoire pour soumettre la réservation."
             )
+
         if not date_retour:
             errors["date_retour_prevue"] = (
                 "La date de retour est obligatoire pour soumettre la réservation."
@@ -615,6 +626,7 @@ class ReservationSerializer(serializers.ModelSerializer):
                     errors["date_retrait_prevue"] = (
                         "La période doit couvrir au moins les dates de la prestation."
                     )
+
                 if date_retour < prestation.date_fin:
                     errors["date_retour_prevue"] = (
                         "La période doit couvrir au moins les dates de la prestation."
@@ -637,18 +649,53 @@ class ReservationSerializer(serializers.ModelSerializer):
                 for ligne in lignes
             ]
 
-            if not RentableItem.objects.filter(
-                part_id__in=part_ids, is_virtual=True
+            # Les trois règles portent sur la même clé : on les cumule au lieu
+            # de les écraser, sinon un objet inactif remontait « il manque un
+            # article virtuel » — un message qui ne désigne pas le problème.
+            lignes_errors = []
+
+            if self._has_inactive_part(part_ids):
+                lignes_errors.append(
+                    "Un objet non actif ne peut pas être ajouté à une réservation."
+                )
+
+            if RentableItem.objects.filter(
+                part_id__in=part_ids,
+                is_rentable=False,
             ).exists():
-                errors["lignes"] = (
+                lignes_errors.append(
+                    "Un objet non louable ne peut pas être ajouté à une réservation."
+                )
+
+            if not RentableItem.objects.filter(
+                part_id__in=part_ids,
+                is_virtual=True,
+            ).exists():
+                lignes_errors.append(
                     "Au moins un article virtuel (ex: prestation de nettoyage) "
                     "est obligatoire pour soumettre la réservation."
                 )
+
+            if lignes_errors:
+                errors["lignes"] = lignes_errors
 
         if errors:
             raise serializers.ValidationError(errors)
 
         return attrs
+
+    @staticmethod
+    def _has_inactive_part(part_ids) -> bool:
+        """Vrai si au moins une des Parts est désactivée côté InvenTree.
+
+        Le contrôle porte sur `Part.active` et non sur `RentableItem` : une
+        Part sans extension louable l'est par défaut, mais elle peut très bien
+        être désactivée — passer par `RentableItem` laissait filtrer ces Parts.
+        """
+
+        from part.models import Part
+
+        return Part.objects.filter(pk__in=part_ids, active=False).exists()
 
     @transaction.atomic
     def create(self, validated_data):
@@ -712,6 +759,136 @@ class ReservationSerializer(serializers.ModelSerializer):
             })
 
 
+class RamassageSerializer(serializers.ModelSerializer):
+    """Sérialiseur pour SCRUM-89 : liste des ramassages à effectuer."""
+
+    prestation_nom = serializers.CharField(source="prestation.nom", read_only=True)
+    manifestation_nom = serializers.CharField(
+        source="prestation.manifestation.nom",
+        read_only=True,
+    )
+    demandeur_nom = serializers.SerializerMethodField()
+    date_ramassage = serializers.DateTimeField(
+        source="date_retour_prevue",
+        read_only=True,
+    )
+    lieu = serializers.SerializerMethodField()
+    nb_objets = serializers.SerializerMethodField()
+    quantite_totale = serializers.SerializerMethodField()
+    recap_par_vehicule = serializers.SerializerMethodField()
+
+    class Meta:
+        """Configuration du serializer Ramassage."""
+
+        model = Reservation
+        fields = [
+            "id",
+            "numero",
+            "prestation",
+            "prestation_nom",
+            "manifestation_nom",
+            "demandeur",
+            "demandeur_nom",
+            "statut",
+            "date_ramassage",
+            "date_retrait_prevue",
+            "date_retour_prevue",
+            "lieu",
+            "nb_objets",
+            "quantite_totale",
+            "recap_par_vehicule",
+        ]
+
+    def get_demandeur_nom(self, obj):
+        """Nom lisible du demandeur."""
+
+        return ReservationSerializer._user_label(obj.demandeur)
+
+    def get_lieu(self, obj):
+        """Lieu de la prestation, ou None (ORG-02 : un seul lieu, nullable)."""
+
+        lieu = obj.prestation.lieu
+
+        if lieu is None:
+            return None
+
+        return {
+            "id": lieu.id,
+            "nom": lieu.nom,
+            "adresse": lieu.adresse,
+            "latitude": str(lieu.latitude) if lieu.latitude is not None else None,
+            "longitude": str(lieu.longitude) if lieu.longitude is not None else None,
+        }
+
+    def get_nb_objets(self, obj):
+        """Nombre de lignes à ramasser.
+
+        `len()` sur le prefetch plutôt que `.count()`, qui repartirait en base
+        une fois par ligne de la liste.
+        """
+
+        return len(obj.lignes.all())
+
+    def get_quantite_totale(self, obj):
+        """Quantité totale à ramasser."""
+
+        total = 0
+
+        for ligne in obj.lignes.all():
+            total += ligne.quantite_livree or ligne.quantite_demandee or 0
+
+        return total
+
+    def get_recap_par_vehicule(self, obj):
+        """Récap quantité totale par véhicule.
+
+        MVP : aucun modèle véhicule n'existe encore.
+        On retourne donc un regroupement "Non attribué".
+        """
+
+        return [
+            {
+                "vehicule": "Non attribué",
+                "quantite_totale": self.get_quantite_totale(obj),
+            }
+        ]
+
+
+class BonRamassageSerializer(RamassageSerializer):
+    """Sérialiseur détaillé pour le bon de ramassage imprimable."""
+
+    lignes = serializers.SerializerMethodField()
+
+    class Meta(RamassageSerializer.Meta):
+        """Configuration du serializer BonRamassage."""
+
+        fields = RamassageSerializer.Meta.fields + [
+            "lignes",
+            "commentaire",
+        ]
+
+    def get_lignes(self, obj):
+        """Détail des articles à ramasser."""
+
+        lignes = []
+
+        # Pas de `select_related` ici : la vue a déjà préchargé `lignes__part`,
+        # et le rajouter annulerait ce prefetch au profit d'une requête neuve.
+        for ligne in obj.lignes.all():
+            lignes.append({
+                "part": ligne.part_id,
+                "part_nom": ligne.part.name,
+                "quantite_demandee": ligne.quantite_demandee,
+                "quantite_livree": ligne.quantite_livree,
+                "quantite_a_ramasser": ligne.quantite_livree or ligne.quantite_demandee,
+                "quantite_retournee": ligne.quantite_retournee,
+                "etat_retour": ligne.etat_retour,
+                "commentaire": ligne.commentaire,
+            })
+
+        return lignes
+
+
 class RentableItemSerializer(serializers.ModelSerializer):
     """Drapeaux location d'un Part.
 
@@ -758,7 +935,7 @@ class ExampleSerializer(serializers.Serializer):
 
     part_count = serializers.IntegerField(
         label="Number of Parts",
-        help_text="Total number of parts in the InvenTree database.",
+        help_text="Total number of Parts in the InvenTree database.",
     )
 
     today = serializers.DateField(
@@ -972,7 +1149,7 @@ class DeliverySerializer(serializers.ModelSerializer):
 
 
 class CatalogPartSerializer(serializers.Serializer):
-    """Serializer used to expose InvenTree parts in the rental catalog."""
+    """Serializer used to expose InvenTree Parts in the rental catalog."""
 
     id = serializers.IntegerField(read_only=True)
     name = serializers.CharField(read_only=True)
@@ -991,9 +1168,11 @@ class CatalogPartSerializer(serializers.Serializer):
     seuil_alerte_haut = serializers.SerializerMethodField()
 
     def get_stock_available(self, obj):
-        """Stock disponible de la part, exposé à 0 si non renseigné."""
+        """Stock disponible de la Part, exposé à 0 si non renseigné."""
+
         for attr in ["stock_available", "available_stock"]:
             value = getattr(obj, attr, None)
+
             if value is not None:
                 try:
                     return float(value)
@@ -1004,15 +1183,25 @@ class CatalogPartSerializer(serializers.Serializer):
 
     def get_image_url(self, obj):
         """URL de l'image principale si le modèle en expose une."""
+
         for attr in ["image", "image_url", "thumbnail", "thumbnail_url"]:
             value = getattr(obj, attr, None)
+
             if value:
                 return str(value)
 
         return None
 
     def get_rentable(self, obj):
-        """Drapeau louable issu de RentableItem."""
+        """Drapeau louable issu de RentableItem.
+
+        Une Part désactivée côté InvenTree n'est jamais louable, quels que
+        soient ses drapeaux plugin (SCRUM-111 : « Désactiver » dans le
+        back-office doit sortir l'objet du catalogue louable).
+        """
+
+        if not bool(getattr(obj, "active", True)):
+            return False
 
         rentable_info = getattr(obj, "rentable_info", None)
 
@@ -1033,6 +1222,7 @@ class CatalogPartSerializer(serializers.Serializer):
 
     def get_is_virtual(self, obj):
         """Drapeau article virtuel issu de RentableItem (False par défaut)."""
+
         rentable_info = getattr(obj, "rentable_info", None)
 
         if rentable_info is None:
@@ -1118,7 +1308,8 @@ class PrestationSerializer(serializers.ModelSerializer):
     """
 
     manifestation_nom = serializers.CharField(
-        source="manifestation.nom", read_only=True
+        source="manifestation.nom",
+        read_only=True,
     )
     lieu_detail = LieuSerializer(source="lieu", read_only=True)
     lignes = LignePrestationSerializer(

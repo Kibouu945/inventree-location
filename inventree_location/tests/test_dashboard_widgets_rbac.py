@@ -19,18 +19,26 @@ User = get_user_model()
 
 CATALOG = "inventree-location-catalog"
 RESERVATIONS = "inventree-location-reservations"
+RAMASSAGES = "inventree-location-ramassages"
 CONFLICTS = "inventree-location-conflicts"
 ORGANISATION = "inventree-location-organisation"
 STOCK_ALERTS = "inventree-location-stock-alerts"
 DELIVERIES = "inventree-location-deliveries"
+BACKOFFICE_USERS = "inventree-location-backoffice-users"
+BACKOFFICE_PARTS = "inventree-location-backoffice-parts"
 
 #: Dérivé du mapping et non figé en dur : un widget ajouté à
 #: ``DASHBOARD_WIDGET_ROLES`` sans toucher ce test faisait échouer cinq cas d'un
 #: coup, sans que la régression concerne les rôles.
 ALL_WIDGETS = set(roles.DASHBOARD_WIDGET_ROLES)
-#: Widgets vus par un lecteur : tous sauf les tournées livreur, réservées aux
-#: rôles qui les exécutent.
-LECTEUR_WIDGETS = ALL_WIDGETS - {DELIVERIES}
+
+#: Les back-offices sont réservés à l'admin : tous les autres rôles voient
+#: l'ensemble des widgets *sauf* ceux-là.
+BACKOFFICE_WIDGETS = {BACKOFFICE_USERS, BACKOFFICE_PARTS}
+
+#: Widgets vus par un lecteur : ni back-offices, ni les écrans d'exploitation
+#: (ramassages, tournées livreur) réservés aux rôles qui les exécutent.
+LECTEUR_WIDGETS = ALL_WIDGETS - BACKOFFICE_WIDGETS - {RAMASSAGES, DELIVERIES}
 
 
 def _make_user(username, role=None, *, is_staff=False, is_superuser=False):
@@ -71,13 +79,14 @@ class TestVisibleDashboardWidgetKeys:
         "role, expected",
         [
             (roles.ADMIN, ALL_WIDGETS),
-            (roles.GESTIONNAIRE, ALL_WIDGETS),
+            (roles.GESTIONNAIRE, ALL_WIDGETS - BACKOFFICE_WIDGETS),
             (roles.LECTEUR, LECTEUR_WIDGETS),
             # Le magasinier suit la disponibilité future et l'inventaire :
             # les alertes de seuil le concernent (US-09).
-            (roles.MAGASINIER, {CATALOG, RESERVATIONS, STOCK_ALERTS}),
+            (roles.MAGASINIER, {CATALOG, RESERVATIONS, RAMASSAGES, STOCK_ALERTS}),
             (roles.ORGANISATEUR, {RESERVATIONS, ORGANISATION}),
-            (roles.LIVREUR, {RESERVATIONS, DELIVERIES}),
+            (roles.LIVREUR, {RESERVATIONS, RAMASSAGES, DELIVERIES}),
+            (roles.ACHETEUR, {CATALOG}),
             (roles.SAV, set()),
         ],
     )
