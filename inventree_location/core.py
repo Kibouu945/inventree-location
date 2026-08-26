@@ -18,18 +18,27 @@ class InvenTreeLocation(
 ):
     """InvenTreeLocation - custom InvenTree plugin."""
 
+    # Plugin metadata
     TITLE = "InvenTree Location"
     NAME = "InvenTreeLocation"
     SLUG = "inventree-location"
     DESCRIPTION = "Module de gestion des locations événementielles pour InvenTree"
     VERSION = PLUGIN_VERSION
 
+    # Additional project information
     AUTHOR = "groupe-6"
     WEBSITE = "https://github.com/Kibouu945/inventree-location"
     LICENSE = "MIT"
 
+    # Optionally specify supported InvenTree versions
+    # MIN_VERSION = '0.18.0'
+    # MAX_VERSION = '2.0.0'
+
+    # Render custom UI elements to the plugin settings page
     ADMIN_SOURCE = "Settings.js:renderPluginSettings"
 
+    # Plugin settings (from SettingsMixin)
+    # Ref: https://docs.inventree.org/en/latest/plugins/mixins/settings/
     SETTINGS = {
         "CUSTOM_VALUE": {
             "name": "Custom Value",
@@ -39,21 +48,22 @@ class InvenTreeLocation(
         }
     }
 
+    # Respond to InvenTree events (from EventMixin)
+    # Ref: https://docs.inventree.org/en/latest/plugins/mixins/event/
     def wants_process_event(self, event: str) -> bool:
         """Return True if the plugin wants to process the given event."""
-
         return event == "part_part.created"
 
     def process_event(self, event: str, *args, **kwargs) -> None:
         """Process the provided event."""
-
         print("Processing custom event:", event)
         print("Arguments:", args)
         print("Keyword arguments:", kwargs)
 
+    # Custom URL endpoints (from UrlsMixin)
+    # Ref: https://docs.inventree.org/en/latest/plugins/mixins/urls/
     def setup_urls(self):
         """Configure custom URL endpoints for this plugin."""
-
         from django.urls import path
 
         from .backoffice import (
@@ -76,18 +86,33 @@ class InvenTreeLocation(
             CatalogPartDetailView,
             CatalogPartListView,
             ConflictsListView,
+            DeliveryListView,
             ExampleView,
             GeocodeAddressView,
+            GroupeListView,
             LieuDetailView,
             LieuListCreateView,
-            PrestationListView,
+            ManifestationDetailView,
+            ManifestationListCreateView,
+            PrestationDetailView,
+            PrestationListCreateView,
+            PrestationStockPreviewView,
+            PrestationStockView,
             RamassageListView,
             RentableFlagBulkUpdateView,
             RentablePartDetailView,
+            ReservationCheckinView,
             ReservationConflictCheckView,
             ReservationDetailView,
             ReservationListCreateView,
+            ReservationRetourView,
             ReservationTransitionView,
+            ReturnIncidentDetailView,
+            ReturnIncidentHistoryView,
+            ReturnIncidentListCreateView,
+            ReturnReportPdfView,
+            ReturnReportView,
+            StockAlertListView,
             UserListView,
         )
 
@@ -128,9 +153,86 @@ class InvenTreeLocation(
                 name="reservation-transition",
             ),
             path(
+                "reservations/<int:pk>/retour/",
+                ReservationRetourView.as_view(),
+                name="reservation-retour",
+            ),
+            path(
+                "reservations/<int:pk>/checkin/",
+                ReservationCheckinView.as_view(),
+                name="reservation-checkin",
+            ),
+            path(
+                "returns/incidents/",
+                ReturnIncidentListCreateView.as_view(),
+                name="return-incident-list",
+            ),
+            path(
+                "returns/history/",
+                ReturnIncidentHistoryView.as_view(),
+                name="return-incident-history",
+            ),
+            path(
+                "returns/incidents/<int:pk>/",
+                ReturnIncidentDetailView.as_view(),
+                name="return-incident-detail",
+            ),
+            path(
+                "returns/reports/<int:pk>/",
+                ReturnReportView.as_view(),
+                name="return-report",
+            ),
+            path(
+                "returns/reports/<int:pk>/pdf/",
+                ReturnReportPdfView.as_view(),
+                name="return-report-pdf",
+            ),
+            path("conflicts/", ConflictsListView.as_view(), name="conflict-list"),
+            path("deliveries/", DeliveryListView.as_view(), name="delivery-list"),
+            path(
                 "reservations/<int:pk>/conflicts/",
                 ReservationConflictCheckView.as_view(),
                 name="reservation-conflict-check",
+            ),
+            path(
+                "manifestations/",
+                ManifestationListCreateView.as_view(),
+                name="manifestation-list-create",
+            ),
+            path(
+                "manifestations/<int:pk>/",
+                ManifestationDetailView.as_view(),
+                name="manifestation-detail",
+            ),
+            path(
+                "prestations/",
+                PrestationListCreateView.as_view(),
+                name="prestation-list-create",
+            ),
+            path(
+                "prestations/stock-preview/",
+                PrestationStockPreviewView.as_view(),
+                name="prestation-stock-preview",
+            ),
+            path(
+                "prestations/<int:pk>/",
+                PrestationDetailView.as_view(),
+                name="prestation-detail",
+            ),
+            path(
+                "prestations/<int:pk>/stock/",
+                PrestationStockView.as_view(),
+                name="prestation-stock",
+            ),
+            path(
+                "groupes/",
+                GroupeListView.as_view(),
+                name="groupe-list",
+            ),
+            path(
+                "users/",
+                UserListView.as_view(),
+                name="user-list",
             ),
             path(
                 "ramassages/",
@@ -187,21 +289,18 @@ class InvenTreeLocation(
                 BackOfficeRoleListView.as_view(),
                 name="backoffice-role-list",
             ),
-            path("conflicts/", ConflictsListView.as_view(), name="conflict-list"),
             path(
-                "prestations/",
-                PrestationListView.as_view(),
-                name="prestation-list",
-            ),
-            path(
-                "users/",
-                UserListView.as_view(),
-                name="user-list",
+                "alerts/stock/",
+                StockAlertListView.as_view(),
+                name="stock-alert-list",
             ),
         ]
 
+    # User interface elements (from UserInterfaceMixin)
+    # Ref: https://docs.inventree.org/en/latest/plugins/mixins/ui/
+
     def get_ui_panels(self, request, context: dict, **kwargs):
-        """Return custom panels for the InvenTree user interface."""
+        """Return a list of custom panels to be rendered in the InvenTree user interface."""
 
         panels = []
 
@@ -236,8 +335,9 @@ class InvenTreeLocation(
         return panels
 
     def get_ui_dashboard_items(self, request, context: dict, **kwargs):
-        """Return custom dashboard items for the InvenTree user interface."""
+        """Return a list of custom dashboard items to be rendered in the InvenTree user interface."""
 
+        # Filtrage RBAC métier basé sur les 7 groupes (cf. roles.py)
         visible_keys = roles.visible_dashboard_widget_keys(request.user)
 
         if not visible_keys:
@@ -257,6 +357,31 @@ class InvenTreeLocation(
                 "source": self.plugin_static_file(
                     "Catalog.js:renderInvenTreeLocationCatalog"
                 ),
+                # Seul widget à ne pas déclarer sa taille, il retombait sur la
+                # boîte par défaut : un tableau de 5 colonnes y tenait dans une
+                # colonne, illisible. Même gabarit que les autres écrans.
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-organisation"):
+            items.append({
+                "key": "inventree-location-organisation",
+                "title": "Organisation",
+                "description": ("Gestion des manifestations, prestations et lieux"),
+                "icon": "ti:calendar-cog:outline",
+                "source": self.plugin_static_file(
+                    "Organisation.js:renderInvenTreeLocationOrganisation"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
                 "context": {
                     "settings": self.get_settings_dict(),
                 },
@@ -271,9 +396,73 @@ class InvenTreeLocation(
                 "source": self.plugin_static_file(
                     "Reservations.js:renderInvenTreeLocationReservations"
                 ),
+                # Liste dense (filtres + tableau + modale)
                 "options": {
                     "width": 12,
                     "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-deliveries"):
+            items.append({
+                "key": "inventree-location-deliveries",
+                "title": "Tournées livreur",
+                "description": "Livraisons à effectuer, filtrables par date / lieu / statut",
+                "icon": "ti:truck-delivery:outline",
+                "source": self.plugin_static_file(
+                    "Deliveries.js:renderInvenTreeLocationDeliveries"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-conflicts"):
+            conflicts_count = 0
+
+            try:
+                from .conflicts import count_current_conflicts
+
+                conflicts_count = count_current_conflicts()
+            except Exception:
+                conflicts_count = 0
+
+            items.append({
+                "key": "inventree-location-conflicts",
+                "title": f"Conflits actuels ({conflicts_count})",
+                "description": "Liste des réservations actuellement en conflit",
+                "icon": "ti:alert-triangle:outline",
+                "source": self.plugin_static_file(
+                    "Conflicts.js:renderInvenTreeLocationConflicts"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-stock-alerts"):
+            items.append({
+                "key": "inventree-location-stock-alerts",
+                "title": "Alertes stock",
+                "description": "Seuils bas/hauts et tension projetée",
+                "icon": "ti:bell-ringing:outline",
+                "source": self.plugin_static_file(
+                    "Dashboard.js:renderInvenTreeLocationDashboardItem"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 6,
                 },
                 "context": {
                     "settings": self.get_settings_dict(),
@@ -362,18 +551,3 @@ class InvenTreeLocation(
             })
 
         return items
-
-    def get_ui_spotlight_actions(self, request, context, **kwargs):
-        """Return custom spotlight actions."""
-
-        return [
-            {
-                "key": "sample-spotlight-action",
-                "title": "Hello Action",
-                "description": "Hello from InvenTreeLocation",
-                "icon": "ti:heart-handshake:outline",
-                "source": self.plugin_static_file(
-                    "Spotlight.js:InvenTreeLocationSpotlightAction"
-                ),
-            }
-        ]

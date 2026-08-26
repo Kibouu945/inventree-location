@@ -35,7 +35,9 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
     """Sérialiseur back-office d'un utilisateur Django + rôles plugin."""
 
     roles = serializers.ListField(
-        child=serializers.ChoiceField(choices=[(role, role) for role in roles.ALL_ROLES]),
+        child=serializers.ChoiceField(
+            choices=[(role, role) for role in roles.ALL_ROLES]
+        ),
         required=False,
         allow_empty=True,
     )
@@ -158,14 +160,11 @@ class BackOfficeUserListCreateView(generics.ListCreateAPIView):
         search = self.request.query_params.get("search", "").strip()
 
         if search:
-            queryset = queryset.filter(
-                username__icontains=search
-            ) | queryset.filter(
-                first_name__icontains=search
-            ) | queryset.filter(
-                last_name__icontains=search
-            ) | queryset.filter(
-                email__icontains=search
+            queryset = (
+                queryset.filter(username__icontains=search)
+                | queryset.filter(first_name__icontains=search)
+                | queryset.filter(last_name__icontains=search)
+                | queryset.filter(email__icontains=search)
             )
 
         return queryset.distinct()

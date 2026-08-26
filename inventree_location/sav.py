@@ -149,7 +149,9 @@ def _close_or_update_ticket(
             ticket.quantite = 0
             ticket.updated_by = user
             ticket.closed_at = timezone.now()
-            ticket.resolution = "Ticket clôturé automatiquement car quantité remise à 0."
+            ticket.resolution = (
+                "Ticket clôturé automatiquement car quantité remise à 0."
+            )
             ticket.save()
 
         return None
@@ -191,16 +193,20 @@ class RetourRamassageLigneSerializer(serializers.Serializer):
     quantite_ramassee = serializers.IntegerField(required=False, min_value=0, default=0)
     quantite_sav = serializers.IntegerField(required=False, min_value=0, default=0)
     quantite_detruite = serializers.IntegerField(required=False, min_value=0, default=0)
-    quantite_manquante = serializers.IntegerField(required=False, min_value=0, default=0)
+    quantite_manquante = serializers.IntegerField(
+        required=False, min_value=0, default=0
+    )
     facturer_client = serializers.BooleanField(required=False, default=False)
     commentaire = serializers.CharField(required=False, allow_blank=True, default="")
 
     def validate(self, attrs):
         """Contrôle que les quantités ne dépassent pas la quantité attendue."""
 
-        ligne = LigneReservation.objects.select_related("reservation").filter(
-            pk=attrs["ligne"]
-        ).first()
+        ligne = (
+            LigneReservation.objects.select_related("reservation")
+            .filter(pk=attrs["ligne"])
+            .first()
+        )
 
         if ligne is None:
             raise serializers.ValidationError({
@@ -243,7 +249,9 @@ class SavTicketSerializer(serializers.ModelSerializer):
     """Serializer lecture / édition d'un ticket SAV."""
 
     part_nom = serializers.CharField(source="part.name", read_only=True)
-    reservation_numero = serializers.CharField(source="reservation.numero", read_only=True)
+    reservation_numero = serializers.CharField(
+        source="reservation.numero", read_only=True
+    )
     created_by_username = serializers.CharField(
         source="created_by.username",
         read_only=True,
@@ -350,9 +358,7 @@ class RamassageRetourView(APIView):
         """Enregistre les quantités ramassées / SAV / détruites / manquantes."""
 
         reservation = (
-            Reservation.objects.prefetch_related("lignes")
-            .filter(pk=pk)
-            .first()
+            Reservation.objects.prefetch_related("lignes").filter(pk=pk).first()
         )
 
         if reservation is None:

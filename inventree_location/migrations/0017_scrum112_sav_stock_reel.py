@@ -6,11 +6,10 @@ import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ("inventree_location", "0007_rentableitem_stock_total"),
+        ("inventree_location", "0016_alter_conflicthistory_id"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
-        ("part", "0047_alter_part_options_and_more"),
+        ("part", "0001_initial"),
     ]
 
     operations = [

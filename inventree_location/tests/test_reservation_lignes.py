@@ -22,7 +22,7 @@ from inventree_location.views import (
     ReservationListCreateView,
 )
 
-from part.models import Part
+from part.models import Part, PartCategory
 
 User = get_user_model()
 
@@ -90,7 +90,7 @@ class TestReservationFilters:
         response = ReservationListCreateView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        assert [row["id"] for row in response.data] == [validee.pk]
+        assert [row["id"] for row in response.data["results"]] == [validee.pk]
 
     @pytest.mark.django_db
     def test_filter_by_period(self, factory, user, prestation):
@@ -122,7 +122,40 @@ class TestReservationFilters:
         response = ReservationListCreateView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        assert [row["id"] for row in response.data] == [early.pk]
+        assert [row["id"] for row in response.data["results"]] == [early.pk]
+
+    @pytest.mark.django_db
+    def test_filter_by_categories(self, factory, user, prestation):
+        category_a = PartCategory.objects.create(name="Cat A")
+        category_b = PartCategory.objects.create(name="Cat B")
+
+        part_a = Part.objects.create(name="Article A", category=category_a)
+        part_b = Part.objects.create(name="Article B", category=category_b)
+
+        reservation_a = Reservation.objects.create(
+            prestation=prestation,
+            demandeur=user,
+            date_demande=timezone.now(),
+            statut="validee",
+        )
+        reservation_a.lignes.create(part=part_a, quantite_demandee=1)
+
+        reservation_b = Reservation.objects.create(
+            prestation=prestation,
+            demandeur=user,
+            date_demande=timezone.now(),
+            statut="validee",
+        )
+        reservation_b.lignes.create(part=part_b, quantite_demandee=1)
+
+        request = factory.get(RESA_URL, {"categories": str(category_a.pk)})
+        force_authenticate(request, user=user)
+
+        response = ReservationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [row["id"] for row in response.data["results"]] == [reservation_a.pk]
+        assert reservation_b.pk not in [row["id"] for row in response.data["results"]]
 
 
 class TestReservationNestedLignes:

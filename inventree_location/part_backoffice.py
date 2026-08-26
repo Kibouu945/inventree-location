@@ -168,7 +168,9 @@ class PartBackOfficeSerializer(serializers.Serializer):
     # Part InvenTree
     NOI = serializers.CharField(required=False, allow_blank=True, max_length=100)
     name = serializers.CharField(required=True, max_length=100)
-    description = serializers.CharField(required=False, allow_blank=True, max_length=500)
+    description = serializers.CharField(
+        required=False, allow_blank=True, max_length=500
+    )
     link = serializers.URLField(required=False, allow_blank=True)
     active = serializers.BooleanField(required=False, default=True)
     salable = serializers.BooleanField(required=False, default=False)
@@ -216,12 +218,8 @@ class PartBackOfficeSerializer(serializers.Serializer):
             "virtual": bool(getattr(part, "virtual", False)),
             "pack": _is_pack(part),
             "stock_total_inventree": _get_stock_total(part),
-            "is_rentable": bool(rentable_item.is_rentable)
-            if rentable_item
-            else False,
-            "consommable": bool(rentable_item.consommable)
-            if rentable_item
-            else False,
+            "is_rentable": bool(rentable_item.is_rentable) if rentable_item else False,
+            "consommable": bool(rentable_item.consommable) if rentable_item else False,
             "stock_total": rentable_item.stock_total if rentable_item else 0,
             "seuil_alerte_bas": rentable_item.seuil_alerte_bas
             if rentable_item

@@ -18,11 +18,14 @@
     "@mantine/hooks": "^8.3.18",
     "@mantine/modals": "^8.3.18",
     "@mantine/notifications": "^8.3.18",
+    "leaflet": "^1.9.4",
     "react": ">= 19.1.2",
-    "react-dom": ">= 19.1.2"
+    "react-dom": ">= 19.1.2",
+    "react-leaflet": "^5.0.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.0.0",
+    "@types/leaflet": "^1.9.14",
     "@types/node": "^25.9.1",
     "@types/react": "latest",
     "@types/react-dom": "latest",

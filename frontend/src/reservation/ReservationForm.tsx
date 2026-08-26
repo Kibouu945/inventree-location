@@ -11,7 +11,8 @@ import {
   Table,
   Text,
   Textarea,
-  Title
+  Title,
+  Tooltip
 } from '@mantine/core';
 import { DateTimePicker } from '@mantine/dates';
 import { useForm } from '@mantine/form';
@@ -23,11 +24,13 @@ import {
   buildReservationPayload,
   emptyReservationValues,
   enrichLignesFromCatalog,
+  isReservationEditable,
   removeLigne,
   reservationToFormValues,
   upsertLigne,
   validateReservationValues
 } from './formLogic';
+import { LieuMapLinks } from './LieuMapLinks';
 import { PartPicker } from './PartPicker';
 import type {
   Page,
@@ -48,19 +51,72 @@ function userLabel(user: UserOption): string {
   return fullName ? `${fullName} (${user.username})` : user.username;
 }
 
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    day: '2-digit',
+    month: '2-digit'
+  });
+}
+
+/**
+ * Clés d'erreur DRF qui ne correspondent à aucun champ du formulaire.
+ *
+ * `detail` porte les refus non liés à un champ (réservation déjà validée,
+ * conflit de stock, permission refusée) ; `conflicts` / `stock` portent les
+ * données structurées qui l'accompagnent. Les afficher comme erreurs de champ
+ * ne mène nulle part : aucun input ne les rend.
+ */
+const NON_FIELD_ERROR_KEYS = ['detail', 'non_field_errors'];
+const IGNORED_ERROR_KEYS = [...NON_FIELD_ERROR_KEYS, 'conflicts', 'stock'];
+
+function apiErrorData(error: unknown): Record<string, unknown> {
+  return (
+    (error as { response?: { data?: Record<string, unknown> } })?.response
+      ?.data ?? {}
+  );
+}
+
 function apiErrorFields(error: unknown): Record<string, string> {
-  const data =
-    (error as { response?: { data?: Record<string, string | string[]> } })
-      ?.response?.data ?? {};
   const flattened: Record<string, string> = {};
 
-  for (const [field, messages] of Object.entries(data)) {
-    flattened[field] = Array.isArray(messages)
-      ? messages.join(' ')
-      : String(messages);
+  for (const [field, messages] of Object.entries(apiErrorData(error))) {
+    if (IGNORED_ERROR_KEYS.includes(field)) {
+      continue;
+    }
+
+    if (typeof messages === 'string') {
+      flattened[field] = messages;
+    } else if (Array.isArray(messages)) {
+      flattened[field] = messages
+        .filter((m) => typeof m === 'string')
+        .join(' ');
+    }
   }
 
   return flattened;
+}
+
+/** Message d'erreur non lié à un champ, tel que renvoyé par le serveur. */
+function apiErrorMessage(error: unknown): string | null {
+  const data = apiErrorData(error);
+
+  for (const key of NON_FIELD_ERROR_KEYS) {
+    const value = data[key];
+
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      const joined = value.filter((m) => typeof m === 'string').join(' ');
+
+      if (joined.trim()) {
+        return joined;
+      }
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -93,6 +149,7 @@ export function ReservationForm({
   const [debouncedPrestationSearch] = useDebouncedValue(prestationSearch, 300);
   const [userSearch, setUserSearch] = useState('');
   const [debouncedUserSearch] = useDebouncedValue(userSearch, 300);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const existingQuery = useQuery<Reservation>(
     {
@@ -119,6 +176,27 @@ export function ReservationForm({
           }
         });
         return response.data as Page<Prestation>;
+      }
+    },
+    context.queryClient
+  );
+
+  // La prestation choisie est chargée par son id, indépendamment de la
+  // recherche : Mantine recopie le label de l'option dans `searchValue`, et ce
+  // label ("nom — manifestation (dates)") ne correspond à aucun résultat côté
+  // serveur, qui ne cherche que sur nom / manifestation__nom. Sans cette
+  // requête dédiée, l'encart lieu et le tooltip dates disparaissaient dès la
+  // sélection. Couvre aussi l'édition, où la prestation peut être hors des 20
+  // premiers résultats.
+  const selectedPrestationQuery = useQuery<Prestation>(
+    {
+      queryKey: ['reservation-prestation', form.values.prestation],
+      enabled: form.values.prestation != null,
+      queryFn: async () => {
+        const response = await context.api.get(
+          `${PRESTATIONS_URL}${form.values.prestation}/`
+        );
+        return response.data as Prestation;
       }
     },
     context.queryClient
@@ -169,11 +247,18 @@ export function ReservationForm({
 
   const selectedPrestation = useMemo(
     () =>
-      prestationsQuery.data?.results.find(
-        (prestation) => prestation.id === form.values.prestation
-      ) ?? null,
-    [prestationsQuery.data, form.values.prestation]
+      selectedPrestationQuery.data?.id === form.values.prestation
+        ? selectedPrestationQuery.data
+        : null,
+    [selectedPrestationQuery.data, form.values.prestation]
   );
+
+  // Une réservation validée (ou au-delà) n'est plus modifiable : lecture seule.
+  const locked =
+    isEdit &&
+    existingQuery.data != null &&
+    !isReservationEditable(existingQuery.data.statut);
+  const effectiveReadOnly = readOnly || locked;
 
   const mutation = useMutation(
     {
@@ -191,6 +276,7 @@ export function ReservationForm({
       },
       onSuccess: (data) => {
         form.clearErrors();
+        setSubmitError(null);
         context.queryClient.invalidateQueries({ queryKey: ['reservations'] });
         notifications.show({
           title: 'Enregistré',
@@ -201,9 +287,17 @@ export function ReservationForm({
       },
       onError: (error: unknown) => {
         form.setErrors(apiErrorFields(error));
+
+        // On préfère le motif renvoyé par le serveur au message générique :
+        // lui seul dit *pourquoi* (réservation déjà validée, conflit de stock,
+        // permission refusée). Conservé aussi dans un encart, la notification
+        // disparaissant au bout de quelques secondes.
+        const message = apiErrorMessage(error);
+
+        setSubmitError(message);
         notifications.show({
           title: 'Erreur',
-          message: "La réservation n'a pas pu être enregistrée.",
+          message: message ?? "La réservation n'a pas pu être enregistrée.",
           color: 'red'
         });
       }
@@ -234,12 +328,27 @@ export function ReservationForm({
     );
   }
 
+  const prestationOption = (prestation: Prestation) => ({
+    value: String(prestation.id),
+    label: `${prestation.nom} — ${prestation.manifestation_nom} (${shortDate(
+      prestation.date_debut
+    )}→${shortDate(prestation.date_fin)})`
+  });
+
   const prestationOptions = (prestationsQuery.data?.results ?? []).map(
-    (prestation) => ({
-      value: String(prestation.id),
-      label: `${prestation.nom} — ${prestation.manifestation_nom}`
-    })
+    prestationOption
   );
+
+  // La prestation choisie doit rester dans les options même quand la recherche
+  // courante ne la ramène pas, sinon le Select perd son libellé.
+  if (
+    selectedPrestation &&
+    !prestationOptions.some(
+      (option) => option.value === String(selectedPrestation.id)
+    )
+  ) {
+    prestationOptions.unshift(prestationOption(selectedPrestation));
+  }
 
   const userOptions = (usersQuery.data?.results ?? []).map((user) => ({
     value: String(user.id),
@@ -257,14 +366,60 @@ export function ReservationForm({
         )}
       </Group>
 
-      {readOnly && (
+      {effectiveReadOnly && (
         <Alert color='blue' title='Lecture seule'>
-          Votre rôle ne permet pas de modifier cette réservation.
+          {locked
+            ? 'Cette réservation est validée : elle n’est plus modifiable.'
+            : 'Votre rôle ne permet pas de modifier cette réservation.'}
         </Alert>
       )}
 
+      {submitError && (
+        <Alert color='red' title='Enregistrement refusé'>
+          {submitError}
+        </Alert>
+      )}
+
+      {/* Tooltip sur l'icône, pas sur le Select (le wrapper casse le dropdown). */}
       <Select
-        label='Événement / Prestation'
+        label={
+          <Group gap={6} component='span' align='center'>
+            <span>Événement / Prestation</span>
+            {selectedPrestation && (
+              <Tooltip
+                multiline
+                w={280}
+                openDelay={100}
+                closeDelay={2000}
+                events={{ hover: true, focus: true, touch: true }}
+                label={
+                  <Stack gap={2}>
+                    <Text size='sm' fw={600}>
+                      {selectedPrestation.nom} —{' '}
+                      {selectedPrestation.manifestation_nom}
+                    </Text>
+                    <Text size='xs'>
+                      Du{' '}
+                      {new Date(selectedPrestation.date_debut).toLocaleString()}{' '}
+                      au{' '}
+                      {new Date(selectedPrestation.date_fin).toLocaleString()}
+                    </Text>
+                    <Text size='xs'>
+                      Lieu : {selectedPrestation.lieu_detail?.nom ?? 'aucun'}
+                    </Text>
+                    <Text size='xs' c='yellow'>
+                      La réservation doit couvrir ces dates.
+                    </Text>
+                  </Stack>
+                }
+              >
+                <Text component='span' c='blue' style={{ cursor: 'help' }}>
+                  ⓘ dates
+                </Text>
+              </Tooltip>
+            )}
+          </Group>
+        }
         placeholder='Rechercher une prestation…'
         data={prestationOptions}
         searchable
@@ -277,23 +432,25 @@ export function ReservationForm({
           form.setFieldValue('prestation', value ? Number(value) : null)
         }
         error={form.errors.prestation}
-        disabled={readOnly}
+        disabled={effectiveReadOnly}
         required
       />
 
       {selectedPrestation && (
-        <Alert color='gray' title='Événement / Lieu(x)'>
+        <Alert color='gray' title='Événement / Lieu'>
           <Text size='sm'>{selectedPrestation.manifestation_nom}</Text>
-          <Text size='sm' c='dimmed'>
-            {selectedPrestation.lieux.length > 0
-              ? selectedPrestation.lieux.map((lieu) => lieu.nom).join(', ')
-              : 'Aucun lieu associé à cette prestation.'}
-          </Text>
+          {selectedPrestation.lieu_detail ? (
+            <LieuMapLinks lieu={selectedPrestation.lieu_detail} />
+          ) : (
+            <Text size='sm' c='dimmed'>
+              Aucun lieu associé à cette prestation.
+            </Text>
+          )}
         </Alert>
       )}
 
       <Select
-        label='Demandeur'
+        label='Gérant interne'
         placeholder='Rechercher un utilisateur…'
         data={userOptions}
         searchable
@@ -306,7 +463,7 @@ export function ReservationForm({
           form.setFieldValue('demandeur', value ? Number(value) : null)
         }
         error={form.errors.demandeur}
-        disabled={readOnly}
+        disabled={effectiveReadOnly}
         required
       />
 
@@ -321,7 +478,7 @@ export function ReservationForm({
             )
           }
           error={form.errors.date_retrait_prevue}
-          disabled={readOnly}
+          disabled={effectiveReadOnly}
           clearable
         />
         <DateTimePicker
@@ -334,7 +491,7 @@ export function ReservationForm({
             )
           }
           error={form.errors.date_retour_prevue}
-          disabled={readOnly}
+          disabled={effectiveReadOnly}
           clearable
         />
       </Group>
@@ -347,15 +504,18 @@ export function ReservationForm({
           form.setFieldValue('commentaire', event.currentTarget.value)
         }
         minRows={2}
-        disabled={readOnly}
+        disabled={effectiveReadOnly}
       />
 
       <Title order={5}>Matériel</Title>
-      {!readOnly && (
+      {!effectiveReadOnly && (
         <>
           <PartPicker
             context={context}
             label='Ajouter un article'
+            dateDebut={selectedPrestation?.date_debut}
+            dateFin={selectedPrestation?.date_fin}
+            excludeReservationId={reservationId}
             onAdd={(ligne) =>
               form.setFieldValue(
                 'lignes',
@@ -392,7 +552,7 @@ export function ReservationForm({
               <Table.Th>Article</Table.Th>
               <Table.Th>Quantité</Table.Th>
               <Table.Th>Type</Table.Th>
-              {!readOnly && <Table.Th />}
+              {!effectiveReadOnly && <Table.Th />}
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -407,7 +567,7 @@ export function ReservationForm({
                     <Badge color='green'>Matériel</Badge>
                   )}
                 </Table.Td>
-                {!readOnly && (
+                {!effectiveReadOnly && (
                   <Table.Td>
                     <Button
                       size='xs'
@@ -430,7 +590,7 @@ export function ReservationForm({
         </Table>
       )}
 
-      {!readOnly && (
+      {!effectiveReadOnly && (
         <Group justify='flex-end'>
           <Button
             variant='light'

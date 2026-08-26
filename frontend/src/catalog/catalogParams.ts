@@ -57,6 +57,12 @@ export function buildCatalogQuery(
   return params;
 }
 
+/**
+ * Clés d'URL du widget Catalogue. Le widget Réservations partage la même query
+ * string sur le dashboard et possède les siennes, préfixées `resa_`.
+ */
+export const CATALOG_URL_KEYS = ['q', 'cat', 'rentable', 'page'];
+
 /** Sérialise l'état des filtres en query string pour l'URL (CAT-03). */
 export function serializeFilters(filters: CatalogFiltersState): string {
   const search = new URLSearchParams();

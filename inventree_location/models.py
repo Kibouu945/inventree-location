@@ -2,8 +2,20 @@
 
 Le catalogue matériel (`Part`, `PartCategory`) et l'historique stock
 (`StockItemTracking`) sont fournis nativement par InvenTree — on ne les
-recrée pas ici. Le plugin ajoute uniquement le domaine location :
-organisation, événements, réservations, retours, SAV et suivi du stock réel.
+recrée pas ici. Le plugin se limite à 8 tables propres :
+
+1. Groupe — Organisation scoute propriétaire (mono-tenant MVP)
+2. Profile — Extension OneToOne du User Django
+3. RentableItem — Extension OneToOne de `part.Part` (drapeau louable + champs
+   location) ; le stock physique reste celui d'InvenTree (`StockItem`)
+4. Manifestation — Événement (camp, formation, week-end)
+5. Prestation — Sous-événement / besoin matériel d'une Manifestation
+6. Lieu — Localisation physique rattachée à une Prestation
+7. Reservation — Demande de location liée à une Prestation
+8. LigneReservation — Détail (Part native × quantité) d'une Reservation
+9. ConflictHistory — Journal des conflits (stock / lieu)
+
+S'y ajoutent, avec le SAV et les ramassages, les tables du domaine retour.
 """
 
 from django.conf import settings
@@ -141,11 +153,10 @@ class RentableItem(TimestampedModel):
     is_rentable = models.BooleanField(default=True, verbose_name=_("louable"))
     consommable = models.BooleanField(default=False, verbose_name=_("consommable"))
     is_virtual = models.BooleanField(default=False, verbose_name=_("article virtuel"))
-    stock_total = models.PositiveIntegerField(
-        default=0,
-        verbose_name=_("stock total théorique"),
-        help_text=_("Stock total théorique disponible pour la location."),
-    )
+    # Pas de champ « stock total » ici : le stock physique appartient à
+    # InvenTree (`StockItem`). Un compteur parallèle divergeait en silence dès
+    # qu'une casse, un achat ou un inventaire était saisi côté InvenTree.
+    # Cf. `conflicts.get_part_total_stock`.
     caution = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -162,6 +173,9 @@ class RentableItem(TimestampedModel):
     )
     seuil_alerte_bas = models.PositiveIntegerField(
         null=True, blank=True, verbose_name=_("seuil d'alerte bas")
+    )
+    seuil_alerte_haut = models.PositiveIntegerField(
+        null=True, blank=True, verbose_name=_("seuil d'alerte haut")
     )
 
     class Meta:
@@ -217,6 +231,38 @@ class Manifestation(TimestampedModel):
     def __str__(self):
         return self.nom
 
+    #: Statuts où l'on peut encore ajouter des prestations.
+    STATUTS_MODIFIABLES = (
+        StatutManifestation.BROUILLON,
+        StatutManifestation.PLANIFIEE,
+    )
+
+    @property
+    def statut_effectif(self):
+        """Statut réel : brouillon/annulée explicites, en_cours/terminée dérivés
+        des dates dès qu'elle est planifiée."""
+
+        if self.statut in (
+            StatutManifestation.BROUILLON,
+            StatutManifestation.ANNULEE,
+        ):
+            return self.statut
+
+        now = timezone.now()
+
+        if now > self.date_fin:
+            return StatutManifestation.TERMINEE
+        if now >= self.date_debut:
+            return StatutManifestation.EN_COURS
+
+        return StatutManifestation.PLANIFIEE
+
+    @property
+    def accepte_nouvelles_prestations(self) -> bool:
+        """Vrai tant que la manif n'a pas démarré."""
+
+        return self.statut_effectif in self.STATUTS_MODIFIABLES
+
 
 class Prestation(TimestampedModel):
     """Créneau / service interne à une manifestation."""
@@ -226,6 +272,17 @@ class Prestation(TimestampedModel):
         on_delete=models.PROTECT,
         related_name="prestations",
         verbose_name=_("manifestation"),
+    )
+    # ORG-02 : une prestation se déroule sur un seul lieu (géolocalisé), qu'un
+    # même lieu peut porter pour plusieurs prestations (base de CON-06).
+    # Nullable pour autoriser les brouillons de prestation.
+    lieu = models.ForeignKey(
+        "Lieu",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="prestations",
+        verbose_name=_("lieu"),
     )
     nom = models.CharField(max_length=200, verbose_name=_("nom"))
     date_debut = models.DateTimeField(verbose_name=_("date de début"))
@@ -245,14 +302,14 @@ class Prestation(TimestampedModel):
 
 
 class Lieu(TimestampedModel):
-    """Site physique rattaché à une prestation."""
+    """Site physique géolocalisé, réutilisable par plusieurs prestations.
 
-    prestation = models.ForeignKey(
-        Prestation,
-        on_delete=models.PROTECT,
-        related_name="lieux",
-        verbose_name=_("prestation"),
-    )
+    Autonome (ORG-01/ORG-02) : le lieu porte adresse et coordonnées GPS et
+    n'appartient plus à une prestation. C'est la prestation qui référence son
+    lieu unique (``Prestation.lieu``), un même lieu pouvant servir à plusieurs
+    prestations — socle de la détection de conflit de lieu (CON-06).
+    """
+
     nom = models.CharField(max_length=200, verbose_name=_("nom"))
     adresse = models.TextField(blank=True, default="", verbose_name=_("adresse"))
     latitude = models.DecimalField(
@@ -281,6 +338,47 @@ class Lieu(TimestampedModel):
 
     def __str__(self):
         return self.nom
+
+
+class LignePrestation(TimestampedModel):
+    """Article (Part natif) et quantité nécessaires à une prestation (RES-09).
+
+    Chaque prestation porte sa propre liste de matériel + quantités. Ces lignes
+    alimentent le calcul de stock disponible au jour (STK-01) et la détection
+    des conflits de stock.
+    """
+
+    prestation = models.ForeignKey(
+        Prestation,
+        on_delete=models.CASCADE,
+        related_name="lignes_prestation",
+        verbose_name=_("prestation"),
+    )
+    part = models.ForeignKey(
+        "part.Part",
+        on_delete=models.PROTECT,
+        related_name="lignes_prestation",
+        verbose_name=_("part"),
+    )
+    quantite = models.PositiveIntegerField(verbose_name=_("quantité"))
+    commentaire = models.TextField(
+        blank=True, default="", verbose_name=_("commentaire")
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["prestation", "part"]
+        verbose_name = _("ligne de prestation")
+        verbose_name_plural = _("lignes de prestation")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["prestation", "part"],
+                name="unique_prestation_part",
+            ),
+        ]
+
+    def __str__(self):
+        return f"part#{self.part_id} x{self.quantite}"
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +464,7 @@ class Reservation(TimestampedModel):
     commentaire = models.TextField(
         blank=True, default="", verbose_name=_("commentaire")
     )
+    is_archived = models.BooleanField(default=False, verbose_name=_("archivée"))
 
     class Meta:
         app_label = "inventree_location"
@@ -377,6 +476,10 @@ class Reservation(TimestampedModel):
                 fields=["date_retrait_prevue", "date_retour_prevue", "statut"],
                 name="resa_periode_statut_idx",
             ),
+            models.Index(fields=["statut"], name="resa_statut_idx"),
+            models.Index(fields=["date_retrait_prevue"], name="resa_retrait_idx"),
+            models.Index(fields=["date_retour_prevue"], name="resa_retour_idx"),
+            models.Index(fields=["is_archived"], name="resa_archived_idx"),
         ]
 
     def __str__(self):
@@ -456,6 +559,17 @@ class LigneReservation(TimestampedModel):
     etat_retour = models.CharField(
         max_length=20, blank=True, default="", verbose_name=_("état du retour")
     )
+    # Détail du check-in retour (SCRUM-94) : la somme des 3 doit égaler
+    # quantite_demandee. quantite_retournee reste la vue agrégée (ok + casse).
+    quantite_retour_ok = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité retournée OK")
+    )
+    quantite_retour_manquant = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité manquante")
+    )
+    quantite_retour_casse = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité cassée")
+    )
     commentaire = models.TextField(
         blank=True, default="", verbose_name=_("commentaire")
     )
@@ -474,6 +588,53 @@ class LigneReservation(TimestampedModel):
 
     def __str__(self):
         return f"part#{self.part_id} x{self.quantite_demandee}"
+
+
+class ReturnIncidentType(models.TextChoices):
+    MISSING = "missing", _("Manquant")
+    BROKEN = "broken", _("Cassé")
+    DESTROYED = "destroyed", _("Détruit")
+
+
+class ReturnIncident(TimestampedModel):
+    line = models.ForeignKey(
+        LigneReservation,
+        on_delete=models.CASCADE,
+        related_name="incidents",
+        verbose_name=_("ligne de réservation"),
+    )
+    type = models.CharField(
+        max_length=20,
+        choices=ReturnIncidentType.choices,
+        verbose_name=_("type d'incident"),
+    )
+    qty = models.PositiveIntegerField(verbose_name=_("quantité"))
+    comment = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("commentaire"),
+    )
+    reported_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name=_("date de signalement"),
+    )
+    reported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reported_incidents",
+        verbose_name=_("signalé par"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-reported_at"]
+        verbose_name = _("incident de retour")
+        verbose_name_plural = _("incidents de retour")
+
+    def __str__(self):
+        return f"Incident #{self.pk} ({self.type}) — Ligne#{self.line_id}"
 
 
 class ReservationStatusLog(TimestampedModel):
@@ -630,7 +791,4 @@ class SavTicket(TimestampedModel):
         ]
 
     def __str__(self):
-        return (
-            f"SAV #{self.pk} — part#{self.part_id} "
-            f"x{self.quantite} — {self.statut}"
-        )
+        return f"SAV #{self.pk} — part#{self.part_id} x{self.quantite} — {self.statut}"

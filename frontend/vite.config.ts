@@ -50,6 +50,8 @@ export default defineConfig({
         "./src/BackOfficeUsers.tsx",
         "./src/BackOfficeParts.tsx",
         "./src/Conflicts.tsx",
+        "./src/Deliveries.tsx",
+        "./src/Organisation.tsx",
         "./src/PartDetail.tsx",
       ],
       output: [

@@ -15,6 +15,12 @@ import { useState } from 'react';
 import { ReservationForm } from '../reservation/ReservationForm';
 import { canWriteReservations } from '../roles';
 
+interface Shortage {
+  part_id: number;
+  part_name: string;
+  missing_quantity: number;
+}
+
 interface ConflictItem {
   id: number;
   numero: string;
@@ -25,6 +31,8 @@ interface ConflictItem {
   demandeur_nom: string;
   conflict_count: number;
   conflicting_reservation_ids: number[];
+  /** Articles en pénurie et quantité manquante (CON-01). */
+  shortages: Shortage[];
 }
 
 interface ModalState {
@@ -87,11 +95,12 @@ export function ConflictsList({
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Réservation</Table.Th>
-              <Table.Th>Demandeur</Table.Th>
+              <Table.Th>Gérant interne</Table.Th>
               <Table.Th>Événement</Table.Th>
               <Table.Th>Début</Table.Th>
               <Table.Th>Fin</Table.Th>
-              <Table.Th>Conflits</Table.Th>
+              <Table.Th>Manque</Table.Th>
+              <Table.Th>Résas liées</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -118,6 +127,18 @@ export function ConflictsList({
                   {conflict.date_retour_prevue
                     ? new Date(conflict.date_retour_prevue).toLocaleString()
                     : '—'}
+                </Table.Td>
+                <Table.Td>
+                  {/* Une pénurie peut venir du seul prévisionnel d'une
+                      prestation : c'est l'article manquant qui porte
+                      l'information, pas le nombre de réservations. */}
+                  <Group gap={4} wrap='wrap'>
+                    {conflict.shortages.map((shortage) => (
+                      <Badge key={shortage.part_id} color='red' variant='light'>
+                        {shortage.part_name} −{shortage.missing_quantity}
+                      </Badge>
+                    ))}
+                  </Group>
                 </Table.Td>
                 <Table.Td>{conflict.conflict_count}</Table.Td>
               </Table.Tr>
