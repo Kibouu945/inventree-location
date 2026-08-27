@@ -13,7 +13,12 @@ from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
 
-from .conflicts import detect_reservation_conflicts
+from .conflicts import (
+    detect_location_reservation_conflicts,
+    detect_reservation_conflicts,
+    register_location_conflict_history,
+    register_stock_conflict_history,
+)
 from .models import (
     Groupe,
     LignePrestation,
@@ -708,6 +713,7 @@ class ReservationSerializer(serializers.ModelSerializer):
         if lignes_data:
             self._replace_lignes(reservation, lignes_data)
 
+        self._register_conflict_history(reservation)
         self._validate_stock_conflicts_if_needed(reservation)
 
         return reservation
@@ -722,6 +728,7 @@ class ReservationSerializer(serializers.ModelSerializer):
         if lignes_data is not None:
             self._replace_lignes(reservation, lignes_data)
 
+        self._register_conflict_history(reservation)
         self._validate_stock_conflicts_if_needed(reservation)
 
         return reservation
@@ -735,6 +742,25 @@ class ReservationSerializer(serializers.ModelSerializer):
             LigneReservation(reservation=reservation, **ligne_data)
             for ligne_data in lignes_data
         ])
+
+    def _register_conflict_history(self, reservation):
+        """Journalise les conflits détectés, qu'ils bloquent ou non (SCRUM-110).
+
+        L'historique et le blocage sont deux choses distinctes : une demande
+        peut être enregistrée en conflit et arbitrée plus tard, mais le conflit
+        doit rester tracé. Les fonctions d'enregistrement existaient sans
+        qu'aucun appel ne les atteigne : l'historique restait vide.
+        """
+
+        if not reservation.date_retrait_prevue or not reservation.date_retour_prevue:
+            return
+
+        register_stock_conflict_history(
+            reservation, detect_reservation_conflicts(reservation)
+        )
+        register_location_conflict_history(
+            reservation, detect_location_reservation_conflicts(reservation)
+        )
 
     def _validate_stock_conflicts_if_needed(self, reservation):
         """Refuse la validation d'une réservation en conflit de stock non forcé.

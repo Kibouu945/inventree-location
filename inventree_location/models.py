@@ -45,6 +45,16 @@ class StatutReservation(models.TextChoices):
     CLOTUREE = "cloturee", _("Clôturée")
 
 
+class ConflictType(models.TextChoices):
+    STOCK = "stock", _("Conflit de stock")
+    LOCATION = "location", _("Conflit de lieu")
+
+
+class ConflictState(models.TextChoices):
+    OPEN = "open", _("Ouvert")
+    RESOLVED = "resolved", _("Résolu")
+
+
 # ---------------------------------------------------------------------------
 # Mixin abstrait
 # ---------------------------------------------------------------------------
@@ -660,3 +670,94 @@ class ReservationStatusLog(TimestampedModel):
         return (
             f"Réservation #{self.reservation_id}: {self.from_status} → {self.to_status}"
         )
+
+
+class ConflictHistory(TimestampedModel):
+    """Historique des conflits détectés (ouverts et résolus)."""
+
+    conflict_type = models.CharField(
+        max_length=20,
+        choices=ConflictType.choices,
+        verbose_name=_("type de conflit"),
+    )
+    state = models.CharField(
+        max_length=20,
+        choices=ConflictState.choices,
+        default=ConflictState.OPEN,
+        verbose_name=_("état"),
+    )
+    reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.CASCADE,
+        related_name="conflict_history",
+        verbose_name=_("réservation"),
+    )
+    conflicting_reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="conflicted_by_history",
+        verbose_name=_("réservation en conflit"),
+    )
+    part = models.ForeignKey(
+        "part.Part",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="conflict_history",
+        verbose_name=_("article"),
+    )
+    period_start = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("début période"),
+    )
+    period_end = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("fin période"),
+    )
+    location_key = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name=_("clé de lieu"),
+    )
+    details = models.JSONField(default=dict, blank=True, verbose_name=_("détails"))
+    resolved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("résolu le"),
+    )
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="resolved_conflicts",
+        verbose_name=_("résolu par"),
+    )
+    resolution_note = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("note de résolution"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-created_at"]
+        verbose_name = _("historique de conflit")
+        verbose_name_plural = _("historiques de conflit")
+        indexes = [
+            models.Index(
+                fields=["conflict_type", "state"], name="conflict_type_state_idx"
+            ),
+            models.Index(
+                fields=["reservation", "state"], name="conflict_resa_state_idx"
+            ),
+            models.Index(fields=["created_at"], name="conflict_created_at_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.conflict_type}:{self.reservation_id}:{self.state}"
