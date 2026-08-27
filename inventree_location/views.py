@@ -917,6 +917,105 @@ class ReturnIncidentDetailView(generics.RetrieveUpdateDestroyAPIView):
         sync_ligne_etat_retour(ligne)
 
 
+class ReturnLossReportView(APIView):
+    """Rapport de pertes agrégé : manquants, cassés, détruits et facturés.
+
+    Complète `ReturnReportView`, qui détaille **une** réservation : ici on
+    agrège sur l'ensemble des incidents, avec ventilation par article et par
+    réservation, pour répondre à « qu'est-ce qui se perd, et sur quoi ».
+    Le filtre `reservation` permet de retomber sur une seule réservation.
+
+    Totaux et ventilations sont calculés dans la même passe, avec la même
+    définition de « facturé » — tout incident portant `bill_client`, quel que
+    soit son type — pour qu'ils se réconcilient toujours.
+    """
+
+    permission_classes = [ReturnCheckinPermission]
+
+    #: Clés d'agrégation par type d'incident, alignées sur ReturnIncidentType.
+    TOTAL_KEYS = {
+        ReturnIncidentType.MISSING: "missing",
+        ReturnIncidentType.BROKEN: "broken",
+        ReturnIncidentType.DESTROYED: "destroyed",
+    }
+
+    def _nouvelle_entree(self, **identite):
+        """Entrée de ventilation à zéro, une clé par type plus « facturé »."""
+
+        entree = dict(identite)
+        entree.update({cle: 0 for cle in self.TOTAL_KEYS.values()})
+        entree["billed"] = 0
+
+        return entree
+
+    def get(self, request, *args, **kwargs):
+        """Retourne le rapport de pertes agrégé."""
+
+        reservation_id = parse_optional_int_param(request, "reservation")
+
+        incidents = ReturnIncident.objects.select_related(
+            "line__part", "line__reservation"
+        )
+
+        if reservation_id is not None:
+            incidents = incidents.filter(line__reservation_id=reservation_id)
+
+        incidents = list(incidents)
+
+        totaux = self._nouvelle_entree()
+        by_part = {}
+        by_reservation = {}
+
+        for incident in incidents:
+            # Un type ajouté au modèle sans passer ici ne doit pas faire tomber
+            # le rapport sur un KeyError : il reste compté dans `count` et,
+            # s'il est facturé, dans « facturé ».
+            cle = self.TOTAL_KEYS.get(incident.type)
+
+            part_entry = by_part.setdefault(
+                incident.line.part_id,
+                self._nouvelle_entree(
+                    part_id=incident.line.part_id,
+                    part_name=incident.line.part.name,
+                ),
+            )
+            reservation_entry = by_reservation.setdefault(
+                incident.line.reservation_id,
+                self._nouvelle_entree(
+                    reservation_id=incident.line.reservation_id,
+                    reservation_numero=incident.line.reservation.numero,
+                ),
+            )
+
+            if cle is not None:
+                totaux[cle] += incident.qty
+                part_entry[cle] += incident.qty
+                reservation_entry[cle] += incident.qty
+
+            if incident.bill_client:
+                totaux["billed"] += incident.qty
+                part_entry["billed"] += incident.qty
+                reservation_entry["billed"] += incident.qty
+
+        return Response(
+            {
+                "count": len(incidents),
+                "total_missing": totaux["missing"],
+                "total_broken": totaux["broken"],
+                "total_destroyed": totaux["destroyed"],
+                "total_billed": totaux["billed"],
+                "by_part": sorted(
+                    by_part.values(), key=lambda item: item["part_name"].lower()
+                ),
+                "by_reservation": sorted(
+                    by_reservation.values(),
+                    key=lambda item: item["reservation_numero"],
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class ReturnReportView(APIView):
     """Rapport synthétique du retour d'une réservation (JSON)."""
 

@@ -592,6 +592,14 @@ class ReturnIncident(TimestampedModel):
         related_name="reported_incidents",
         verbose_name=_("signalé par"),
     )
+    #: Décision commerciale prise au constat, indépendante du type : un objet
+    #: manquant n'est pas toujours refacturé (geste commercial, usure normale),
+    #: et un objet cassé peut l'être. C'est ce drapeau, et non le type, qui
+    #: alimente le total « facturé » du rapport de pertes (SCRUM-96).
+    bill_client = models.BooleanField(
+        default=False,
+        verbose_name=_("facturer au client"),
+    )
 
     class Meta:
         app_label = "inventree_location"

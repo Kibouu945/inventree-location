@@ -94,6 +94,7 @@ class InvenTreeLocation(
             ReturnIncidentDetailView,
             ReturnIncidentHistoryView,
             ReturnIncidentListCreateView,
+            ReturnLossReportView,
             ReturnReportPdfView,
             ReturnReportView,
             StockAlertListView,
@@ -160,6 +161,11 @@ class InvenTreeLocation(
                 "returns/incidents/<int:pk>/",
                 ReturnIncidentDetailView.as_view(),
                 name="return-incident-detail",
+            ),
+            path(
+                "returns/loss-report/",
+                ReturnLossReportView.as_view(),
+                name="return-loss-report",
             ),
             path(
                 "returns/reports/<int:pk>/",

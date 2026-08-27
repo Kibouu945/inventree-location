@@ -25,11 +25,13 @@ from inventree_location.views import (
     ReturnIncidentDetailView,
     ReturnIncidentHistoryView,
     ReturnIncidentListCreateView,
+    ReturnLossReportView,
 )
 
 User = get_user_model()
 
 INCIDENTS_URL = "/plugin/inventree-location/returns/incidents/"
+LOSS_REPORT_URL = "/plugin/inventree-location/returns/loss-report/"
 
 
 @pytest.fixture
@@ -659,3 +661,179 @@ class TestCoexistenceCheckinEtIncidents:
 
         ligne.refresh_from_db()
         assert ligne.etat_retour == "casse"
+
+
+class TestReturnLossReport:
+    """Rapport de pertes agrégé (SCRUM-96).
+
+    Complète `ReturnReportView`, qui ne couvre qu'une réservation : ici on
+    agrège tous les incidents, avec ventilation par article et par réservation.
+    """
+
+    @pytest.mark.django_db
+    def test_rapport_agrege(self, factory, magasinier, ligne):
+        for incident_type, qty, facture in [
+            (ReturnIncidentType.MISSING, 1, True),
+            (ReturnIncidentType.MISSING, 1, False),
+            (ReturnIncidentType.BROKEN, 1, False),
+            (ReturnIncidentType.DESTROYED, 1, True),
+        ]:
+            ReturnIncident.objects.create(
+                line=ligne,
+                type=incident_type,
+                qty=qty,
+                bill_client=facture,
+                reported_by=magasinier,
+            )
+
+        request = factory.get(LOSS_REPORT_URL)
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnLossReportView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["count"] == 4
+        assert response.data["total_missing"] == 2
+        assert response.data["total_broken"] == 1
+        assert response.data["total_destroyed"] == 1
+        assert response.data["total_billed"] == 2
+
+        par_article = response.data["by_part"][0]
+
+        assert par_article["part_name"] == "Tente 4 places"
+        assert par_article["missing"] == 2
+        assert par_article["broken"] == 1
+        assert par_article["destroyed"] == 1
+        assert par_article["billed"] == 2
+
+        par_reservation = response.data["by_reservation"][0]
+
+        assert par_reservation["reservation_numero"] == ligne.reservation.numero
+        assert par_reservation["missing"] == 2
+
+    @pytest.mark.django_db
+    def test_rapport_vide(self, factory, magasinier):
+        request = factory.get(LOSS_REPORT_URL)
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnLossReportView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["count"] == 0
+        assert response.data["total_missing"] == 0
+        assert response.data["by_part"] == []
+        assert response.data["by_reservation"] == []
+
+    @pytest.mark.django_db
+    def test_filtre_par_reservation(self, factory, magasinier, ligne):
+        ReturnIncident.objects.create(
+            line=ligne,
+            type=ReturnIncidentType.MISSING,
+            qty=1,
+            reported_by=magasinier,
+        )
+
+        request = factory.get(LOSS_REPORT_URL, {"reservation": ligne.reservation_id})
+        force_authenticate(request, user=magasinier)
+        avec = ReturnLossReportView.as_view()(request)
+
+        autre = factory.get(LOSS_REPORT_URL, {"reservation": ligne.reservation_id + 99})
+        force_authenticate(autre, user=magasinier)
+        sans = ReturnLossReportView.as_view()(autre)
+
+        assert avec.data["count"] == 1
+        assert sans.data["count"] == 0
+
+    @pytest.mark.django_db
+    def test_casse_facture_compte_dans_le_total(self, factory, magasinier, ligne):
+        """Le total « facturé » se réconcilie avec les ventilations.
+
+        « Facturé » ne dépend pas du type : un cassé refacturé doit peser dans
+        `total_billed` comme dans `by_part` / `by_reservation`.
+        """
+
+        ReturnIncident.objects.create(
+            line=ligne,
+            type=ReturnIncidentType.BROKEN,
+            qty=2,
+            bill_client=True,
+            reported_by=magasinier,
+        )
+
+        request = factory.get(LOSS_REPORT_URL)
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnLossReportView.as_view()(request)
+
+        assert response.data["total_billed"] == 2
+        assert response.data["by_part"][0]["billed"] == 2
+        assert response.data["by_reservation"][0]["billed"] == 2
+
+    @pytest.mark.django_db
+    def test_filtre_non_entier_refuse(self, factory, magasinier):
+        request = factory.get(LOSS_REPORT_URL, {"reservation": "abc"})
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnLossReportView.as_view()(request)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.django_db
+    def test_lecture_ouverte_aux_roles_plugin(self, factory, gestionnaire):
+        """C'est un rapport de gestion : la lecture suit `RoleBasedPermission`.
+
+        Le magasinier constate les pertes, le gestionnaire les regarde — seule
+        l'écriture des incidents reste réservée au magasinier et à l'admin.
+        """
+
+        request = factory.get(LOSS_REPORT_URL)
+        force_authenticate(request, user=gestionnaire)
+
+        response = ReturnLossReportView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+
+    @pytest.mark.django_db
+    def test_sans_role_plugin_refuse(self, factory, db):
+        sans_role = User.objects.create_user(username="badaud", password="pwd12345")
+
+        request = factory.get(LOSS_REPORT_URL)
+        force_authenticate(request, user=sans_role)
+
+        response = ReturnLossReportView.as_view()(request)
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    @pytest.mark.django_db
+    def test_bill_client_par_defaut_a_false(self, factory, magasinier, ligne):
+        """Créé par l'API sans le champ, un incident n'est pas facturé."""
+
+        payload = {
+            "line": ligne.pk,
+            "type": ReturnIncidentType.MISSING,
+            "qty": 1,
+            "comment": "",
+        }
+        request = factory.post(INCIDENTS_URL, payload, format="json")
+        force_authenticate(request, user=magasinier)
+        creation = ReturnIncidentListCreateView.as_view()(request)
+
+        assert creation.status_code == status.HTTP_201_CREATED
+        assert creation.data["bill_client"] is False
+
+    @pytest.mark.django_db
+    def test_bill_client_posable_a_la_creation(self, factory, magasinier, ligne):
+        payload = {
+            "line": ligne.pk,
+            "type": ReturnIncidentType.MISSING,
+            "qty": 1,
+            "comment": "",
+            "bill_client": True,
+        }
+        request = factory.post(INCIDENTS_URL, payload, format="json")
+        force_authenticate(request, user=magasinier)
+        creation = ReturnIncidentListCreateView.as_view()(request)
+
+        assert creation.status_code == status.HTTP_201_CREATED
+        assert creation.data["bill_client"] is True
+        assert ReturnIncident.objects.get(pk=creation.data["id"]).bill_client is True

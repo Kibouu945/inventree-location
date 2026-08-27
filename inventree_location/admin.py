@@ -101,10 +101,11 @@ class ReturnIncidentAdmin(admin.ModelAdmin):
         "line",
         "type",
         "qty",
+        "bill_client",
         "reported_at",
         "reported_by",
     )
-    list_filter = ("type",)
+    list_filter = ("type", "bill_client")
     search_fields = ("line__part__name", "line__reservation__numero", "comment")
 
 

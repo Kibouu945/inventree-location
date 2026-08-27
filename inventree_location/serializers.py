@@ -310,6 +310,7 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
             "type",
             "qty",
             "comment",
+            "bill_client",
             "reported_at",
             "reported_by",
             "reported_by_username",
