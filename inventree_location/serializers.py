@@ -36,6 +36,7 @@ from .models import (
 )
 from .services.workflow_service import transition_reservation_status
 from .stock import compute_prestation_stock
+from .sav import get_real_available_stock
 
 
 # Produit français : on restreint le géocodage à la France pour éviter les
@@ -186,6 +187,11 @@ class LigneReservationSerializer(serializers.ModelSerializer):
             "quantite_demandee",
             "quantite_livree",
             "quantite_retournee",
+            "quantite_ramassee",
+            "quantite_sav",
+            "quantite_detruite",
+            "quantite_manquante",
+            "facturer_client",
             "etat_retour",
             "quantite_retour_ok",
             "quantite_retour_manquant",
@@ -576,7 +582,7 @@ class ReservationSerializer(serializers.ModelSerializer):
         return self._user_label(obj.demandeur)
 
     def get_validateur_nom(self, obj):
-        """Nom lisible du validateur (vide tant que la réservation n'est pas validée)."""
+        """Nom lisible du validateur."""
 
         return self._user_label(obj.validateur)
 
@@ -603,9 +609,6 @@ class ReservationSerializer(serializers.ModelSerializer):
                 return attrs[field]
             return getattr(self.instance, field, None) if self.instance else None
 
-        # `demandeur` et `prestation` sont des FK non-nullables : leur
-        # présence est déjà garantie par la validation de champ de DRF avant
-        # que `validate()` ne soit appelée.
         prestation = effective("prestation")
         date_retrait = effective("date_retrait_prevue")
         date_retour = effective("date_retour_prevue")
@@ -763,13 +766,7 @@ class ReservationSerializer(serializers.ModelSerializer):
         )
 
     def _validate_stock_conflicts_if_needed(self, reservation):
-        """Refuse la validation d'une réservation en conflit de stock non forcé.
-
-        La règle ne s'applique qu'au passage en statut « validée » : une
-        réservation `forced=True` peut être validée malgré les conflits
-        (US-03 : « Forcer malgré les conflits »). Levée dans la transaction
-        de create/update, la ValidationError annule donc la sauvegarde.
-        """
+        """Refuse la validation d'une réservation en conflit de stock non forcé."""
 
         if reservation.statut != StatutReservation.VALIDEE or reservation.forced:
             return
@@ -903,12 +900,18 @@ class BonRamassageSerializer(RamassageSerializer):
         # et le rajouter annulerait ce prefetch au profit d'une requête neuve.
         for ligne in obj.lignes.all():
             lignes.append({
+                "id": ligne.id,
                 "part": ligne.part_id,
                 "part_nom": ligne.part.name,
                 "quantite_demandee": ligne.quantite_demandee,
                 "quantite_livree": ligne.quantite_livree,
                 "quantite_a_ramasser": ligne.quantite_livree or ligne.quantite_demandee,
                 "quantite_retournee": ligne.quantite_retournee,
+                "quantite_ramassee": ligne.quantite_ramassee,
+                "quantite_sav": ligne.quantite_sav,
+                "quantite_detruite": ligne.quantite_detruite,
+                "quantite_manquante": ligne.quantite_manquante,
+                "facturer_client": ligne.facturer_client,
                 "etat_retour": ligne.etat_retour,
                 "commentaire": ligne.commentaire,
             })
@@ -1186,6 +1189,7 @@ class CatalogPartSerializer(serializers.Serializer):
     category = serializers.IntegerField(source="category_id", read_only=True)
     category_name = serializers.CharField(source="category.name", read_only=True)
     stock_available = serializers.SerializerMethodField()
+    stock_reel_disponible = serializers.SerializerMethodField()
     image_url = serializers.SerializerMethodField()
     rentable = serializers.SerializerMethodField()
     consommable = serializers.SerializerMethodField()
@@ -1194,8 +1198,27 @@ class CatalogPartSerializer(serializers.Serializer):
     seuil_alerte_bas = serializers.SerializerMethodField()
     seuil_alerte_haut = serializers.SerializerMethodField()
 
+    def _rentable_info(self, obj):
+        """Récupère l'extension RentableItem attachée par la vue catalogue."""
+
+        attached = getattr(obj, "_location_rentable_info", None)
+
+        if attached is not None:
+            return attached
+
+        try:
+            return getattr(obj, "rentable_info", None)
+        except Exception:
+            return None
+
     def get_stock_available(self, obj):
-        """Stock disponible de la Part, exposé à 0 si non renseigné."""
+        """Disponibilité **sur la période demandée**, annotée par la vue.
+
+        À ne pas confondre avec `stock_reel_disponible` (SCRUM-112) : ici on
+        répond « combien puis-je réserver du 12 au 14 mars », là-bas « combien
+        reste-t-il en état de servir, hors SAV et casse ». Les deux chiffres
+        diffèrent légitimement et portaient le même nom.
+        """
 
         for attr in ["stock_available", "available_stock"]:
             value = getattr(obj, attr, None)
@@ -1207,6 +1230,11 @@ class CatalogPartSerializer(serializers.Serializer):
                     return 0
 
         return 0
+
+    def get_stock_reel_disponible(self, obj):
+        """Stock en état de servir : total InvenTree moins SAV et détruits."""
+
+        return get_real_available_stock(obj.id)
 
     def get_image_url(self, obj):
         """URL de l'image principale si le modèle en expose une."""
@@ -1230,7 +1258,10 @@ class CatalogPartSerializer(serializers.Serializer):
         if not bool(getattr(obj, "active", True)):
             return False
 
-        rentable_info = getattr(obj, "rentable_info", None)
+        if not bool(getattr(obj, "active", True)):
+            return False
+
+        rentable_info = self._rentable_info(obj)
 
         if rentable_info is None:
             return True
@@ -1240,7 +1271,7 @@ class CatalogPartSerializer(serializers.Serializer):
     def get_consommable(self, obj):
         """Drapeau consommable issu de RentableItem."""
 
-        rentable_info = getattr(obj, "rentable_info", None)
+        rentable_info = self._rentable_info(obj)
 
         if rentable_info is None:
             return False
@@ -1297,7 +1328,7 @@ class GroupeSerializer(serializers.ModelSerializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
-    """Sérialiseur léger d'un utilisateur InvenTree (sélecteur demandeur)."""
+    """Sérialiseur léger d'un utilisateur InvenTree."""
 
     class Meta:
         """Configuration du serializer User."""

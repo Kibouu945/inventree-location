@@ -65,6 +65,12 @@ class InvenTreeLocation(
             PartBackOfficeDetailView,
             PartBackOfficeListCreateView,
         )
+        from .sav import (
+            DestroyedItemsListView,
+            RamassageRetourView,
+            SavTicketDetailView,
+            SavTicketListView,
+        )
         from .views import (
             BonRamassageView,
             CatalogPartDetailView,
@@ -276,6 +282,26 @@ class InvenTreeLocation(
                 "conflicts/history/<int:pk>/resolve/",
                 ConflictHistoryResolveView.as_view(),
                 name="conflicts-history-resolve",
+            ),
+            path(
+                "ramassages/<int:pk>/retour/",
+                RamassageRetourView.as_view(),
+                name="ramassage-retour",
+            ),
+            path(
+                "sav/tickets/",
+                SavTicketListView.as_view(),
+                name="sav-ticket-list",
+            ),
+            path(
+                "sav/tickets/<int:pk>/",
+                SavTicketDetailView.as_view(),
+                name="sav-ticket-detail",
+            ),
+            path(
+                "sav/detruits/",
+                DestroyedItemsListView.as_view(),
+                name="sav-destroyed-list",
             ),
             path(
                 "alerts/stock/",

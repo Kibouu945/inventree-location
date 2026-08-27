@@ -21,14 +21,56 @@ export interface RecapVehicule {
 }
 
 export interface LigneBonRamassage {
+  /** Id de la ligne de réservation : c'est lui que la saisie retour renvoie. */
+  id: number;
   part: number;
   part_nom: string;
   quantite_demandee: number;
   quantite_livree: number;
   quantite_a_ramasser: number;
   quantite_retournee: number;
+  // Ventilation du retour réel (SCRUM-112) : ce qui revient en état, ce qui
+  // part au SAV, ce qui est détruit, ce qui manque.
+  quantite_ramassee: number;
+  quantite_sav: number;
+  quantite_detruite: number;
+  quantite_manquante: number;
+  facturer_client: boolean;
   etat_retour: string;
   commentaire: string;
+}
+
+export interface RetourRamassageLignePayload {
+  ligne: number;
+  quantite_ramassee: number;
+  quantite_sav: number;
+  quantite_detruite: number;
+  quantite_manquante: number;
+  facturer_client: boolean;
+  commentaire: string;
+}
+
+export interface RetourRamassagePayload {
+  commentaire: string;
+  lignes: RetourRamassageLignePayload[];
+}
+
+export interface RetourRamassageResponse {
+  reservation: number;
+  numero: string;
+  statut: string;
+  updated_lines: Array<{
+    id: number;
+    part: number;
+    quantite_ramassee: number;
+    quantite_sav: number;
+    quantite_detruite: number;
+    quantite_manquante: number;
+    facturer_client: boolean;
+    etat_retour: string;
+  }>;
+  /** Ids des tickets SAV ouverts par la saisie. */
+  sav_tickets: number[];
 }
 
 export interface Ramassage {

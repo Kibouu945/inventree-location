@@ -26,6 +26,7 @@ import {
   PrintableModalStyles
 } from '../print/printableModal';
 import { ownsKeys, syncOwnedParams } from '../urlState';
+import { RetourRamassageForm } from './RetourRamassageForm';
 import {
   buildRamassageQuery,
   DEFAULT_RAMASSAGE_FILTERS,
@@ -414,6 +415,20 @@ export function RamassagesList({
 
             <div className={PRINT_AREA}>
               <BonRamassageContent bon={bonQuery.data} />
+            </div>
+
+            {/* La saisie ne part pas à l'impression : un bon imprimé avec des
+                champs de formulaire vides ne sert à personne. */}
+            <div className={PRINT_HIDE}>
+              <RetourRamassageForm
+                context={context}
+                reservationId={bonQuery.data.reservation.id}
+                lignes={bonQuery.data.reservation.lignes}
+                onSaved={async () => {
+                  await bonQuery.refetch();
+                  await query.refetch();
+                }}
+              />
             </div>
           </Stack>
         ) : null}

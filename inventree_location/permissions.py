@@ -89,3 +89,14 @@ class PrestationRetourPermission(RoleBasedPermission):
     """Déclaration du retour d'une prestation (SCRUM-95) : rôle magasinier."""
 
     write_roles = (roles.ADMIN, roles.MAGASINIER)
+
+
+class SavPermission(RoleBasedPermission):
+    """Tickets SAV et objets détruits (SCRUM-112) : rôle sav.
+
+    Le défaut de `RoleBasedPermission` n'ouvre l'écriture qu'à l'admin : le
+    rôle dont c'est précisément le métier — « tickets réparation + historique »
+    dans `roles.py` — ne pouvait que lire ses propres tickets.
+    """
+
+    write_roles = (roles.ADMIN, roles.SAV)

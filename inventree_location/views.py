@@ -54,7 +54,6 @@ from .permissions import (
     RoleBasedPermission,
 )
 from .serializers import (
-    BonRamassageSerializer,
     CatalogPartSerializer,
     DeliverySerializer,
     ExampleSerializer,
@@ -63,10 +62,11 @@ from .serializers import (
     ManifestationSerializer,
     PrestationRetourSerializer,
     PrestationSerializer,
-    RamassageSerializer,
     RentableItemSerializer,
     ReservationCheckinSerializer,
     ReservationSerializer,
+    BonRamassageSerializer,
+    RamassageSerializer,
     ReservationTransitionSerializer,
     ReturnIncidentHistorySerializer,
     ReturnIncidentSerializer,
