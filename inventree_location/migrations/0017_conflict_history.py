@@ -6,7 +6,7 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
     dependencies = [
         ("part", "0001_initial"),
-        ("inventree_location", "0014_reservation_indexes_and_archiving"),
+        ("inventree_location", "0016_returnincident_bill_client"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
