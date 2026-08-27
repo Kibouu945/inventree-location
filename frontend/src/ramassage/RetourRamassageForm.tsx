@@ -175,90 +175,92 @@ export function RetourRamassageForm({
         </Alert>
       )}
 
-      <Table striped withTableBorder>
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>Article</Table.Th>
-            <Table.Th>Attendue</Table.Th>
-            <Table.Th>Revenue OK</Table.Th>
-            <Table.Th>SAV</Table.Th>
-            <Table.Th>Détruite</Table.Th>
-            <Table.Th>Manquante</Table.Th>
-            <Table.Th>Facturer</Table.Th>
-            <Table.Th>Commentaire</Table.Th>
-            <Table.Th>Total</Table.Th>
-          </Table.Tr>
-        </Table.Thead>
+      <Table.ScrollContainer minWidth={900}>
+        <Table striped withTableBorder>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Article</Table.Th>
+              <Table.Th>Attendue</Table.Th>
+              <Table.Th>Revenue OK</Table.Th>
+              <Table.Th>SAV</Table.Th>
+              <Table.Th>Détruite</Table.Th>
+              <Table.Th>Manquante</Table.Th>
+              <Table.Th>Facturer</Table.Th>
+              <Table.Th>Commentaire</Table.Th>
+              <Table.Th>Total</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
 
-        <Table.Tbody>
-          {lines.map((line, index) => {
-            const total = totalSaisi(line);
-            const invalide = total > line.quantiteAttendue;
+          <Table.Tbody>
+            {lines.map((line, index) => {
+              const total = totalSaisi(line);
+              const invalide = total > line.quantiteAttendue;
 
-            return (
-              <Table.Tr key={line.ligne}>
-                <Table.Td>
-                  <Text fw={500}>{line.partNom}</Text>
-                </Table.Td>
-                <Table.Td>{line.quantiteAttendue}</Table.Td>
+              return (
+                <Table.Tr key={line.ligne}>
+                  <Table.Td>
+                    <Text fw={500}>{line.partNom}</Text>
+                  </Table.Td>
+                  <Table.Td>{line.quantiteAttendue}</Table.Td>
 
-                {(
-                  [
-                    'quantite_ramassee',
-                    'quantite_sav',
-                    'quantite_detruite',
-                    'quantite_manquante'
-                  ] as const
-                ).map((champ) => (
-                  <Table.Td key={champ}>
-                    <NumberInput
-                      min={0}
-                      max={line.quantiteAttendue}
-                      value={line[champ]}
-                      onChange={(value) =>
-                        updateLine(index, { [champ]: numberValue(value) })
+                  {(
+                    [
+                      'quantite_ramassee',
+                      'quantite_sav',
+                      'quantite_detruite',
+                      'quantite_manquante'
+                    ] as const
+                  ).map((champ) => (
+                    <Table.Td key={champ}>
+                      <NumberInput
+                        min={0}
+                        max={line.quantiteAttendue}
+                        value={line[champ]}
+                        onChange={(value) =>
+                          updateLine(index, { [champ]: numberValue(value) })
+                        }
+                        w={90}
+                      />
+                    </Table.Td>
+                  ))}
+
+                  <Table.Td>
+                    <Checkbox
+                      checked={line.facturer_client}
+                      onChange={(event) =>
+                        updateLine(index, {
+                          facturer_client: event.currentTarget.checked
+                        })
                       }
-                      w={90}
                     />
                   </Table.Td>
-                ))}
 
-                <Table.Td>
-                  <Checkbox
-                    checked={line.facturer_client}
-                    onChange={(event) =>
-                      updateLine(index, {
-                        facturer_client: event.currentTarget.checked
-                      })
-                    }
-                  />
-                </Table.Td>
+                  <Table.Td>
+                    <Textarea
+                      autosize
+                      minRows={1}
+                      value={line.commentaire}
+                      onChange={(event) =>
+                        updateLine(index, {
+                          commentaire: event.currentTarget.value
+                        })
+                      }
+                      placeholder='État, casse, remarque…'
+                      w={200}
+                    />
+                  </Table.Td>
 
-                <Table.Td>
-                  <Textarea
-                    autosize
-                    minRows={1}
-                    value={line.commentaire}
-                    onChange={(event) =>
-                      updateLine(index, {
-                        commentaire: event.currentTarget.value
-                      })
-                    }
-                    placeholder='État, casse, remarque…'
-                    w={200}
-                  />
-                </Table.Td>
-
-                <Table.Td>
-                  <Badge color={invalide ? 'red' : 'green'}>
-                    {total} / {line.quantiteAttendue}
-                  </Badge>
-                </Table.Td>
-              </Table.Tr>
-            );
-          })}
-        </Table.Tbody>
-      </Table>
+                  <Table.Td>
+                    <Badge color={invalide ? 'red' : 'green'}>
+                      {total} / {line.quantiteAttendue}
+                    </Badge>
+                  </Table.Td>
+                </Table.Tr>
+              );
+            })}
+          </Table.Tbody>
+        </Table>
+      </Table.ScrollContainer>
 
       {enTrop.length > 0 && (
         <Alert color='red' title='Quantités invalides'>
