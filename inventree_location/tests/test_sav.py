@@ -36,6 +36,7 @@ from inventree_location.models import (
     RentableItem,
     Reservation,
     ReturnIncident,
+    ReturnIncidentType,
     SavTicket,
     StatutReservation,
     StatutSavTicket,
@@ -190,16 +191,46 @@ class TestStockReel:
 
     @pytest.mark.django_db
     def test_un_manquant_sort_du_stock(self, ligne, part):
-        ligne.quantite_manquante = 4
-        ligne.save(update_fields=["quantite_manquante"])
+        """Le manquant se lit dans le registre, alimenté par les deux écrans."""
+
+        ReturnIncident.objects.create(
+            line=ligne, type=ReturnIncidentType.MISSING, qty=4
+        )
 
         assert get_unavailable_stock_quantity(part.pk) == 4
         assert get_real_available_stock(part.pk) == 6
 
     @pytest.mark.django_db
-    def test_le_stock_reel_ne_descend_pas_sous_zero(self, ligne, part):
-        ligne.quantite_manquante = 99
+    def test_la_colonne_seule_ne_bouge_plus_le_stock(self, ligne, part):
+        """Invariant de l'unification : la colonne n'est plus la vérité.
+
+        Elle reste l'entrée de l'écran de ramassage, mais c'est le registre
+        d'incidents qui décide de ce qui sort du stock — sinon un manquant
+        constaté au check-in n'en sortait jamais.
+        """
+
+        ligne.quantite_manquante = 4
         ligne.save(update_fields=["quantite_manquante"])
+
+        assert get_unavailable_stock_quantity(part.pk) == 0
+
+    @pytest.mark.django_db
+    def test_un_manquant_du_checkin_sort_aussi_du_stock(self, ligne, part):
+        """C'était le bug : seule la colonne du ramassage était lue."""
+
+        ligne.quantite_retour_manquant = 2
+        ligne.save(update_fields=["quantite_retour_manquant"])
+        ReturnIncident.objects.create(
+            line=ligne, type=ReturnIncidentType.MISSING, qty=2
+        )
+
+        assert get_real_available_stock(part.pk) == 8
+
+    @pytest.mark.django_db
+    def test_le_stock_reel_ne_descend_pas_sous_zero(self, ligne, part):
+        ReturnIncident.objects.create(
+            line=ligne, type=ReturnIncidentType.MISSING, qty=99
+        )
 
         assert get_real_available_stock(part.pk) == 0
 

@@ -12,6 +12,8 @@ from .models import (
     LigneReservation,
     RentableItem,
     Reservation,
+    ReturnIncident,
+    ReturnIncidentType,
     SavTicket,
     StatutReservation,
     StatutSavTicket,
@@ -51,7 +53,13 @@ def get_unavailable_stock_quantity(part_id: int) -> int:
     Règle SCRUM-112 :
     - SAV ouvert / en réparation : indisponible temporairement.
     - Détruit : indisponible définitivement.
-    - Manquant : indisponible tant que la ligne de retour le signale.
+    - Manquant : indisponible tant qu'un incident le signale.
+
+    Deux sources, chacune pour ce qu'elle sait dire : les `SavTicket` portent un
+    cycle de vie (un objet réparé revient au stock), le registre d'incidents
+    porte le constat. Le manquant n'a pas de cycle de vie, il se lit donc dans
+    le registre — et le registre est alimenté par le check-in comme par le
+    ramassage.
     """
 
     sav_quantity = _sum_or_zero(
@@ -72,17 +80,22 @@ def get_unavailable_stock_quantity(part_id: int) -> int:
         "quantite",
     )
 
+    # Les manquants se lisent dans le registre d'incidents, pas dans la colonne
+    # `quantite_manquante` du ramassage : celle-ci ignorait les manquants
+    # constatés au check-in, qui ne sortaient donc jamais du stock réel. Les
+    # deux écrans alimentent le registre (cf. retours.py), une seule lecture
+    # suffit désormais et couvre les deux.
     missing_quantity = _sum_or_zero(
-        LigneReservation.objects.filter(
-            part_id=part_id,
-            quantite_manquante__gt=0,
-            reservation__statut__in=[
+        ReturnIncident.objects.filter(
+            line__part_id=part_id,
+            type=ReturnIncidentType.MISSING,
+            line__reservation__statut__in=[
                 StatutReservation.LIVREE,
                 StatutReservation.RETOURNEE,
                 StatutReservation.CLOTUREE,
             ],
         ),
-        "quantite_manquante",
+        "qty",
     )
 
     return sav_quantity + destroyed_quantity + missing_quantity
