@@ -12,6 +12,8 @@ from .models import (
     LigneReservation,
     RentableItem,
     Reservation,
+    ReturnIncident,
+    ReturnIncidentType,
     SavTicket,
     StatutReservation,
     StatutSavTicket,
@@ -105,6 +107,64 @@ def get_real_available_stock(part_id: int) -> int:
     unavailable_stock = get_unavailable_stock_quantity(part_id)
 
     return max(theoretical_stock - unavailable_stock, 0)
+
+
+#: Correspondance entre les quantités saisies au ramassage (SCRUM-112) et les
+#: types du journal d'incidents (SCRUM-93). Un objet envoyé au SAV est un objet
+#: cassé ; « ramassée OK » ne produit aucun incident.
+INCIDENTS_PAR_QUANTITE = (
+    ("quantite_sav", ReturnIncidentType.BROKEN),
+    ("quantite_detruite", ReturnIncidentType.DESTROYED),
+    ("quantite_manquante", ReturnIncidentType.MISSING),
+)
+
+
+def _sync_incidents(ligne: LigneReservation, user) -> None:
+    """Projette les quantités du ramassage dans le journal d'incidents.
+
+    `ReturnIncident` est le registre unique des dégâts : c'est lui que lisent
+    l'historique 90 jours, le rapport de retour d'une réservation, son PDF et le
+    rapport de pertes agrégé. Le ramassage écrivait ses propres colonnes sur la
+    ligne sans l'alimenter, si bien qu'un magasinier cochant « facturer » au
+    ramassage n'apparaissait dans aucun rapport — ceux-ci lisent
+    `ReturnIncident.bill_client`, l'autre moitié écrivait
+    `LigneReservation.facturer_client`. Deux vérités, deux compteurs.
+
+    La projection est idempotente : ré-enregistrer le retour ajuste les
+    quantités, et une quantité ramenée à 0 supprime l'incident correspondant —
+    il n'a pas de cycle de vie propre, contrairement au ticket SAV qu'on
+    clôture pour garder la trace.
+    """
+
+    for champ, type_incident in INCIDENTS_PAR_QUANTITE:
+        quantite = getattr(ligne, champ, 0) or 0
+        incident = ReturnIncident.objects.filter(
+            line=ligne,
+            type=type_incident,
+        ).first()
+
+        if quantite <= 0:
+            if incident is not None:
+                incident.delete()
+
+            continue
+
+        if incident is None:
+            ReturnIncident.objects.create(
+                line=ligne,
+                type=type_incident,
+                qty=quantite,
+                comment=ligne.commentaire,
+                bill_client=ligne.facturer_client,
+                reported_by=user,
+            )
+
+            continue
+
+        incident.qty = quantite
+        incident.comment = ligne.commentaire or incident.comment
+        incident.bill_client = ligne.facturer_client
+        incident.save()
 
 
 def _derive_return_state(ligne: LigneReservation) -> str:
@@ -436,6 +496,8 @@ class RamassageRetourView(APIView):
             ligne.quantite_retournee = ligne.quantite_ramassee
             ligne.etat_retour = _derive_return_state(ligne)
             ligne.save()
+
+            _sync_incidents(ligne, request.user)
 
             sav_ticket = _close_or_update_ticket(
                 ligne=ligne,

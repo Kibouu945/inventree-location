@@ -35,6 +35,7 @@ from inventree_location.models import (
     Prestation,
     RentableItem,
     Reservation,
+    ReturnIncident,
     SavTicket,
     StatutReservation,
     StatutSavTicket,
@@ -736,3 +737,129 @@ class TestCorrectionDuneDestruction:
 
         assert ticket.statut == StatutSavTicket.CLOTURE
         assert get_real_available_stock(part.pk) == 10
+
+
+class TestUnificationFacturation:
+    """Un seul registre de dégâts, un seul drapeau de facturation.
+
+    Le ramassage écrivait `LigneReservation.facturer_client` et
+    `SavTicket.facturer_client` ; les rapports lisent
+    `ReturnIncident.bill_client`. Cocher « facturer » au ramassage restait donc
+    invisible dans le rapport de pertes.
+    """
+
+    def _saisir(self, factory, magasinier, reservation, ligne, **quantites):
+        return _patch_retour(
+            factory,
+            magasinier,
+            reservation,
+            {"lignes": [{"ligne": ligne.pk, **quantites}]},
+        )
+
+    def _rapport(self, factory, user):
+        from inventree_location.views import ReturnLossReportView
+
+        request = factory.get("/plugin/inventree-location/returns/loss-report/")
+        force_authenticate(request, user=user)
+        return ReturnLossReportView.as_view()(request)
+
+    @pytest.mark.django_db
+    def test_le_ramassage_alimente_le_journal_dincidents(
+        self, factory, magasinier, reservation, ligne
+    ):
+        self._saisir(
+            factory, magasinier, reservation, ligne,
+            quantite_ramassee=2, quantite_sav=2,
+            quantite_detruite=1, quantite_manquante=1,
+            facturer_client=True, commentaire="Toile déchirée",
+        )
+
+        incidents = {i.type: i for i in ReturnIncident.objects.filter(line=ligne)}
+
+        assert set(incidents) == {"broken", "destroyed", "missing"}
+        assert incidents["broken"].qty == 2
+        assert incidents["destroyed"].qty == 1
+        assert incidents["missing"].qty == 1
+        # Le drapeau du formulaire arrive jusqu'au registre lu par les rapports.
+        assert all(i.bill_client for i in incidents.values())
+        assert incidents["broken"].comment == "Toile déchirée"
+        assert incidents["broken"].reported_by == magasinier
+
+    @pytest.mark.django_db
+    def test_le_rapport_de_pertes_voit_la_saisie_du_ramassage(
+        self, factory, magasinier, reservation, ligne
+    ):
+        self._saisir(
+            factory, magasinier, reservation, ligne,
+            quantite_ramassee=2, quantite_sav=2,
+            quantite_detruite=1, quantite_manquante=1,
+            facturer_client=True,
+        )
+
+        rapport = self._rapport(factory, magasinier)
+
+        assert rapport.data["total_broken"] == 2
+        assert rapport.data["total_destroyed"] == 1
+        assert rapport.data["total_missing"] == 1
+        # C'était le bug : 0 facturé alors que la case était cochée.
+        assert rapport.data["total_billed"] == 4
+
+    @pytest.mark.django_db
+    def test_sans_la_case_rien_nest_facture(
+        self, factory, magasinier, reservation, ligne
+    ):
+        self._saisir(
+            factory, magasinier, reservation, ligne,
+            quantite_ramassee=5, quantite_manquante=1, facturer_client=False,
+        )
+
+        rapport = self._rapport(factory, magasinier)
+
+        assert rapport.data["total_missing"] == 1
+        assert rapport.data["total_billed"] == 0
+
+    @pytest.mark.django_db
+    def test_la_projection_est_idempotente(
+        self, factory, magasinier, reservation, ligne
+    ):
+        for _ in range(3):
+            self._saisir(
+                factory, magasinier, reservation, ligne,
+                quantite_ramassee=5, quantite_manquante=1,
+            )
+
+        assert ReturnIncident.objects.filter(line=ligne).count() == 1
+
+    @pytest.mark.django_db
+    def test_une_correction_retire_lincident(
+        self, factory, magasinier, reservation, ligne
+    ):
+        self._saisir(
+            factory, magasinier, reservation, ligne,
+            quantite_ramassee=5, quantite_detruite=1,
+        )
+
+        assert ReturnIncident.objects.filter(line=ligne).count() == 1
+
+        self._saisir(factory, magasinier, reservation, ligne, quantite_ramassee=6)
+
+        assert ReturnIncident.objects.filter(line=ligne).count() == 0
+        assert self._rapport(factory, magasinier).data["total_destroyed"] == 0
+
+    @pytest.mark.django_db
+    def test_decocher_facturer_met_a_jour_le_registre(
+        self, factory, magasinier, reservation, ligne
+    ):
+        self._saisir(
+            factory, magasinier, reservation, ligne,
+            quantite_ramassee=5, quantite_manquante=1, facturer_client=True,
+        )
+
+        assert self._rapport(factory, magasinier).data["total_billed"] == 1
+
+        self._saisir(
+            factory, magasinier, reservation, ligne,
+            quantite_ramassee=5, quantite_manquante=1, facturer_client=False,
+        )
+
+        assert self._rapport(factory, magasinier).data["total_billed"] == 0
