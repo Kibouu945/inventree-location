@@ -187,6 +187,14 @@ class RentableItem(TimestampedModel):
     seuil_alerte_haut = models.PositiveIntegerField(
         null=True, blank=True, verbose_name=_("seuil d'alerte haut")
     )
+    #: Coupe les alertes de seuil pour cet article, sans effacer les seuils
+    #: eux-mêmes (CDC V06 : « seuil haut + seuil bas + booléen pour désactiver
+    #: les alertes »). Un article dont on connaît les seuils mais qu'on ne veut
+    #: pas voir remonter — surplus assumé, article en fin de vie.
+    alertes_desactivees = models.BooleanField(
+        default=False,
+        verbose_name=_("alertes désactivées"),
+    )
 
     class Meta:
         app_label = "inventree_location"

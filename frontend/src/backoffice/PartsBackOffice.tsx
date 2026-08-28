@@ -52,6 +52,7 @@ function emptyForm(): BackOfficePartFormValues {
     consommable: false,
     seuil_alerte_bas: null,
     seuil_alerte_haut: null,
+    alertes_desactivees: false,
     stock_initial: 0
   };
 }
@@ -69,6 +70,7 @@ function formFromPart(part: BackOfficePart): BackOfficePartFormValues {
     consommable: part.consommable,
     seuil_alerte_bas: part.seuil_alerte_bas,
     seuil_alerte_haut: part.seuil_alerte_haut,
+    alertes_desactivees: part.alertes_desactivees,
     stock_initial: 0
   };
 }
@@ -189,6 +191,7 @@ export function PartsBackOffice({
         consommable: formValues.consommable,
         seuil_alerte_bas: formValues.seuil_alerte_bas,
         seuil_alerte_haut: formValues.seuil_alerte_haut,
+        alertes_desactivees: formValues.alertes_desactivees,
         stock_initial: formValues.stock_initial
       };
 
@@ -460,6 +463,15 @@ export function PartsBackOffice({
             value={formValues.stock_initial}
             onChange={(value) =>
               updateField('stock_initial', numberOrZero(value))
+            }
+          />
+
+          <Checkbox
+            label='Alertes de seuil désactivées'
+            description='Conserve les seuils mais cesse de faire remonter cet article dans les alertes.'
+            checked={formValues.alertes_desactivees}
+            onChange={(event) =>
+              updateField('alertes_desactivees', event.currentTarget.checked)
             }
           />
 

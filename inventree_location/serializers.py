@@ -36,6 +36,7 @@ from .models import (
 )
 from .services.workflow_service import transition_reservation_status
 from .stock import compute_prestation_stock
+from .ramassage import lignes_a_ramasser
 from .sav import get_real_available_stock
 
 
@@ -851,14 +852,14 @@ class RamassageSerializer(serializers.ModelSerializer):
         une fois par ligne de la liste.
         """
 
-        return len(obj.lignes.all())
+        return len(lignes_a_ramasser(obj))
 
     def get_quantite_totale(self, obj):
         """Quantité totale à ramasser."""
 
         total = 0
 
-        for ligne in obj.lignes.all():
+        for ligne in lignes_a_ramasser(obj):
             total += ligne.quantite_livree or ligne.quantite_demandee or 0
 
         return total
@@ -898,7 +899,7 @@ class BonRamassageSerializer(RamassageSerializer):
 
         # Pas de `select_related` ici : la vue a déjà préchargé `lignes__part`,
         # et le rajouter annulerait ce prefetch au profit d'une requête neuve.
-        for ligne in obj.lignes.all():
+        for ligne in lignes_a_ramasser(obj):
             lignes.append({
                 "id": ligne.id,
                 "part": ligne.part_id,

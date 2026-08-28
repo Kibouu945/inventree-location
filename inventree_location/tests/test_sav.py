@@ -530,3 +530,101 @@ class TestTicketsSav:
         assert response.status_code == status.HTTP_200_OK
         # Seuls les tickets de destruction, pas les réparations en cours.
         assert response.data["count"] == 1
+
+
+class TestPerimetreSaisieRetour:
+    """La saisie retour a le même périmètre que le bon : rien de virtuel."""
+
+    @pytest.fixture
+    def ligne_virtuelle(self, db, reservation):
+        article = Part.objects.create(name="Prestation montage", virtual=True)
+        RentableItem.objects.create(part=article, is_virtual=True)
+        return LigneReservation.objects.create(
+            reservation=reservation,
+            part=article,
+            quantite_demandee=1,
+            quantite_livree=1,
+        )
+
+    @pytest.mark.django_db
+    def test_une_ligne_virtuelle_est_refusee(
+        self, factory, magasinier, reservation, ligne_virtuelle
+    ):
+        response = _patch_retour(
+            factory,
+            magasinier,
+            reservation,
+            {"lignes": [{"ligne": ligne_virtuelle.pk, "quantite_ramassee": 1}]},
+        )
+
+        ligne_virtuelle.refresh_from_db()
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert ligne_virtuelle.quantite_ramassee == 0
+
+    @pytest.mark.django_db
+    def test_la_ligne_physique_passe_toujours(
+        self, factory, magasinier, reservation, ligne, ligne_virtuelle
+    ):
+        response = _patch_retour(
+            factory,
+            magasinier,
+            reservation,
+            {"lignes": [{"ligne": ligne.pk, "quantite_ramassee": 6}]},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+
+
+class TestAlertesDesactivees:
+    """Le booléen du CDC doit vraiment faire taire les alertes."""
+
+    @pytest.fixture
+    def consommable_sous_le_seuil(self, db):
+        article = Part.objects.create(name="Gaffer noir")
+        StockItem.objects.create(part=article, quantity=1)
+        return RentableItem.objects.create(
+            part=article,
+            consommable=True,
+            seuil_alerte_bas=5,
+        )
+
+    def _alertes(self, factory, user):
+        from inventree_location.views import StockAlertListView
+
+        request = factory.get("/plugin/inventree-location/alerts/stock/")
+        force_authenticate(request, user=user)
+        return StockAlertListView.as_view()(request)
+
+    @pytest.mark.django_db
+    def test_alerte_remontee_par_defaut(
+        self, factory, magasinier, consommable_sous_le_seuil
+    ):
+        response = self._alertes(factory, magasinier)
+
+        noms = [a["part_name"] for a in response.data["alerts"]]
+
+        assert "Gaffer noir" in noms
+
+    @pytest.mark.django_db
+    def test_alertes_desactivees_fait_taire_larticle(
+        self, factory, magasinier, consommable_sous_le_seuil
+    ):
+        consommable_sous_le_seuil.alertes_desactivees = True
+        consommable_sous_le_seuil.save(update_fields=["alertes_desactivees"])
+
+        response = self._alertes(factory, magasinier)
+
+        noms = [a["part_name"] for a in response.data["alerts"]]
+
+        assert "Gaffer noir" not in noms
+
+    @pytest.mark.django_db
+    def test_les_seuils_sont_conserves(self, consommable_sous_le_seuil):
+        """Couper les alertes n'efface pas les seuils : on peut les rallumer."""
+
+        consommable_sous_le_seuil.alertes_desactivees = True
+        consommable_sous_le_seuil.save(update_fields=["alertes_desactivees"])
+        consommable_sous_le_seuil.refresh_from_db()
+
+        assert consommable_sous_le_seuil.seuil_alerte_bas == 5

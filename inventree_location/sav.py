@@ -18,6 +18,7 @@ from .models import (
     TypeSavTicket,
 )
 from .permissions import ReturnCheckinPermission, SavPermission
+from .ramassage import lignes_a_ramasser
 
 
 SAV_BLOCKING_STATUSES = [
@@ -368,7 +369,9 @@ class RamassageRetourView(APIView):
         """Enregistre les quantités ramassées / SAV / détruites / manquantes."""
 
         reservation = (
-            Reservation.objects.prefetch_related("lignes").filter(pk=pk).first()
+            Reservation.objects.prefetch_related("lignes__part__rentable_info")
+            .filter(pk=pk)
+            .first()
         )
 
         if reservation is None:
@@ -382,6 +385,9 @@ class RamassageRetourView(APIView):
 
         updated_lines = []
         created_or_updated_tickets = []
+        # Même périmètre que le bon de ramassage : un article virtuel n'a rien
+        # à faire revenir, donc rien à ventiler ici non plus.
+        ramassables = {ligne.pk for ligne in lignes_a_ramasser(reservation)}
 
         for line_data in serializer.validated_data["lignes"]:
             ligne = line_data["_ligne_instance"]
@@ -391,6 +397,18 @@ class RamassageRetourView(APIView):
                     {
                         "detail": (
                             "Une ligne fournie ne correspond pas à la réservation."
+                        ),
+                        "ligne": ligne.pk,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if ligne.pk not in ramassables:
+                return Response(
+                    {
+                        "detail": (
+                            "Cette ligne ne se ramasse pas : un article virtuel "
+                            "n'a pas d'existence physique."
                         ),
                         "ligne": ligne.pk,
                     },

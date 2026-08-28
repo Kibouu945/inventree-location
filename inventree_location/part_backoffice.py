@@ -164,6 +164,7 @@ class PartBackOfficeSerializer(serializers.Serializer):
         allow_null=True,
         min_value=0,
     )
+    alertes_desactivees = serializers.BooleanField(required=False, default=False)
 
     # Stock initial : crée un StockItem InvenTree (pas un compteur local).
     stock_initial = serializers.FloatField(required=False, min_value=0, default=0)
@@ -192,6 +193,9 @@ class PartBackOfficeSerializer(serializers.Serializer):
             "seuil_alerte_haut": rentable_item.seuil_alerte_haut
             if rentable_item
             else None,
+            "alertes_desactivees": bool(rentable_item.alertes_desactivees)
+            if rentable_item
+            else False,
         }
 
     def _effective(self, attrs, field, default=False):
@@ -263,6 +267,7 @@ class PartBackOfficeSerializer(serializers.Serializer):
             "is_virtual": virtual,
             "seuil_alerte_bas": validated_data.pop("seuil_alerte_bas", None),
             "seuil_alerte_haut": validated_data.pop("seuil_alerte_haut", None),
+            "alertes_desactivees": validated_data.pop("alertes_desactivees", False),
         }
 
         part = Part(
@@ -303,6 +308,7 @@ class PartBackOfficeSerializer(serializers.Serializer):
             "consommable",
             "seuil_alerte_bas",
             "seuil_alerte_haut",
+            "alertes_desactivees",
         ]
 
         rentable_data = {}

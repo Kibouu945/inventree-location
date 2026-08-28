@@ -219,3 +219,83 @@ class TestBonRamassage:
         response = BonRamassageView.as_view()(request, pk=9999)
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+class TestPerimetreDuRamassage:
+    """Un article virtuel n'a rien à faire revenir (CDC V06 / RET-04)."""
+
+    @pytest.fixture
+    def part_physique(self, db):
+        from part.models import Part
+
+        from inventree_location.models import RentableItem
+
+        article = Part.objects.create(name="Tente 4 places")
+        RentableItem.objects.create(part=article, is_virtual=False)
+        return article
+
+    @pytest.fixture
+    def part_virtuelle(self, db):
+        from part.models import Part
+
+        from inventree_location.models import RentableItem
+
+        article = Part.objects.create(name="Prestation montage", virtual=True)
+        RentableItem.objects.create(part=article, is_virtual=True)
+        return article
+
+    @pytest.fixture
+    def lignes(self, db, reservation, part_physique, part_virtuelle):
+        from inventree_location.models import LigneReservation
+
+        physique = LigneReservation.objects.create(
+            reservation=reservation,
+            part=part_physique,
+            quantite_demandee=6,
+            quantite_livree=6,
+        )
+        virtuelle = LigneReservation.objects.create(
+            reservation=reservation,
+            part=part_virtuelle,
+            quantite_demandee=1,
+            quantite_livree=1,
+        )
+        return physique, virtuelle
+
+    def test_la_liste_ne_compte_que_le_physique(self, factory, user, lignes):
+        response = _get(factory, user)
+
+        ligne = response.data["results"][0]
+
+        # 2 lignes en base, 1 seule à ramasser.
+        assert ligne["nb_objets"] == 1
+        assert ligne["quantite_totale"] == 6
+
+    def test_le_bon_nexpose_que_le_physique(self, factory, user, reservation, lignes):
+        request = factory.get(f"{RAMASSAGES_URL}{reservation.pk}/bon/")
+        force_authenticate(request, user=user)
+
+        response = BonRamassageView.as_view()(request, pk=reservation.pk)
+
+        noms = [ligne["part_nom"] for ligne in response.data["reservation"]["lignes"]]
+
+        assert noms == ["Tente 4 places"]
+
+    def test_une_part_sans_extension_reste_ramassable(
+        self, factory, user, reservation
+    ):
+        """Pas d'extension louable = pas virtuel : on ne l'écarte pas."""
+
+        from part.models import Part
+
+        from inventree_location.models import LigneReservation
+
+        orpheline = Part.objects.create(name="Sans extension")
+        LigneReservation.objects.create(
+            reservation=reservation,
+            part=orpheline,
+            quantite_demandee=2,
+            quantite_livree=2,
+        )
+
+        assert _get(factory, user).data["results"][0]["nb_objets"] == 1

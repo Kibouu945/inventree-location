@@ -18,6 +18,8 @@ export interface BackOfficePart {
   consommable: boolean;
   seuil_alerte_bas: number | null;
   seuil_alerte_haut: number | null;
+  /** Coupe les alertes de seuil sans effacer les seuils (CDC V06). */
+  alertes_desactivees: boolean;
 }
 
 export interface BackOfficePartFormValues {
@@ -32,6 +34,7 @@ export interface BackOfficePartFormValues {
   consommable: boolean;
   seuil_alerte_bas: number | null;
   seuil_alerte_haut: number | null;
+  alertes_desactivees: boolean;
   /** Quantité à mettre en stock : crée un StockItem InvenTree. */
   stock_initial: number;
 }

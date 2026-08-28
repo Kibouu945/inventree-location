@@ -417,7 +417,7 @@ class RamassageListView(generics.ListAPIView):
                 "demandeur",
             )
             .prefetch_related(
-                "lignes",
+                "lignes__part__rentable_info",
             )
             .filter(date_retour_prevue__isnull=False)
             .exclude(
@@ -494,8 +494,7 @@ class BonRamassageView(APIView):
                 "demandeur",
             )
             .prefetch_related(
-                "lignes",
-                "lignes__part",
+                "lignes__part__rentable_info",
             )
             .filter(pk=pk)
             .first()
@@ -1567,8 +1566,12 @@ class StockAlertListView(APIView):
         # Les articles virtuels (services, ex. « nettoyage ») n'ont pas de stock
         # physique : ni seuil, ni tension n'ont de sens pour eux. Sans ce filtre
         # ils remontaient en alerte à 200 % de « 0 louable(s) ».
+        # `alertes_desactivees` coupe l'article sans effacer ses seuils : sans
+        # ce filtre, le booléen du CDC n'aurait aucun effet.
         rentable_items = (
-            RentableItem.objects.select_related("part").filter(is_virtual=False).all()
+            RentableItem.objects.select_related("part")
+            .filter(is_virtual=False, alertes_desactivees=False)
+            .all()
         )
 
         if scope_ids is not None:
