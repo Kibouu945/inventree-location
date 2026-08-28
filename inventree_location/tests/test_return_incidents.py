@@ -615,8 +615,8 @@ class TestCoexistenceCheckinEtIncidents:
     def test_suppression_dincident_preserve_letat_du_checkin(
         self, factory, magasinier, ligne
     ):
-        ligne.quantite_retour_ok = ligne.quantite_demandee
-        ligne.save(update_fields=["quantite_retour_ok"])
+        ligne.quantite_retournee = ligne.quantite_demandee
+        ligne.save(update_fields=["quantite_retournee"])
 
         incident = ReturnIncident.objects.create(
             line=ligne, type=ReturnIncidentType.MISSING, qty=1
@@ -646,8 +646,8 @@ class TestCoexistenceCheckinEtIncidents:
 
     @pytest.mark.django_db
     def test_un_incident_prime_sur_le_checkin(self, factory, magasinier, ligne):
-        ligne.quantite_retour_ok = ligne.quantite_demandee
-        ligne.save(update_fields=["quantite_retour_ok"])
+        ligne.quantite_retournee = ligne.quantite_demandee
+        ligne.save(update_fields=["quantite_retournee"])
 
         payload = {
             "line": ligne.pk,

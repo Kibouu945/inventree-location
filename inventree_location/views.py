@@ -54,9 +54,11 @@ from .permissions import (
     RoleBasedPermission,
 )
 from .retours import (
-    INCIDENTS_CHECKIN,
+    CHAMPS_CHECKIN,
     etat_retour_de_la_ligne,
     projeter_incidents,
+    quantites_depuis_payload,
+    quantites_du_retour,
 )
 from .serializers import (
     CatalogPartSerializer,
@@ -1236,17 +1238,7 @@ class ReservationCheckinView(APIView):
                 "numero": reservation.numero,
                 "statut": reservation.statut,
                 "lignes": [
-                    {
-                        "id": ligne.pk,
-                        "part": ligne.part_id,
-                        "part_name": getattr(ligne.part, "name", str(ligne.part)),
-                        "quantite_demandee": ligne.quantite_demandee,
-                        "quantite_retour_ok": ligne.quantite_retour_ok,
-                        "quantite_retour_manquant": ligne.quantite_retour_manquant,
-                        "quantite_retour_casse": ligne.quantite_retour_casse,
-                        "commentaire": ligne.commentaire,
-                    }
-                    for ligne in reservation.lignes.all()
+                    self._ligne_pointee(ligne) for ligne in reservation.lignes.all()
                 ],
             },
             status=status.HTTP_200_OK,
@@ -1297,18 +1289,35 @@ class ReservationCheckinView(APIView):
         return errors
 
     @staticmethod
+    def _ligne_pointee(ligne):
+        """Ligne telle que la renvoie le check-in.
+
+        Forme inchangée pour le front ; les chiffres se déduisent désormais du
+        registre d'incidents, une seule passe par ligne.
+        """
+
+        quantites = quantites_du_retour(ligne)
+
+        return {
+            "id": ligne.pk,
+            "part": ligne.part_id,
+            "part_name": getattr(ligne.part, "name", str(ligne.part)),
+            "quantite_demandee": ligne.quantite_demandee,
+            "quantite_retour_ok": quantites["ok"],
+            "quantite_retour_manquant": quantites["manquant"],
+            "quantite_retour_casse": quantites["casse"],
+            "commentaire": ligne.commentaire,
+        }
+
+    @staticmethod
     def _apply_checkin_ligne(ligne, entry, user=None):
         """Reporte une entree de check-in sur la ligne et la sauvegarde."""
 
-        ligne.quantite_retour_ok = entry["ok"]
-        ligne.quantite_retour_manquant = entry["manquant"]
-        ligne.quantite_retour_casse = entry["casse"]
+        # Seule quantité conservée sur la ligne : ce qui est revenu
+        # physiquement. Le manquant n'est pas revenu, le cassé si.
         ligne.quantite_retournee = entry["ok"] + entry["casse"]
 
         update_fields = [
-            "quantite_retour_ok",
-            "quantite_retour_manquant",
-            "quantite_retour_casse",
             "quantite_retournee",
             "etat_retour",
             "updated_at",
@@ -1326,7 +1335,11 @@ class ReservationCheckinView(APIView):
         # ramassage, sinon un objet cassé constaté au check-in n'apparaissait
         # dans aucun rapport. Pas de décision de facturation ici : `facturer`
         # reste à None, le drapeau déjà posé est conservé.
-        projeter_incidents(ligne, user, INCIDENTS_CHECKIN)
+        projeter_incidents(
+            ligne,
+            user,
+            quantites_depuis_payload(entry, CHAMPS_CHECKIN),
+        )
         # La règle était réécrite ici alors qu'elle existait déjà dans
         # `retours.py` : deux copies pour une seule règle.
         ligne.etat_retour = etat_retour_de_la_ligne(ligne)

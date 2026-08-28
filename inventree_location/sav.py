@@ -22,9 +22,11 @@ from .models import (
 from .permissions import ReturnCheckinPermission, SavPermission
 from .ramassage import lignes_a_ramasser
 from .retours import (
-    INCIDENTS_RAMASSAGE,
+    CHAMPS_RAMASSAGE,
     appliquer_etat_retour,
     projeter_incidents,
+    quantites_depuis_payload,
+    quantites_du_retour,
 )
 
 
@@ -419,13 +421,16 @@ class RamassageRetourView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            ligne.quantite_ramassee = line_data.get("quantite_ramassee", 0)
-            ligne.quantite_sav = line_data.get("quantite_sav", 0)
-            ligne.quantite_detruite = line_data.get("quantite_detruite", 0)
-            ligne.quantite_manquante = line_data.get("quantite_manquante", 0)
-            ligne.facturer_client = line_data.get("facturer_client", False)
+            ramassee = line_data.get("quantite_ramassee", 0)
+            au_sav = line_data.get("quantite_sav", 0)
+            detruite = line_data.get("quantite_detruite", 0)
+            facturer = line_data.get("facturer_client", False)
+
             ligne.commentaire = line_data.get("commentaire", "")
-            ligne.quantite_retournee = ligne.quantite_ramassee
+            # Ce qui est revenu physiquement : conforme, abîmé ou détruit. Le
+            # manquant, lui, n'est pas revenu. Seule quantité conservée sur la
+            # ligne, le reste vit dans le registre d'incidents.
+            ligne.quantite_retournee = ramassee + au_sav + detruite
             ligne.save()
 
             # Le registre d'incidents d'abord, l'état de la ligne ensuite : il
@@ -433,39 +438,43 @@ class RamassageRetourView(APIView):
             projeter_incidents(
                 ligne,
                 request.user,
-                INCIDENTS_RAMASSAGE,
-                facturer=ligne.facturer_client,
+                quantites_depuis_payload(line_data, CHAMPS_RAMASSAGE),
+                facturer=facturer,
             )
             appliquer_etat_retour(ligne)
 
             sav_ticket = _close_or_update_ticket(
                 ligne=ligne,
                 type_ticket=TypeSavTicket.REPARATION,
-                quantite=ligne.quantite_sav,
+                quantite=au_sav,
                 statut_si_quantite=StatutSavTicket.OUVERT,
                 user=request.user,
-                facturer_client=ligne.facturer_client,
+                facturer_client=facturer,
                 description=ligne.commentaire,
             )
 
             destruction_ticket = _close_or_update_ticket(
                 ligne=ligne,
                 type_ticket=TypeSavTicket.DESTRUCTION,
-                quantite=ligne.quantite_detruite,
+                quantite=detruite,
                 statut_si_quantite=StatutSavTicket.DETRUIT,
                 user=request.user,
-                facturer_client=ligne.facturer_client,
+                facturer_client=facturer,
                 description=ligne.commentaire,
             )
+
+            # Forme inchangée pour le front ; relu depuis le registre, ce qui
+            # vérifie au passage que la projection a bien eu lieu.
+            quantites = quantites_du_retour(ligne)
 
             updated_lines.append({
                 "id": ligne.pk,
                 "part": ligne.part_id,
-                "quantite_ramassee": ligne.quantite_ramassee,
-                "quantite_sav": ligne.quantite_sav,
-                "quantite_detruite": ligne.quantite_detruite,
-                "quantite_manquante": ligne.quantite_manquante,
-                "facturer_client": ligne.facturer_client,
+                "quantite_ramassee": quantites["ok"],
+                "quantite_sav": quantites["casse"],
+                "quantite_detruite": quantites["detruit"],
+                "quantite_manquante": quantites["manquant"],
+                "facturer_client": facturer,
                 "etat_retour": ligne.etat_retour,
             })
 

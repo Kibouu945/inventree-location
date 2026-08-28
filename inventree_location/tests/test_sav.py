@@ -42,6 +42,7 @@ from inventree_location.models import (
     StatutSavTicket,
     TypeSavTicket,
 )
+from inventree_location.retours import quantites_du_retour
 from inventree_location.sav import (
     DestroyedItemsListView,
     RamassageRetourView,
@@ -201,25 +202,29 @@ class TestStockReel:
         assert get_real_available_stock(part.pk) == 6
 
     @pytest.mark.django_db
-    def test_la_colonne_seule_ne_bouge_plus_le_stock(self, ligne, part):
-        """Invariant de l'unification : la colonne n'est plus la vérité.
+    def test_la_ligne_ne_porte_plus_de_quantites_de_probleme(self, ligne):
+        """Invariant de l'unification : sept colonnes ont disparu du modèle.
 
-        Elle reste l'entrée de l'écran de ramassage, mais c'est le registre
-        d'incidents qui décide de ce qui sort du stock — sinon un manquant
-        constaté au check-in n'en sortait jamais.
+        Elles disaient ce que le registre d'incidents dit déjà, et deux écrans
+        pointant la même ligne y écrivaient deux vérités.
         """
 
-        ligne.quantite_manquante = 4
-        ligne.save(update_fields=["quantite_manquante"])
-
-        assert get_unavailable_stock_quantity(part.pk) == 0
+        for colonne in [
+            "quantite_ramassee",
+            "quantite_sav",
+            "quantite_detruite",
+            "quantite_manquante",
+            "facturer_client",
+            "quantite_retour_ok",
+            "quantite_retour_manquant",
+            "quantite_retour_casse",
+        ]:
+            assert not hasattr(ligne, colonne), colonne
 
     @pytest.mark.django_db
     def test_un_manquant_du_checkin_sort_aussi_du_stock(self, ligne, part):
         """C'était le bug : seule la colonne du ramassage était lue."""
 
-        ligne.quantite_retour_manquant = 2
-        ligne.save(update_fields=["quantite_retour_manquant"])
         ReturnIncident.objects.create(
             line=ligne, type=ReturnIncidentType.MISSING, qty=2
         )
@@ -269,11 +274,14 @@ class TestSaisieRetour:
         ligne.refresh_from_db()
         reservation.refresh_from_db()
 
-        assert ligne.quantite_ramassee == 3
-        assert ligne.quantite_sav == 1
-        assert ligne.quantite_detruite == 1
-        assert ligne.quantite_manquante == 1
-        assert ligne.quantite_retournee == 3
+        quantites = quantites_du_retour(ligne)
+
+        assert quantites["ok"] == 3
+        assert quantites["casse"] == 1
+        assert quantites["detruit"] == 1
+        assert quantites["manquant"] == 1
+        # Revenu physiquement : conforme + abîmé + détruit. Le manquant, non.
+        assert ligne.quantite_retournee == 5
         # Plusieurs natures sur la ligne : la plus grave l'emporte (règle
         # unique, cf. retours.py). La ventilation détaillée vit dans les
         # incidents et les tickets SAV.
@@ -382,7 +390,7 @@ class TestSaisieRetour:
         ligne.refresh_from_db()
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert ligne.quantite_ramassee == 0
+        assert quantites_du_retour(ligne)["ok"] == 0
 
     @pytest.mark.django_db
     def test_ligne_dune_autre_reservation_refusee(
@@ -594,7 +602,7 @@ class TestPerimetreSaisieRetour:
         ligne_virtuelle.refresh_from_db()
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert ligne_virtuelle.quantite_ramassee == 0
+        assert quantites_du_retour(ligne_virtuelle)["ok"] == 0
 
     @pytest.mark.django_db
     def test_la_ligne_physique_passe_toujours(
@@ -702,7 +710,7 @@ class TestCorrectionDuneDestruction:
 
         assert ticket.statut == StatutSavTicket.CLOTURE
         assert ticket.quantite == 0
-        assert ligne.quantite_detruite == 0
+        assert quantites_du_retour(ligne)["detruit"] == 0
         assert get_real_available_stock(part.pk) == 10
 
     @pytest.mark.django_db

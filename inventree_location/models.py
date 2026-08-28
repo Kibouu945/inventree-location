@@ -569,31 +569,14 @@ class LigneReservation(TimestampedModel):
     quantite_livree = models.PositiveIntegerField(
         default=0, verbose_name=_("quantité livrée")
     )
+    #: Ce qui est revenu physiquement, conforme ou non — seule quantité de
+    #: retour stockée ici. Trois fonctionnalités avaient ajouté sept colonnes
+    #: pour dire ce que le registre `ReturnIncident` dit déjà (combien manque,
+    #: combien est cassé, combien est détruit, et faut-il facturer) ; elles se
+    #: contredisaient dès que deux écrans pointaient la même ligne. Cf.
+    #: `retours.quantites_du_retour` et la migration `0021`.
     quantite_retournee = models.PositiveIntegerField(
-        default=0, verbose_name=_("quantité retournée")
-    )
-
-    # SCRUM-112 — détail du ramassage et du stock réel.
-    quantite_ramassee = models.PositiveIntegerField(
-        default=0,
-        verbose_name=_("quantité ramassée bonne"),
-        help_text=_("Quantité ramassée en bon état, réintégrable au stock réel."),
-    )
-    quantite_sav = models.PositiveIntegerField(
-        default=0,
-        verbose_name=_("quantité à mettre au SAV"),
-    )
-    quantite_detruite = models.PositiveIntegerField(
-        default=0,
-        verbose_name=_("quantité détruite"),
-    )
-    quantite_manquante = models.PositiveIntegerField(
-        default=0,
-        verbose_name=_("quantité manquante"),
-    )
-    facturer_client = models.BooleanField(
-        default=False,
-        verbose_name=_("facturer le client"),
+        default=0, verbose_name=_("quantité revenue")
     )
 
     # Vocabulaire unique : cf. `EtatRetour` et `retours.py`.
@@ -603,17 +586,6 @@ class LigneReservation(TimestampedModel):
         default="",
         choices=EtatRetour.choices,
         verbose_name=_("état du retour"),
-    )
-    # Détail du check-in retour (SCRUM-94) : la somme des 3 doit égaler
-    # quantite_demandee. quantite_retournee reste la vue agrégée (ok + casse).
-    quantite_retour_ok = models.PositiveIntegerField(
-        default=0, verbose_name=_("quantité retournée OK")
-    )
-    quantite_retour_manquant = models.PositiveIntegerField(
-        default=0, verbose_name=_("quantité manquante")
-    )
-    quantite_retour_casse = models.PositiveIntegerField(
-        default=0, verbose_name=_("quantité cassée")
     )
     commentaire = models.TextField(
         blank=True, default="", verbose_name=_("commentaire")

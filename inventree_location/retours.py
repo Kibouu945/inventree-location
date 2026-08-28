@@ -47,23 +47,70 @@ ETAT_PAR_TYPE = {
     ReturnIncidentType.MISSING: EtatRetour.MANQUANT,
 }
 
-#: Quantités de la saisie de ramassage (SCRUM-112) → types d'incident.
-#: « Ramassée OK » ne produit aucun incident : c'est l'absence de problème.
-INCIDENTS_RAMASSAGE = (
+#: Champ du payload de ramassage (SCRUM-112) → type d'incident. « Ramassée OK »
+#: n'y figure pas : l'absence de problème ne s'enregistre pas.
+CHAMPS_RAMASSAGE = (
     ("quantite_sav", ReturnIncidentType.BROKEN),
     ("quantite_detruite", ReturnIncidentType.DESTROYED),
     ("quantite_manquante", ReturnIncidentType.MISSING),
 )
 
-#: Quantités du check-in retour (SCRUM-94) → types d'incident.
-INCIDENTS_CHECKIN = (
-    ("quantite_retour_casse", ReturnIncidentType.BROKEN),
-    ("quantite_retour_manquant", ReturnIncidentType.MISSING),
+#: Champ du payload de check-in (SCRUM-94) → type d'incident.
+CHAMPS_CHECKIN = (
+    ("casse", ReturnIncidentType.BROKEN),
+    ("manquant", ReturnIncidentType.MISSING),
 )
 
 
-def projeter_incidents(ligne, user, mapping, *, facturer=None) -> None:
-    """Projette les quantités d'un écran dans le registre d'incidents.
+def quantites_depuis_payload(payload, champs):
+    """Traduit un payload d'écran en {type d'incident: quantité}."""
+
+    return {
+        type_incident: payload.get(champ, 0) or 0 for champ, type_incident in champs
+    }
+
+
+def quantites_du_retour(ligne) -> dict:
+    """Reconstitue les quantités d'un retour depuis le registre.
+
+    Ces chiffres étaient stockés en double sur la ligne — une colonne par écran,
+    sept en tout — alors qu'ils se déduisent du registre et de la seule quantité
+    qui ne s'en déduit pas : combien est revenu physiquement.
+
+    `ok` = revenu physiquement moins ce qui est revenu abîmé ou détruit.
+    """
+
+    par_type = dict.fromkeys(ReturnIncidentType.values, 0)
+
+    for type_incident, qty in ligne.incidents.values_list("type", "qty"):
+        par_type[type_incident] = par_type.get(type_incident, 0) + (qty or 0)
+
+    revenue = ligne.quantite_retournee or 0
+    abimee = (
+        par_type[ReturnIncidentType.BROKEN] + par_type[ReturnIncidentType.DESTROYED]
+    )
+
+    return {
+        "revenue": revenue,
+        "ok": max(revenue - abimee, 0),
+        "casse": par_type[ReturnIncidentType.BROKEN],
+        "detruit": par_type[ReturnIncidentType.DESTROYED],
+        "manquant": par_type[ReturnIncidentType.MISSING],
+    }
+
+
+def facturer_le_client(ligne) -> bool:
+    """Vrai si au moins un incident de la ligne est refacturé au client."""
+
+    return ligne.incidents.filter(bill_client=True).exists()
+
+
+def projeter_incidents(ligne, user, quantites, *, facturer=None) -> None:
+    """Projette les quantités saisies par un écran dans le registre.
+
+    `quantites` associe un type d'incident à sa quantité. Les écrans passent ce
+    qu'ils ont reçu : plus aucune colonne de la ligne n'est lue, elles n'existent
+    plus (cf. migration 0021).
 
     Idempotent : ré-enregistrer ajuste les quantités, et une quantité ramenée à
     0 supprime l'incident correspondant — un incident n'a pas de cycle de vie
@@ -74,8 +121,8 @@ def projeter_incidents(ligne, user, mapping, *, facturer=None) -> None:
     déjà posé sur l'incident est conservé.
     """
 
-    for champ, type_incident in mapping:
-        quantite = getattr(ligne, champ, 0) or 0
+    for type_incident, quantite in quantites.items():
+        quantite = quantite or 0
         incident = ReturnIncident.objects.filter(
             line=ligne,
             type=type_incident,
@@ -108,51 +155,22 @@ def projeter_incidents(ligne, user, mapping, *, facturer=None) -> None:
         incident.save()
 
 
-#: Colonnes qui, à elles seules, signent une nature de problème. Utile pour les
-#: lignes écrites avant l'unification, qui n'ont pas d'incident associé.
-NATURES_DU_POINTAGE = (
-    (("quantite_retour_casse", "quantite_sav", "quantite_detruite"), EtatRetour.CASSE),
-    (("quantite_retour_manquant", "quantite_manquante"), EtatRetour.MANQUANT),
-)
-
-#: Toutes les colonnes de pointage, les deux écrans confondus : leur somme dit
-#: si quelqu'un a regardé la ligne.
-COLONNES_DE_POINTAGE = (
-    "quantite_retour_ok",
-    "quantite_retour_manquant",
-    "quantite_retour_casse",
-    "quantite_ramassee",
-    "quantite_sav",
-    "quantite_detruite",
-    "quantite_manquante",
-)
-
-
 def etat_retour_du_pointage(ligne) -> str:
-    """État déduit des colonnes, quand la ligne ne porte aucun incident.
+    """État d'une ligne sans incident : pointée et conforme, ou pas pointée.
 
-    Deux écrans pointent la même ligne dans deux familles de colonnes — le
-    check-in (`quantite_retour_*`) et le ramassage (`quantite_ramassee` et
-    consorts). La déduction de repli lisait la première seulement : un
-    ramassage entièrement conforme retombait donc sur « pas encore pointé »
-    alors qu'il venait d'être saisi.
+    Toutes les natures de problème vivent dans le registre ; s'il est vide, il
+    ne reste qu'une question — quelqu'un a-t-il regardé cette ligne. La réponse
+    est `quantite_retournee`, seule colonne de retour conservée : « combien est
+    revenu physiquement ».
 
-    Le repli sert à deux choses : ne pas effacer un pointage quand le dernier
-    incident d'une ligne est supprimé, et rester juste sur les lignes écrites
-    avant l'unification, qui n'ont pas d'incident associé.
+    Le repli sert aussi à ne pas effacer un pointage quand le dernier incident
+    d'une ligne est supprimé.
     """
 
-    for champs, etat in NATURES_DU_POINTAGE:
-        if any((getattr(ligne, champ, 0) or 0) > 0 for champ in champs):
-            return etat
+    if (ligne.quantite_retournee or 0) > 0:
+        return EtatRetour.OK
 
-    pointe = sum((getattr(ligne, champ, 0) or 0) for champ in COLONNES_DE_POINTAGE)
-
-    if pointe <= 0:
-        return ""
-
-    # Pointé, et aucune nature de problème : tout est rentré en état.
-    return EtatRetour.OK
+    return ""
 
 
 def etat_retour_de_la_ligne(ligne) -> str:

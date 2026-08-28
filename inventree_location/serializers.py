@@ -37,7 +37,11 @@ from .models import (
 from .services.workflow_service import transition_reservation_status
 from .stock import compute_prestation_stock
 from .ramassage import lignes_a_ramasser
-from .retours import appliquer_etat_retour
+from .retours import (
+    appliquer_etat_retour,
+    facturer_le_client,
+    quantites_du_retour,
+)
 from .sav import get_real_available_stock
 
 
@@ -177,7 +181,57 @@ def _user_phone(user):
 
 
 class LigneReservationSerializer(serializers.ModelSerializer):
-    """Sérialiseur d'une ligne de réservation."""
+    """Sérialiseur d'une ligne de réservation.
+
+    Les quantités de retour ne sont plus stockées sur la ligne — sept colonnes
+    y disaient ce que le registre d'incidents dit déjà (cf. `retours.py` et la
+    migration `0021`). Elles restent exposées **sous les mêmes noms**, calculées
+    en une passe, pour que les écrans n'aient pas à changer.
+    """
+
+    quantite_ramassee = serializers.SerializerMethodField()
+    quantite_sav = serializers.SerializerMethodField()
+    quantite_detruite = serializers.SerializerMethodField()
+    quantite_manquante = serializers.SerializerMethodField()
+    facturer_client = serializers.SerializerMethodField()
+    quantite_retour_ok = serializers.SerializerMethodField()
+    quantite_retour_manquant = serializers.SerializerMethodField()
+    quantite_retour_casse = serializers.SerializerMethodField()
+
+    def _quantites(self, obj):
+        """Une seule reconstitution par ligne, mémorisée sur l'instance."""
+
+        cache = getattr(obj, "_quantites_retour", None)
+
+        if cache is None:
+            cache = quantites_du_retour(obj)
+            obj._quantites_retour = cache
+
+        return cache
+
+    def get_quantite_ramassee(self, obj):
+        return self._quantites(obj)["ok"]
+
+    def get_quantite_sav(self, obj):
+        return self._quantites(obj)["casse"]
+
+    def get_quantite_detruite(self, obj):
+        return self._quantites(obj)["detruit"]
+
+    def get_quantite_manquante(self, obj):
+        return self._quantites(obj)["manquant"]
+
+    def get_quantite_retour_ok(self, obj):
+        return self._quantites(obj)["ok"]
+
+    def get_quantite_retour_manquant(self, obj):
+        return self._quantites(obj)["manquant"]
+
+    def get_quantite_retour_casse(self, obj):
+        return self._quantites(obj)["casse"]
+
+    def get_facturer_client(self, obj):
+        return facturer_le_client(obj)
 
     class Meta:
         """Configuration du serializer LigneReservation."""
@@ -200,16 +254,11 @@ class LigneReservationSerializer(serializers.ModelSerializer):
             "quantite_retour_casse",
             "commentaire",
         ]
-        # Le détail du retour n'appartient qu'au check-in magasinier
-        # (`ReservationCheckinView` / `ReturnCheckinPermission`) : exposé en
-        # écriture ici, il serait modifiable par tout rôle autorisé à éditer
-        # une réservation, et remis à zéro à chaque réécriture des lignes.
-        read_only_fields = [
-            "id",
-            "quantite_retour_ok",
-            "quantite_retour_manquant",
-            "quantite_retour_casse",
-        ]
+        # Le détail du retour n'appartient qu'aux écrans de retour (check-in
+        # magasinier et saisie de ramassage) : il est calculé, donc en lecture
+        # seule par construction, et ne peut plus être remis à zéro par une
+        # réécriture des lignes de la réservation.
+        read_only_fields = ["id"]
 
 
 def sync_ligne_etat_retour(ligne):
@@ -837,6 +886,8 @@ class BonRamassageSerializer(RamassageSerializer):
         # Pas de `select_related` ici : la vue a déjà préchargé `lignes__part`,
         # et le rajouter annulerait ce prefetch au profit d'une requête neuve.
         for ligne in lignes_a_ramasser(obj):
+            quantites = quantites_du_retour(ligne)
+
             lignes.append({
                 "id": ligne.id,
                 "part": ligne.part_id,
@@ -844,12 +895,12 @@ class BonRamassageSerializer(RamassageSerializer):
                 "quantite_demandee": ligne.quantite_demandee,
                 "quantite_livree": ligne.quantite_livree,
                 "quantite_a_ramasser": ligne.quantite_livree or ligne.quantite_demandee,
-                "quantite_retournee": ligne.quantite_retournee,
-                "quantite_ramassee": ligne.quantite_ramassee,
-                "quantite_sav": ligne.quantite_sav,
-                "quantite_detruite": ligne.quantite_detruite,
-                "quantite_manquante": ligne.quantite_manquante,
-                "facturer_client": ligne.facturer_client,
+                "quantite_retournee": quantites["revenue"],
+                "quantite_ramassee": quantites["ok"],
+                "quantite_sav": quantites["casse"],
+                "quantite_detruite": quantites["detruit"],
+                "quantite_manquante": quantites["manquant"],
+                "facturer_client": facturer_le_client(ligne),
                 "etat_retour": ligne.etat_retour,
                 "commentaire": ligne.commentaire,
             })

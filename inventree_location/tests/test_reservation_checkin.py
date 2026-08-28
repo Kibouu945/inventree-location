@@ -19,6 +19,7 @@ from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from inventree_location import roles
+from inventree_location.retours import quantites_du_retour
 from inventree_location.models import (
     Groupe,
     LigneReservation,
@@ -151,8 +152,13 @@ class TestCheckinEndpointPost:
         reservation_livree.refresh_from_db()
         ligne.refresh_from_db()
         assert reservation_livree.statut == StatutReservation.CLOTUREE
-        assert ligne.quantite_retour_ok == 4
-        assert ligne.quantite_retour_manquant == 1
+        # Les quantités ne sont plus stockées sur la ligne : elles se lisent
+        # dans le registre d'incidents (cf. retours.py, migration 0021).
+        quantites = quantites_du_retour(ligne)
+
+        assert quantites["ok"] == 4
+        assert quantites["manquant"] == 1
+        assert ligne.quantite_retournee == 4
         assert ligne.etat_retour == "manquant"
 
     @pytest.mark.django_db
@@ -258,7 +264,7 @@ class TestCheckinEndpointPost:
         reservation_livree.refresh_from_db()
         ligne.refresh_from_db()
         assert reservation_livree.statut == StatutReservation.LIVREE
-        assert ligne.quantite_retour_ok == 0
+        assert quantites_du_retour(ligne)["ok"] == 0
 
     @pytest.mark.django_db
     def test_post_liste_vide_ne_cloture_pas(
@@ -367,6 +373,11 @@ class TestCheckinFieldsReadOnly:
 
         fields = LigneReservationSerializer().fields
 
+        # Calculés depuis le registre, donc en lecture seule par construction :
+        # une réécriture des lignes de la réservation ne peut plus les remettre
+        # à zéro.
         assert fields["quantite_retour_ok"].read_only
         assert fields["quantite_retour_manquant"].read_only
         assert fields["quantite_retour_casse"].read_only
+        assert fields["quantite_ramassee"].read_only
+        assert fields["facturer_client"].read_only
