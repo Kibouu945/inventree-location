@@ -143,7 +143,18 @@ def _close_or_update_ticket(
     facturer_client: bool,
     description: str,
 ):
-    """Crée, met à jour ou clôture un ticket lié à une ligne."""
+    """Crée, met à jour ou clôture un ticket lié à une ligne.
+
+    Ramener une quantité à 0 clôture le ticket correspondant, **y compris une
+    destruction**. Le refus précédent partait d'une idée juste — on ne
+    « dé-détruit » pas un objet — mais produisait un état incohérent : la ligne
+    affichait 0 détruit tandis que le ticket en gardait 1 hors du stock réel,
+    sans aucun écran pour rattraper l'erreur de saisie. Une faute de frappe au
+    ramassage amputait le parc définitivement.
+
+    La correction laisse une trace : `resolution` dit d'où vient la clôture, et
+    `closed_at` la date. Le ticket n'est jamais supprimé.
+    """
 
     ticket = SavTicket.objects.filter(
         ligne_reservation=ligne,
@@ -151,17 +162,18 @@ def _close_or_update_ticket(
     ).first()
 
     if quantite <= 0:
-        if ticket and ticket.statut not in [
-            StatutSavTicket.REPARE,
-            StatutSavTicket.DETRUIT,
-            StatutSavTicket.CLOTURE,
-        ]:
+        if ticket and ticket.statut != StatutSavTicket.CLOTURE:
+            etait_detruit = ticket.statut == StatutSavTicket.DETRUIT
+
             ticket.statut = StatutSavTicket.CLOTURE
             ticket.quantite = 0
             ticket.updated_by = user
             ticket.closed_at = timezone.now()
             ticket.resolution = (
-                "Ticket clôturé automatiquement car quantité remise à 0."
+                "Destruction annulée depuis la saisie retour (correction de "
+                "saisie) : la quantité détruite est repassée à 0."
+                if etait_detruit
+                else "Ticket clôturé : quantité ramenée à 0 depuis la saisie retour."
             )
             ticket.save()
 

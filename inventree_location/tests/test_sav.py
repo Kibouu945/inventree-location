@@ -628,3 +628,111 @@ class TestAlertesDesactivees:
         consommable_sous_le_seuil.refresh_from_db()
 
         assert consommable_sous_le_seuil.seuil_alerte_bas == 5
+
+
+class TestCorrectionDuneDestruction:
+    """Une destruction saisie par erreur doit pouvoir être reprise.
+
+    Avant, `_close_or_update_ticket` refusait de clôturer un ticket `detruit` :
+    la ligne repassait à 0 détruit mais le ticket gardait sa quantité hors du
+    stock réel. Une faute de frappe amputait le parc définitivement.
+    """
+
+    def _saisir(self, factory, magasinier, reservation, ligne, **quantites):
+        payload = {"ligne": ligne.pk, **quantites}
+        return _patch_retour(
+            factory, magasinier, reservation, {"lignes": [payload]}
+        )
+
+    @pytest.mark.django_db
+    def test_remettre_la_destruction_a_zero_libere_le_stock(
+        self, factory, magasinier, reservation, ligne, part
+    ):
+        self._saisir(
+            factory, magasinier, reservation, ligne,
+            quantite_ramassee=5, quantite_detruite=1,
+        )
+
+        ticket = SavTicket.objects.get(type_ticket=TypeSavTicket.DESTRUCTION)
+
+        assert ticket.statut == StatutSavTicket.DETRUIT
+        assert get_real_available_stock(part.pk) == 9
+
+        # Correction : rien n'était détruit.
+        self._saisir(
+            factory, magasinier, reservation, ligne, quantite_ramassee=6
+        )
+
+        ticket.refresh_from_db()
+        ligne.refresh_from_db()
+
+        assert ticket.statut == StatutSavTicket.CLOTURE
+        assert ticket.quantite == 0
+        assert ligne.quantite_detruite == 0
+        assert get_real_available_stock(part.pk) == 10
+
+    @pytest.mark.django_db
+    def test_la_correction_laisse_une_trace(
+        self, factory, magasinier, reservation, ligne
+    ):
+        self._saisir(
+            factory, magasinier, reservation, ligne,
+            quantite_ramassee=5, quantite_detruite=1,
+        )
+        self._saisir(
+            factory, magasinier, reservation, ligne, quantite_ramassee=6
+        )
+
+        ticket = SavTicket.objects.get(type_ticket=TypeSavTicket.DESTRUCTION)
+
+        assert "Destruction annulée" in ticket.resolution
+        assert ticket.closed_at is not None
+        assert ticket.updated_by == magasinier
+        # Le ticket est clôturé, jamais supprimé : l'historique reste lisible.
+        assert SavTicket.objects.filter(pk=ticket.pk).exists()
+
+    @pytest.mark.django_db
+    def test_diminuer_la_destruction_ajuste_le_ticket(
+        self, factory, magasinier, reservation, ligne, part
+    ):
+        self._saisir(
+            factory, magasinier, reservation, ligne,
+            quantite_ramassee=3, quantite_detruite=3,
+        )
+
+        assert get_real_available_stock(part.pk) == 7
+
+        self._saisir(
+            factory, magasinier, reservation, ligne,
+            quantite_ramassee=5, quantite_detruite=1,
+        )
+
+        ticket = SavTicket.objects.get(type_ticket=TypeSavTicket.DESTRUCTION)
+
+        assert ticket.statut == StatutSavTicket.DETRUIT
+        assert ticket.quantite == 1
+        assert get_real_available_stock(part.pk) == 9
+
+    @pytest.mark.django_db
+    def test_un_ticket_repare_se_cloture_sans_toucher_au_stock(
+        self, factory, magasinier, reservation, ligne, part
+    ):
+        self._saisir(
+            factory, magasinier, reservation, ligne,
+            quantite_ramassee=5, quantite_sav=1,
+        )
+
+        ticket = SavTicket.objects.get(type_ticket=TypeSavTicket.REPARATION)
+        ticket.statut = StatutSavTicket.REPARE
+        ticket.save(update_fields=["statut"])
+
+        assert get_real_available_stock(part.pk) == 10
+
+        self._saisir(
+            factory, magasinier, reservation, ligne, quantite_ramassee=6
+        )
+
+        ticket.refresh_from_db()
+
+        assert ticket.statut == StatutSavTicket.CLOTURE
+        assert get_real_available_stock(part.pk) == 10
