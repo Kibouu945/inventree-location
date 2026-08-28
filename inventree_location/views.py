@@ -53,6 +53,11 @@ from .permissions import (
     ReturnCheckinPermission,
     RoleBasedPermission,
 )
+from .retours import (
+    INCIDENTS_CHECKIN,
+    etat_retour_de_la_ligne,
+    projeter_incidents,
+)
 from .serializers import (
     CatalogPartSerializer,
     DeliverySerializer,
@@ -1292,20 +1297,13 @@ class ReservationCheckinView(APIView):
         return errors
 
     @staticmethod
-    def _apply_checkin_ligne(ligne, entry):
+    def _apply_checkin_ligne(ligne, entry, user=None):
         """Reporte une entree de check-in sur la ligne et la sauvegarde."""
 
         ligne.quantite_retour_ok = entry["ok"]
         ligne.quantite_retour_manquant = entry["manquant"]
         ligne.quantite_retour_casse = entry["casse"]
         ligne.quantite_retournee = entry["ok"] + entry["casse"]
-
-        if entry["casse"] > 0:
-            ligne.etat_retour = "casse"
-        elif entry["manquant"] > 0:
-            ligne.etat_retour = "manquant"
-        else:
-            ligne.etat_retour = "ok"
 
         update_fields = [
             "quantite_retour_ok",
@@ -1323,6 +1321,16 @@ class ReservationCheckinView(APIView):
             update_fields.append("commentaire")
 
         ligne.save(update_fields=update_fields)
+
+        # Le pointage alimente le registre d'incidents comme la saisie de
+        # ramassage, sinon un objet cassé constaté au check-in n'apparaissait
+        # dans aucun rapport. Pas de décision de facturation ici : `facturer`
+        # reste à None, le drapeau déjà posé est conservé.
+        projeter_incidents(ligne, user, INCIDENTS_CHECKIN)
+        # La règle était réécrite ici alors qu'elle existait déjà dans
+        # `retours.py` : deux copies pour une seule règle.
+        ligne.etat_retour = etat_retour_de_la_ligne(ligne)
+        ligne.save(update_fields=["etat_retour", "updated_at"])
 
     def post(self, request, pk, *args, **kwargs):
         """Enregistre le check-in retour et cloture la reservation."""
@@ -1353,7 +1361,7 @@ class ReservationCheckinView(APIView):
 
             for entry in payload_lignes:
                 ligne = lignes_by_id[entry["id"]]
-                self._apply_checkin_ligne(ligne, entry)
+                self._apply_checkin_ligne(ligne, entry, request.user)
 
                 if entry["manquant"] > 0 or entry["casse"] > 0:
                     incidents.append(

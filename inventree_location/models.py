@@ -61,6 +61,29 @@ class StatutSavTicket(models.TextChoices):
     CLOTURE = "cloture", _("Clôturé")
 
 
+class EtatRetour(models.TextChoices):
+    """Vocabulaire unique de `LigneReservation.etat_retour`.
+
+    Trois fonctionnalités écrivaient cette colonne avec chacune ses valeurs —
+    `casse` pour le journal d'incidents et le check-in, `sav` / `detruit` /
+    `mixte` pour la saisie de ramassage. Un même retour s'affichait donc
+    différemment selon l'écran qui l'avait saisi. La nuance « au SAV » ou
+    « détruit » vit désormais dans les incidents et les tickets SAV, pas ici.
+
+    Quand plusieurs natures coexistent sur une ligne, **la plus grave
+    l'emporte** : c'est la règle de la PR #45, nommée par ses tests
+    (« casse prime sur manquant »). Le `mixte` de la PR #40 la contredisait
+    sans la remplacer — il disait qu'il s'était passé plusieurs choses sans dire
+    lesquelles, et le détail est de toute façon dans les incidents.
+
+    La valeur vide reste distincte : « pas encore pointé » n'est pas « OK ».
+    """
+
+    OK = "ok", _("Rendu conforme")
+    MANQUANT = "manquant", _("Manquant")
+    CASSE = "casse", _("Cassé")
+
+
 class ConflictType(models.TextChoices):
     STOCK = "stock", _("Conflit de stock")
     LOCATION = "location", _("Conflit de lieu")
@@ -573,9 +596,13 @@ class LigneReservation(TimestampedModel):
         verbose_name=_("facturer le client"),
     )
 
-    # Valeurs applicatives MVP : "ok" | "sav" | "detruit" | "manquant" | "mixte"
+    # Vocabulaire unique : cf. `EtatRetour` et `retours.py`.
     etat_retour = models.CharField(
-        max_length=20, blank=True, default="", verbose_name=_("état du retour")
+        max_length=20,
+        blank=True,
+        default="",
+        choices=EtatRetour.choices,
+        verbose_name=_("état du retour"),
     )
     # Détail du check-in retour (SCRUM-94) : la somme des 3 doit égaler
     # quantite_demandee. quantite_retournee reste la vue agrégée (ok + casse).

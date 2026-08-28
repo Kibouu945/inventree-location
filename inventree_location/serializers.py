@@ -37,6 +37,7 @@ from .models import (
 from .services.workflow_service import transition_reservation_status
 from .stock import compute_prestation_stock
 from .ramassage import lignes_a_ramasser
+from .retours import appliquer_etat_retour
 from .sav import get_real_available_stock
 
 
@@ -211,79 +212,15 @@ class LigneReservationSerializer(serializers.ModelSerializer):
         ]
 
 
-#: Traduction du type d'incident vers le vocabulaire applicatif de
-#: `LigneReservation.etat_retour` ("ok" | "manquant" | "casse", cf. models.py).
-#: Sans elle, la colonne porterait deux vocabulaires incompatibles selon
-#: qu'elle est écrite par un incident ou par le check-in retour.
-ETAT_RETOUR_PAR_TYPE = {
-    ReturnIncidentType.MISSING: "manquant",
-    ReturnIncidentType.BROKEN: "casse",
-    # « Détruit » n'a pas de valeur propre côté ligne : le vocabulaire de
-    # `etat_retour` s'arrête à ok / manquant / casse, et un objet détruit est
-    # un objet cassé du point de vue de la ligne. Le rapport de retour, lui,
-    # garde la distinction (la caution y remplace la valeur de remplacement).
-    ReturnIncidentType.DESTROYED: "casse",
-}
-
-#: Du plus grave au moins grave : le premier type présent gagne.
-ORDRE_GRAVITE_INCIDENT = (
-    ReturnIncidentType.DESTROYED,
-    ReturnIncidentType.BROKEN,
-    ReturnIncidentType.MISSING,
-)
-
-
-def etat_retour_du_checkin(ligne):
-    """État déduit du pointage de check-in retour (SCRUM-94), ou None.
-
-    Retourne None tant qu'aucun check-in n'a été posé, pour distinguer
-    « pas encore pointé » de « pointé, tout est OK ».
-    """
-
-    pointe = (
-        ligne.quantite_retour_ok
-        + ligne.quantite_retour_manquant
-        + ligne.quantite_retour_casse
-    )
-
-    if pointe <= 0:
-        return None
-
-    if ligne.quantite_retour_casse > 0:
-        return "casse"
-
-    if ligne.quantite_retour_manquant > 0:
-        return "manquant"
-
-    return "ok"
-
-
 def sync_ligne_etat_retour(ligne):
-    """Recalcule `etat_retour` depuis les incidents, puis depuis le check-in.
+    """Recalcule `etat_retour` d'une ligne (cf. `retours.py`).
 
-    Recalculé plutôt que déduit du dernier incident écrit : une modification
-    ou une suppression doit ramener la ligne à son état réel, sinon elle reste
-    figée sur un incident qui n'existe plus. Le type le plus grave l'emporte.
-
-    Deux fonctionnalités écrivent cette colonne — le journal d'incidents
-    (SCRUM-93) et le check-in retour (SCRUM-94). Sans ce repli, supprimer le
-    dernier incident d'une ligne effaçait aussi l'état posé par un check-in,
-    alors que le pointage, lui, existe toujours.
+    Conservée comme point d'entrée des vues d'incidents ; la règle elle-même
+    vit dans `retours.appliquer_etat_retour`, partagée avec le check-in et la
+    saisie de ramassage.
     """
 
-    types = set(ligne.incidents.values_list("type", flat=True))
-    etat = ""
-
-    for type_incident in ORDRE_GRAVITE_INCIDENT:
-        if type_incident in types:
-            etat = ETAT_RETOUR_PAR_TYPE[type_incident]
-            break
-
-    if not etat:
-        etat = etat_retour_du_checkin(ligne) or ""
-
-    ligne.etat_retour = etat
-    ligne.save(update_fields=["etat_retour", "updated_at"])
+    appliquer_etat_retour(ligne)
 
 
 class ReturnIncidentSerializer(serializers.ModelSerializer):

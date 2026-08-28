@@ -51,6 +51,14 @@ const STATUT_COLORS: Record<string, string> = {
   cloturee: 'dark'
 };
 
+// Miroir de `EtatRetour` côté back (models.py) : le vocabulaire est fixe et
+// court depuis l'unification, autant l'afficher en français sur un bon imprimé.
+const ETAT_RETOUR_LABELS: Record<string, string> = {
+  ok: 'Rendu conforme',
+  manquant: 'Manquant',
+  casse: 'Cassé'
+};
+
 const STATUT_OPTIONS = [
   { value: 'brouillon', label: 'Brouillon' },
   { value: 'soumise', label: 'Soumise' },
@@ -167,7 +175,11 @@ function BonRamassageContent({ bon }: { bon: BonRamassageResponse }) {
               <Table.Td>{ligne.quantite_livree}</Table.Td>
               <Table.Td>{ligne.quantite_a_ramasser}</Table.Td>
               <Table.Td>{ligne.quantite_retournee}</Table.Td>
-              <Table.Td>{ligne.etat_retour || '—'}</Table.Td>
+              <Table.Td>
+                {ETAT_RETOUR_LABELS[ligne.etat_retour] ??
+                  ligne.etat_retour ??
+                  '—'}
+              </Table.Td>
             </Table.Tr>
           ))}
         </Table.Tbody>

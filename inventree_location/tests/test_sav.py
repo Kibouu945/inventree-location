@@ -243,8 +243,10 @@ class TestSaisieRetour:
         assert ligne.quantite_detruite == 1
         assert ligne.quantite_manquante == 1
         assert ligne.quantite_retournee == 3
-        # Quatre natures de retour sur la même ligne : l'état est « mixte ».
-        assert ligne.etat_retour == "mixte"
+        # Plusieurs natures sur la ligne : la plus grave l'emporte (règle
+        # unique, cf. retours.py). La ventilation détaillée vit dans les
+        # incidents et les tickets SAV.
+        assert ligne.etat_retour == "casse"
         assert reservation.statut == StatutReservation.RETOURNEE
         assert reservation.date_retour_reelle is not None
         assert reservation.commentaire == "Retour terrain"
@@ -863,3 +865,139 @@ class TestUnificationFacturation:
         )
 
         assert self._rapport(factory, magasinier).data["total_billed"] == 0
+
+
+class TestVocabulaireUnifieEtatRetour:
+    """Un seul vocabulaire, une seule règle, quel que soit l'écran.
+
+    Avant : `etat_retour` avait trois écrivains — check-in, journal d'incidents,
+    saisie de ramassage — et trois vocabulaires (`casse` / `sav` / `detruit` /
+    `mixte`). Un même retour s'affichait différemment selon l'écran qui l'avait
+    saisi.
+    """
+
+    def _saisir(self, factory, magasinier, reservation, ligne, **quantites):
+        return _patch_retour(
+            factory,
+            magasinier,
+            reservation,
+            {"lignes": [{"ligne": ligne.pk, **quantites}]},
+        )
+
+    @pytest.mark.django_db
+    def test_le_sav_seul_se_lit_casse(
+        self, factory, magasinier, reservation, ligne
+    ):
+        """« sav » n'existe plus : au SAV ou détruit, la ligne est cassée."""
+
+        self._saisir(
+            factory, magasinier, reservation, ligne,
+            quantite_ramassee=4, quantite_sav=2,
+        )
+        ligne.refresh_from_db()
+
+        assert ligne.etat_retour == "casse"
+
+    @pytest.mark.django_db
+    def test_la_destruction_seule_se_lit_casse(
+        self, factory, magasinier, reservation, ligne
+    ):
+        self._saisir(
+            factory, magasinier, reservation, ligne,
+            quantite_ramassee=5, quantite_detruite=1,
+        )
+        ligne.refresh_from_db()
+
+        assert ligne.etat_retour == "casse"
+
+    @pytest.mark.django_db
+    def test_le_manquant_seul_se_lit_manquant(
+        self, factory, magasinier, reservation, ligne
+    ):
+        self._saisir(
+            factory, magasinier, reservation, ligne,
+            quantite_ramassee=5, quantite_manquante=1,
+        )
+        ligne.refresh_from_db()
+
+        assert ligne.etat_retour == "manquant"
+
+    @pytest.mark.django_db
+    def test_le_plus_grave_lemporte(
+        self, factory, magasinier, reservation, ligne
+    ):
+        """Même règle que le journal d'incidents : « casse prime sur manquant »."""
+
+        self._saisir(
+            factory, magasinier, reservation, ligne,
+            quantite_ramassee=3, quantite_sav=2, quantite_manquante=1,
+        )
+        ligne.refresh_from_db()
+
+        assert ligne.etat_retour == "casse"
+
+    @pytest.mark.django_db
+    def test_un_ramassage_conforme_se_lit_ok(
+        self, factory, magasinier, reservation, ligne
+    ):
+        """Le repli lisait les seules colonnes du check-in : un ramassage
+        entièrement conforme retombait sur « pas encore pointé »."""
+
+        self._saisir(factory, magasinier, reservation, ligne, quantite_ramassee=6)
+        ligne.refresh_from_db()
+
+        assert ligne.etat_retour == "ok"
+
+    @pytest.mark.django_db
+    def test_seules_les_valeurs_du_vocabulaire_sont_ecrites(
+        self, factory, magasinier, reservation, ligne
+    ):
+        from inventree_location.models import EtatRetour
+
+        autorisees = {"", *EtatRetour.values}
+
+        for quantites in [
+            {"quantite_ramassee": 6},
+            {"quantite_ramassee": 4, "quantite_sav": 2},
+            {"quantite_ramassee": 4, "quantite_detruite": 2},
+            {"quantite_ramassee": 4, "quantite_manquante": 2},
+            {"quantite_sav": 3, "quantite_manquante": 3},
+        ]:
+            self._saisir(factory, magasinier, reservation, ligne, **quantites)
+            ligne.refresh_from_db()
+
+            assert ligne.etat_retour in autorisees, quantites
+
+    @pytest.mark.django_db
+    def test_le_checkin_alimente_aussi_le_registre(
+        self, factory, magasinier, reservation, ligne
+    ):
+        """Un objet cassé constaté au check-in doit remonter dans les rapports."""
+
+        from inventree_location.views import ReservationCheckinView
+
+        payload = {
+            "lignes": [
+                {"id": ligne.pk, "ok": 4, "manquant": 1, "casse": 1},
+            ]
+        }
+        request = factory.post(
+            f"/plugin/inventree-location/reservations/{reservation.pk}/checkin/",
+            payload,
+            format="json",
+        )
+        force_authenticate(request, user=magasinier)
+
+        response = ReservationCheckinView.as_view()(request, pk=reservation.pk)
+
+        assert response.status_code == status.HTTP_200_OK
+
+        types = set(
+            ReturnIncident.objects.filter(line=ligne).values_list("type", flat=True)
+        )
+
+        assert types == {"broken", "missing"}
+
+        ligne.refresh_from_db()
+
+        assert ligne.etat_retour == "casse"
