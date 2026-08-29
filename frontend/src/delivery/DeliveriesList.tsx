@@ -22,6 +22,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { ownsKeys, syncOwnedParams } from '../urlState';
 import { DeliveryCalendar } from './DeliveryCalendar';
+import { DeliveryMap } from './DeliveryMap';
+import { DeliveryNote } from './DeliveryNote';
 import {
   buildDeliveryQuery,
   DEFAULT_DELIVERY_FILTERS,
@@ -30,8 +32,6 @@ import {
   parseDeliveryFilters,
   serializeDeliveryFilters
 } from './deliveryParams';
-import { DeliveryMap } from './DeliveryMap';
-import { DeliveryNote } from './DeliveryNote';
 import type { Delivery } from './types';
 
 const DELIVERIES_URL = '/plugin/inventree-location/deliveries/';
@@ -104,7 +104,9 @@ export function DeliveriesList({
     context.queryClient
   );
 
-  const lieuxQuery = useQuery<{ id: number; nom: string }[] | { results: LieuOption[] }>(
+  const lieuxQuery = useQuery<
+    { id: number; nom: string }[] | { results: LieuOption[] }
+  >(
     {
       queryKey: ['delivery-lieu-options'],
       queryFn: async () => {
@@ -144,7 +146,9 @@ export function DeliveriesList({
         <SegmentedControl
           value={filters.viewMode}
           onChange={(value) =>
-            updateFilters({ viewMode: value as DeliveryFiltersState['viewMode'] })
+            updateFilters({
+              viewMode: value as DeliveryFiltersState['viewMode']
+            })
           }
           data={VIEW_OPTIONS}
         />
@@ -156,7 +160,9 @@ export function DeliveriesList({
           label='Période'
           placeholder="Aujourd'hui ou une période"
           value={filters.dateRange}
-          onChange={(value) => updateFilters({ dateRange: [value[0], value[1]] })}
+          onChange={(value) =>
+            updateFilters({ dateRange: [value[0], value[1]] })
+          }
           clearable
           w={260}
         />
@@ -175,7 +181,10 @@ export function DeliveriesList({
           clearable
           w={240}
         />
-        <Button variant='default' onClick={() => setFilters(DEFAULT_DELIVERY_FILTERS)}>
+        <Button
+          variant='default'
+          onClick={() => setFilters(DEFAULT_DELIVERY_FILTERS)}
+        >
           Reset filtres
         </Button>
       </Group>
@@ -251,7 +260,11 @@ export function DeliveriesList({
                   </Badge>
                 </Table.Td>
                 <Table.Td>
-                  <Button size='xs' variant='light' onClick={() => setNoteDelivery(delivery)}>
+                  <Button
+                    size='xs'
+                    variant='light'
+                    onClick={() => setNoteDelivery(delivery)}
+                  >
                     Détails / Imprimer
                   </Button>
                 </Table.Td>
@@ -261,7 +274,10 @@ export function DeliveriesList({
         </Table>
       )}
 
-      <DeliveryNote delivery={noteDelivery} onClose={() => setNoteDelivery(null)} />
+      <DeliveryNote
+        delivery={noteDelivery}
+        onClose={() => setNoteDelivery(null)}
+      />
     </Stack>
   );
 }

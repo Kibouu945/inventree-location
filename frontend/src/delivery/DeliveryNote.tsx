@@ -1,9 +1,24 @@
 // Bon de livraison imprimable (US livreur) : détail d'une livraison + impression
 // via CSS d'impression + window.print(). Pas de dépendance PDF pour l'instant —
 // un futur modèle PDF pourra remplacer ce rendu sans toucher à l'assemblage des
-// données (cf. DeliveriesList / types.ts).
-import { Button, Divider, Group, Modal, Stack, Table, Text, Title } from '@mantine/core';
+// données (cf. DeliveriesList / types.ts). Les règles d'impression sont
+// partagées avec le bon de ramassage (cf. print/printableModal.tsx).
+import {
+  Button,
+  Divider,
+  Group,
+  Modal,
+  Stack,
+  Table,
+  Text,
+  Title
+} from '@mantine/core';
 
+import {
+  PRINT_AREA,
+  PRINT_HIDE,
+  PrintableModalStyles
+} from '../print/printableModal';
 import { LieuMapLinks } from '../reservation/LieuMapLinks';
 import type { Delivery } from './types';
 
@@ -27,21 +42,9 @@ export function DeliveryNote({
     >
       {delivery && (
         <Stack gap='md'>
-          <style>{`
-            @media print {
-              body * { visibility: hidden; }
-              .delivery-print-area, .delivery-print-area * { visibility: visible; }
-              .delivery-print-area {
-                position: absolute;
-                top: 0;
-                left: 0;
-                width: 100%;
-              }
-              .delivery-print-hide { display: none !important; }
-            }
-          `}</style>
+          <PrintableModalStyles />
 
-          <div className='delivery-print-area'>
+          <div className={PRINT_AREA}>
             <Stack gap='xs'>
               <Title order={4}>{delivery.prestation_nom}</Title>
               <Text size='sm'>
@@ -67,7 +70,9 @@ export function DeliveryNote({
                 ? ` (${delivery.organisateur_telephone})`
                 : ''}
             </Text>
-            <Text size='sm'>Gérant interne : {delivery.demandeur_nom || '—'}</Text>
+            <Text size='sm'>
+              Gérant interne : {delivery.demandeur_nom || '—'}
+            </Text>
 
             <Divider my='sm' label='Matériel' labelPosition='left' />
             <Table striped>
@@ -98,7 +103,7 @@ export function DeliveryNote({
             )}
           </div>
 
-          <Group justify='flex-end' className='delivery-print-hide'>
+          <Group justify='flex-end' className={PRINT_HIDE}>
             <Button variant='default' onClick={onClose}>
               Fermer
             </Button>

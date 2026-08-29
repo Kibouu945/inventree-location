@@ -56,7 +56,9 @@ function isViewMode(value: string | null): value is DeliveryViewMode {
   return value === 'liste' || value === 'calendrier' || value === 'carte';
 }
 
-export function serializeDeliveryFilters(filters: DeliveryFiltersState): string {
+export function serializeDeliveryFilters(
+  filters: DeliveryFiltersState
+): string {
   const search = new URLSearchParams();
 
   if (filters.statuts.length > 0) {

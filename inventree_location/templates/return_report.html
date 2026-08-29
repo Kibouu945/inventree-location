@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        font-family: Helvetica, Arial, sans-serif;
+        font-size: 11px;
+        color: #333;
+      }
+      h1 {
+        font-size: 18px;
+        color: #2c3e50;
+        margin-bottom: 4px;
+      }
+      .subtitle {
+        color: #7f8c8d;
+        font-size: 10px;
+        margin-bottom: 2px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
+      th {
+        background: #2c3e50;
+        color: #fff;
+        padding: 6px 8px;
+        text-align: left;
+        font-size: 9px;
+      }
+      td {
+        border: 1px solid #ddd;
+        padding: 5px 8px;
+        font-size: 9px;
+      }
+      tr.total td {
+        background: #ecf0f1;
+        font-weight: bold;
+      }
+      .total-extra {
+        margin-top: 12px;
+        font-size: 12px;
+        font-weight: bold;
+      }
+      .photos {
+        margin-top: 16px;
+      }
+      .photo {
+        display: inline-block;
+        margin: 4px;
+      }
+      .photo img {
+        max-width: 120px;
+        max-height: 120px;
+        border: 1px solid #ccc;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Rapport de retour</h1>
+    <div class="subtitle">
+      Réservation {{ data.reservation_numero }} — {{ data.prestation_name }}
+    </div>
+    <div class="subtitle">
+      Manifestation : {{ data.manifestation_name }} — Demandeur : {{
+      data.demandeur }}
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Article</th>
+          <th>Livré</th>
+          <th>Rendu</th>
+          <th>Manquant</th>
+          <th>Cassé</th>
+          <th>Détruit</th>
+          <th>Coût supplémentaire</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in data.lines %}
+        <tr>
+          <td>{{ line.part_name }}</td>
+          <td>{{ line.quantity_delivered }}</td>
+          <td>{{ line.quantity_returned }}</td>
+          <td>{{ line.missing }}</td>
+          <td>{{ line.broken }}</td>
+          <td>{{ line.destroyed }}</td>
+          <td>{{ line.extra_cost_label }}</td>
+        </tr>
+        {% endfor %}
+        <tr class="total">
+          <td>TOTAL</td>
+          <td></td>
+          <td>{{ data.totals.returned }}</td>
+          <td>{{ data.totals.missing }}</td>
+          <td>{{ data.totals.broken }}</td>
+          <td>{{ data.totals.destroyed }}</td>
+          <td>{{ data.total_extra_label }}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="total-extra">
+      Total à facturer en plus : {{ data.total_extra_label }}
+    </div>
+  </body>
+</html>

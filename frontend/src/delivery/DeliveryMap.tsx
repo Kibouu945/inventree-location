@@ -3,16 +3,14 @@
 import { Stack, Text } from '@mantine/core';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { useMemo } from 'react';
-import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
-
-import type { Delivery } from './types';
-
+import iconUrl from 'leaflet/dist/images/marker-icon.png';
 // Correctif Vite/Leaflet : les icônes par défaut référencent des URLs qui ne
 // se résolvent pas une fois bundlées, il faut les importer explicitement.
 import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png';
-import iconUrl from 'leaflet/dist/images/marker-icon.png';
 import shadowUrl from 'leaflet/dist/images/marker-shadow.png';
+import { useMemo } from 'react';
+import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
+import type { Delivery } from './types';
 
 delete (L.Icon.Default.prototype as { _getIconUrl?: unknown })._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -64,16 +62,20 @@ function groupByLieu(deliveries: Delivery[]): LieuGroup[] {
 
 export function DeliveryMap({ deliveries }: { deliveries: Delivery[] }) {
   const groups = useMemo(() => groupByLieu(deliveries), [deliveries]);
-  const withoutCoords = deliveries.length - groups.reduce((sum, g) => sum + g.deliveries.length, 0);
+  const withoutCoords =
+    deliveries.length - groups.reduce((sum, g) => sum + g.deliveries.length, 0);
 
   const center: [number, number] =
-    groups.length > 0 ? [groups[0].latitude, groups[0].longitude] : DEFAULT_CENTER;
+    groups.length > 0
+      ? [groups[0].latitude, groups[0].longitude]
+      : DEFAULT_CENTER;
 
   return (
     <Stack gap='xs'>
       {withoutCoords > 0 && (
         <Text size='sm' c='dimmed'>
-          {withoutCoords} livraison(s) sans coordonnées GPS non affichée(s) sur la carte.
+          {withoutCoords} livraison(s) sans coordonnées GPS non affichée(s) sur
+          la carte.
         </Text>
       )}
 
