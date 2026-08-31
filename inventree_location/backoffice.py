@@ -1,4 +1,4 @@
-"""Back-office utilisateurs et rôles pour SCRUM-108."""
+"""Back-office utilisateurs et rôles"""
 
 from django.contrib.auth import get_user_model, password_validation
 from django.contrib.auth.models import Group
@@ -9,7 +9,8 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import roles
+from . import profiles, roles
+from .models import Groupe, Profile
 
 
 class BackOfficePermission(permissions.BasePermission):
@@ -62,6 +63,16 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
         allow_blank=True,
         min_length=6,
     )
+    telephone = serializers.CharField(
+        max_length=20,
+        required=False,
+        allow_blank=True,
+    )
+    groupe = serializers.PrimaryKeyRelatedField(
+        queryset=Groupe.objects.all(),
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = get_user_model()
@@ -76,6 +87,8 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
             "is_superuser",
             "roles",
             "password",
+            "telephone",
+            "groupe",
         ]
         read_only_fields = [
             "id",
@@ -84,10 +97,17 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
         ]
 
     def to_representation(self, instance):
-        """Expose les rôles plugin à partir des groupes Django."""
+        """Expose les rôles plugin et les champs portés par le `Profile`."""
 
         data = super().to_representation(instance)
         data["roles"] = sorted(roles.user_roles(instance))
+
+        profile = profiles.user_profile(instance)
+        groupe = profile.groupe if profile else None
+
+        data["telephone"] = profile.telephone if profile else ""
+        data["groupe"] = groupe.pk if groupe else None
+        data["groupe_nom"] = groupe.nom if groupe else ""
 
         return data
 
@@ -176,11 +196,25 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
 
         user.groups.set(list(existing_non_plugin_groups) + list(plugin_groups))
 
+    def _pop_profile_fields(self, validated_data):
+        """Sort les champs portés par le `Profile`, pas par le `User`.
+
+        Seules les clés effectivement envoyées sont retenues : un PATCH partiel
+        ne doit pas réinitialiser le téléphone ou le groupe.
+        """
+
+        return {
+            name: validated_data.pop(name)
+            for name in ("telephone", "groupe")
+            if name in validated_data
+        }
+
     def create(self, validated_data):
-        """Crée un utilisateur et lui affecte ses rôles."""
+        """Crée un utilisateur, son profil et lui affecte ses rôles."""
 
         role_names = validated_data.pop("roles", [])
         password = validated_data.pop("password", "")
+        profile_fields = self._pop_profile_fields(validated_data)
 
         user = get_user_model().objects.create_user(
             password=password,
@@ -188,14 +222,16 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
         )
 
         self._apply_roles(user, role_names)
+        profiles.update_user_profile(user, profile_fields)
 
         return user
 
     def update(self, instance, validated_data):
-        """Met à jour l'utilisateur, son état actif et ses rôles."""
+        """Met à jour l'utilisateur, son profil, son état actif et ses rôles."""
 
         role_names = validated_data.pop("roles", None)
         password = validated_data.pop("password", None)
+        profile_fields = self._pop_profile_fields(validated_data)
 
         for field, value in validated_data.items():
             setattr(instance, field, value)
@@ -207,6 +243,8 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
 
         if role_names is not None:
             self._apply_roles(instance, role_names)
+
+        profiles.update_user_profile(instance, profile_fields)
 
         return instance
 
@@ -223,7 +261,8 @@ class BackOfficeUserListCreateView(generics.ListCreateAPIView):
 
         queryset = (
             get_user_model()
-            .objects.prefetch_related("groups")
+            .objects.select_related("location_profile__groupe")
+            .prefetch_related("groups")
             .all()
             .order_by("username")
         )
@@ -246,7 +285,75 @@ class BackOfficeUserDetailView(generics.RetrieveUpdateAPIView):
 
     permission_classes = [BackOfficePermission]
     serializer_class = BackOfficeUserSerializer
-    queryset = get_user_model().objects.prefetch_related("groups").all()
+    queryset = (
+        get_user_model()
+        .objects.select_related("location_profile__groupe")
+        .prefetch_related("groups")
+        .all()
+    )
+
+
+class BackOfficeGroupeSerializer(serializers.ModelSerializer):
+    """Sérialiseur CRUD d'un groupe scout, réservé au back-office.
+
+    Distinct de `GroupeSerializer`, qui reste en lecture seule pour le
+    sélecteur de manifestation.
+    """
+
+    membres = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Groupe
+        fields = ["id", "nom", "code", "adresse", "membres"]
+
+    def get_membres(self, obj) -> int:
+        """Nombre d'utilisateurs rattachés au groupe.
+
+        Compté depuis `Profile`, jamais via la relation inverse `Groupe.profiles`
+        : le chargeur de plugins importe `models` deux fois et le nom inverse
+        n'est pas rattaché au `Groupe` vu d'ici. Une requête par ligne, sur une
+        liste de groupes qui tient en une page.
+        """
+
+        return Profile.objects.filter(groupe=obj.pk).count()
+
+
+class BackOfficeGroupeListCreateView(generics.ListCreateAPIView):
+    """Liste et création des groupes depuis le back-office."""
+
+    permission_classes = [BackOfficePermission]
+    serializer_class = BackOfficeGroupeSerializer
+    pagination_class = BackOfficePagination
+
+    def get_queryset(self):
+        """Retourne les groupes filtrables par recherche."""
+
+        queryset = Groupe.objects.all().order_by("nom")
+
+        search = self.request.query_params.get("search", "").strip()
+
+        if search:
+            queryset = queryset.filter(
+                Q(nom__icontains=search) | Q(code__icontains=search)
+            )
+
+        return queryset
+
+
+class BackOfficeGroupeDetailView(generics.RetrieveUpdateAPIView):
+    """Lecture / modification d'un groupe depuis le back-office.
+
+    Pas de suppression : `Profile.groupe` et `Manifestation.groupe` sont en
+    `PROTECT`, un groupe déjà utilisé ne peut pas disparaître.
+    """
+
+    permission_classes = [BackOfficePermission]
+    serializer_class = BackOfficeGroupeSerializer
+
+    def get_queryset(self):
+        """Évalué par requête : un queryset de classe casserait l'import."""
+
+        return Groupe.objects.all()
 
 
 class BackOfficeRoleListView(APIView):

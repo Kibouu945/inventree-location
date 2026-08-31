@@ -1,6 +1,6 @@
-/** Types de l'API SCRUM-108 back-office utilisateurs. */
+/** Types de l'API back-office : utilisateurs, rôles et groupes. */
 
-/** Réponse paginée DRF, commune aux deux listes back-office. */
+/** Réponse paginée DRF, commune aux listes back-office. */
 export interface Page<T> {
   count: number;
   next: string | null;
@@ -23,6 +23,10 @@ export interface BackOfficeUser {
   is_staff: boolean;
   is_superuser: boolean;
   roles: string[];
+  /** Porté par le `Profile`, imprimé sur le bon de livraison. */
+  telephone: string;
+  groupe: number | null;
+  groupe_nom: string;
 }
 
 export interface BackOfficeUserFormValues {
@@ -33,4 +37,21 @@ export interface BackOfficeUserFormValues {
   password: string;
   is_active: boolean;
   roles: string[];
+  telephone: string;
+  /** `Select` Mantine travaille en chaîne : converti en entier à l'envoi. */
+  groupe: string | null;
+}
+
+export interface BackOfficeGroupe {
+  id: number;
+  nom: string;
+  code: string;
+  adresse: string;
+  membres: number;
+}
+
+export interface BackOfficeGroupeFormValues {
+  nom: string;
+  code: string;
+  adresse: string;
 }

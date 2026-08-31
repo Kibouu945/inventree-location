@@ -57,6 +57,8 @@ class InvenTreeLocation(
         from django.urls import path
 
         from .backoffice import (
+            BackOfficeGroupeDetailView,
+            BackOfficeGroupeListCreateView,
             BackOfficeRoleListView,
             BackOfficeUserDetailView,
             BackOfficeUserListCreateView,
@@ -236,6 +238,16 @@ class InvenTreeLocation(
                 "backoffice/parts/<int:pk>/",
                 PartBackOfficeDetailView.as_view(),
                 name="backoffice-part-detail",
+            ),
+            path(
+                "backoffice/groupes/",
+                BackOfficeGroupeListCreateView.as_view(),
+                name="backoffice-groupe-list-create",
+            ),
+            path(
+                "backoffice/groupes/<int:pk>/",
+                BackOfficeGroupeDetailView.as_view(),
+                name="backoffice-groupe-detail",
             ),
             path(
                 "backoffice/roles/",

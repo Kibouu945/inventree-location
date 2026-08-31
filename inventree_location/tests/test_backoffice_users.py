@@ -24,6 +24,7 @@ from inventree_location.backoffice import (
     BackOfficeUserDetailView,
     BackOfficeUserListCreateView,
 )
+from inventree_location.models import Groupe, Profile
 
 User = get_user_model()
 
@@ -301,3 +302,104 @@ class TestRoleList:
         assert Group.objects.filter(name__in=roles.ALL_ROLES).count() == len(
             roles.ALL_ROLES
         )
+
+
+class TestProfil:
+    """Téléphone et groupe, portés par le `Profile` et non par le `User`.
+
+    Le téléphone s'imprime sur le bon de livraison : sans ces champs, seul le
+    Django admin permettait de le renseigner.
+    """
+
+    @pytest.fixture
+    def groupe(self, db):
+        return Groupe.objects.create(nom="Saint-Exupéry", code="SEX-01")
+
+    def test_creation_avec_telephone_et_groupe(self, factory, admin, groupe):
+        response = _create(
+            factory,
+            admin,
+            {
+                "username": "livreuse",
+                "password": STRONG_PASSWORD,
+                "telephone": "0102030405",
+                "groupe": groupe.pk,
+            },
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["telephone"] == "0102030405"
+        assert response.data["groupe"] == groupe.pk
+        assert response.data["groupe_nom"] == "Saint-Exupéry"
+
+        profile = Profile.objects.get(user__username="livreuse")
+        assert profile.telephone == "0102030405"
+        assert profile.groupe == groupe
+
+    def test_creation_sans_profil_reste_vide(self, factory, admin):
+        """Aucun `Profile` inutile : le champ absent ne déclenche pas d'écriture."""
+
+        response = _create(
+            factory, admin, {"username": "sobre", "password": STRONG_PASSWORD}
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["telephone"] == ""
+        assert response.data["groupe"] is None
+        assert not Profile.objects.filter(user__username="sobre").exists()
+
+    def test_edition_cree_le_profil_manquant(self, factory, admin, groupe):
+        cible = _make_user("magasinier")
+
+        response = _patch(
+            factory, admin, cible, {"telephone": "0605040302", "groupe": groupe.pk}
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["telephone"] == "0605040302"
+
+        profile = Profile.objects.get(user=cible)
+        assert profile.telephone == "0605040302"
+        assert profile.groupe == groupe
+
+    def test_patch_partiel_ne_vide_pas_le_telephone(self, factory, admin):
+        cible = _make_user("stable")
+        Profile.objects.create(user=cible, telephone="0700000000")
+
+        response = _patch(factory, admin, cible, {"email": "stable@exemple.fr"})
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["telephone"] == "0700000000"
+        assert Profile.objects.get(user=cible).telephone == "0700000000"
+
+    def test_groupe_detachable(self, factory, admin, groupe):
+        cible = _make_user("mobile")
+        Profile.objects.create(user=cible, groupe=groupe)
+
+        response = _patch(factory, admin, cible, {"groupe": None})
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["groupe"] is None
+        assert Profile.objects.get(user=cible).groupe is None
+
+    def test_groupe_inconnu_refuse(self, factory, admin):
+        response = _create(
+            factory,
+            admin,
+            {"username": "perdue", "password": STRONG_PASSWORD, "groupe": 9999},
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "groupe" in response.data
+        assert not User.objects.filter(username="perdue").exists()
+
+    def test_liste_expose_le_profil(self, factory, admin, groupe):
+        cible = _make_user("listee")
+        Profile.objects.create(user=cible, telephone="0899887766", groupe=groupe)
+
+        response = _list(factory, admin, search="listee")
+
+        assert response.status_code == status.HTTP_200_OK
+        ligne = response.data["results"][0]
+        assert ligne["telephone"] == "0899887766"
+        assert ligne["groupe_nom"] == "Saint-Exupéry"

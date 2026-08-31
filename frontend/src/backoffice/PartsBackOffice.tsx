@@ -17,22 +17,18 @@ import {
   TextInput,
   Title
 } from '@mantine/core';
-import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { canManageBackOffice } from '../roles';
+import { listParams, PARTS_URL, pageCount } from './api';
 import { apiErrorMessage } from './apiError';
 import type {
   BackOfficePart,
   BackOfficePartFormValues,
   Page
 } from './partTypes';
-
-const PARTS_URL = '/plugin/inventree-location/backoffice/parts/';
-
-//: Doit rester aligné sur `BackOfficePagination.page_size` côté serveur.
-const PAGE_SIZE = 20;
+import { usePagedSearch } from './usePagedSearch';
 
 interface ModalState {
   open: boolean;
@@ -98,9 +94,8 @@ export function PartsBackOffice({
 }) {
   const canAccess = canManageBackOffice(context);
 
-  const [search, setSearch] = useState('');
-  const [debouncedSearch] = useDebouncedValue(search, 300);
-  const [page, setPage] = useState(1);
+  const { search, debouncedSearch, page, setPage, updateSearch } =
+    usePagedSearch();
 
   const [modalState, setModalState] = useState<ModalState>({ open: false });
   const [formValues, setFormValues] = useState<BackOfficePartFormValues>(
@@ -114,16 +109,9 @@ export function PartsBackOffice({
       queryKey: ['backoffice-parts', debouncedSearch, page],
       enabled: canAccess,
       queryFn: async () => {
-        const params: Record<string, string> = {
-          page: String(page),
-          page_size: String(PAGE_SIZE)
-        };
-
-        if (debouncedSearch.trim()) {
-          params.search = debouncedSearch.trim();
-        }
-
-        const response = await context.api.get(PARTS_URL, { params });
+        const response = await context.api.get(PARTS_URL, {
+          params: listParams(page, debouncedSearch)
+        });
 
         return response.data;
       }
@@ -133,14 +121,7 @@ export function PartsBackOffice({
 
   const rows = partsQuery.data?.results ?? [];
   const count = partsQuery.data?.count ?? 0;
-  const pages = Math.max(1, Math.ceil(count / PAGE_SIZE));
-
-  function updateSearch(value: string) {
-    // Changer la recherche renvoie en première page : rester sur la page 3
-    // d'un résultat qui n'en compte plus qu'une afficherait une liste vide.
-    setSearch(value);
-    setPage(1);
-  }
+  const pages = pageCount(count);
 
   function updateField<K extends keyof BackOfficePartFormValues>(
     field: K,

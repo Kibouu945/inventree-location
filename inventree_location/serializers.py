@@ -7,7 +7,6 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -34,6 +33,7 @@ from .models import (
     StatutManifestation,
     StatutReservation,
 )
+from .profiles import user_phone
 from .services.workflow_service import transition_reservation_status
 from .stock import compute_prestation_stock
 from .ramassage import lignes_a_ramasser
@@ -152,32 +152,6 @@ def _user_label(user):
     full_name = f"{user.first_name} {user.last_name}".strip()
 
     return f"{full_name} ({user.username})" if full_name else user.username
-
-
-def _user_phone(user):
-    """Téléphone de l'utilisateur (via son `Profile`), vide si non renseigné.
-
-    `Profile` n'est jamais auto-créé (pas de signal) : l'accès reverse
-    OneToOne lève `Profile.DoesNotExist`, pas une `AttributeError` — un
-    `getattr(user, "location_profile", None)` ne l'attraperait pas.
-
-    On attrape `ObjectDoesNotExist`, la classe mère de Django, et non
-    `Profile.DoesNotExist` : dans le conteneur, le chargeur de plugins importe
-    `inventree_location.models` deux fois, si bien que le `Profile` de ce module
-    n'est pas celui auquel la relation inverse est rattachée. Un `except
-    Profile.DoesNotExist` ne filtrait donc rien et `/deliveries/` répondait 500
-    (« User has no location_profile. ») pour tout utilisateur sans profil. La
-    suite pytest ne peut pas voir ce cas : hors InvenTree, le module n'existe
-    qu'en un seul exemplaire.
-    """
-
-    if user is None:
-        return ""
-
-    try:
-        return user.location_profile.telephone
-    except ObjectDoesNotExist:
-        return ""
 
 
 class LigneReservationSerializer(serializers.ModelSerializer):
@@ -1159,7 +1133,7 @@ class DeliverySerializer(serializers.ModelSerializer):
     def get_organisateur_telephone(self, obj):
         """Téléphone de l'organisateur, vide si non renseigné."""
 
-        return _user_phone(obj.prestation.manifestation.organisateur)
+        return user_phone(obj.prestation.manifestation.organisateur)
 
     def get_quantite_totale(self, obj):
         """Somme des quantités demandées sur toutes les lignes (déjà prefetchées)."""
