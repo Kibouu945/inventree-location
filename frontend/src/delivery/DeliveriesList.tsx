@@ -17,9 +17,11 @@ import {
   Title
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
-import { useQuery } from '@tanstack/react-query';
+import { notifications } from '@mantine/notifications';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
+import { canMarquerLivree } from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
 import { DeliveryCalendar } from './DeliveryCalendar';
 import { DeliveryMap } from './DeliveryMap';
@@ -99,6 +101,38 @@ export function DeliveriesList({
           paramsSerializer: { indexes: null }
         });
         return response.data as Delivery[];
+      }
+    },
+    context.queryClient
+  );
+
+  const peutMarquerLivree = canMarquerLivree(context);
+
+  const livrerMutation = useMutation(
+    {
+      mutationFn: async (id: number) => {
+        const response = await context.api.post(
+          `${DELIVERIES_URL}${id}/livrer/`
+        );
+        return response.data;
+      },
+      onSuccess: () => {
+        // La réservation quitte « à livrer » : les deux listes changent.
+        context.queryClient.invalidateQueries({ queryKey: ['deliveries'] });
+        context.queryClient.invalidateQueries({ queryKey: ['reservations'] });
+        context.queryClient.invalidateQueries({ queryKey: ['ramassages'] });
+        notifications.show({
+          title: 'Livrée',
+          message: 'Réservation marquée livrée.',
+          color: 'green'
+        });
+      },
+      onError: () => {
+        notifications.show({
+          title: 'Action impossible',
+          message: "La réservation n'a pas pu être marquée livrée.",
+          color: 'red'
+        });
       }
     },
     context.queryClient
@@ -260,13 +294,30 @@ export function DeliveriesList({
                   </Badge>
                 </Table.Td>
                 <Table.Td>
-                  <Button
-                    size='xs'
-                    variant='light'
-                    onClick={() => setNoteDelivery(delivery)}
-                  >
-                    Détails / Imprimer
-                  </Button>
+                  <Group gap='xs'>
+                    <Button
+                      size='xs'
+                      variant='light'
+                      onClick={() => setNoteDelivery(delivery)}
+                    >
+                      Détails / Imprimer
+                    </Button>
+
+                    {peutMarquerLivree && delivery.statut === 'validee' && (
+                      <Button
+                        size='xs'
+                        variant='outline'
+                        color='green'
+                        loading={
+                          livrerMutation.isPending &&
+                          livrerMutation.variables === delivery.id
+                        }
+                        onClick={() => livrerMutation.mutate(delivery.id)}
+                      >
+                        Marquer livrée
+                      </Button>
+                    )}
+                  </Group>
                 </Table.Td>
               </Table.Tr>
             ))}

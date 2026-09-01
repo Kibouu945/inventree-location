@@ -20,6 +20,8 @@ export const CATALOG_WRITE_ROLES = [ADMIN, GESTIONNAIRE];
 export const ORGANISATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE, ORGANISATEUR];
 // Arbitrage (valider / refuser) : gestionnaire + admin seulement.
 export const RESERVATION_ARBITRAGE_ROLES = [ADMIN, GESTIONNAIRE];
+/** Marquer livrée : celui qui livre, plus l'encadrement. */
+export const MARQUER_LIVREE_ROLES = [ADMIN, GESTIONNAIRE, LIVREUR];
 // Back-office (gestion des parts, des utilisateurs) : admin seulement.
 export const BACKOFFICE_ROLES = [ADMIN];
 // Retours (check-in comme déclaration) : magasinier + admin, miroir strict de
@@ -84,6 +86,11 @@ export function canArbitrateReservations(
   context: InvenTreePluginContext
 ): boolean {
   return hasAnyRole(context, RESERVATION_ARBITRAGE_ROLES);
+}
+
+/** Peut marquer une réservation livrée (admin, gestionnaire, livreur). */
+export function canMarquerLivree(context: InvenTreePluginContext): boolean {
+  return hasAnyRole(context, MARQUER_LIVREE_ROLES);
 }
 
 /** Peut pointer le retour d'une réservation livrée (admin, magasinier). */

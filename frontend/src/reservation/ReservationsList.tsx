@@ -213,7 +213,12 @@ export function ReservationsList({
         return response.data;
       },
       onSuccess: (_data, variables) => {
+        // Une réservation validée entre dans la tournée du livreur et dans
+        // les ramassages : sans ça, ces deux listes restaient périmées
+        // jusqu'au prochain rechargement de page.
         context.queryClient.invalidateQueries({ queryKey: ['reservations'] });
+        context.queryClient.invalidateQueries({ queryKey: ['deliveries'] });
+        context.queryClient.invalidateQueries({ queryKey: ['ramassages'] });
         notifications.show({
           title: variables.statut === 'validee' ? 'Validée' : 'Refusée',
           message:

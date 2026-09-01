@@ -1069,16 +1069,24 @@ class LieuSerializer(serializers.ModelSerializer):
 
 
 class DeliveryLigneSerializer(serializers.ModelSerializer):
-    """Ligne de matériel d'une livraison, avec le nom de l'article (lecture seule)."""
+    """Ligne d'une livraison, avec le nom de l'article (lecture seule)."""
 
     part_name = serializers.CharField(source="part.name", read_only=True)
+    is_virtual = serializers.SerializerMethodField()
 
     class Meta:
         """Configuration du serializer DeliveryLigne."""
 
         model = LigneReservation
-        fields = ["id", "part", "part_name", "quantite_demandee"]
+        fields = ["id", "part", "part_name", "quantite_demandee", "is_virtual"]
         read_only_fields = fields
+
+    def get_is_virtual(self, obj) -> bool:
+        """Vrai pour un service, que le bon liste à part du matériel."""
+
+        rentable = getattr(obj.part, "rentable_info", None)
+
+        return bool(rentable and rentable.is_virtual)
 
 
 class DeliverySerializer(serializers.ModelSerializer):
@@ -1136,9 +1144,14 @@ class DeliverySerializer(serializers.ModelSerializer):
         return user_phone(obj.prestation.manifestation.organisateur)
 
     def get_quantite_totale(self, obj):
-        """Somme des quantités demandées sur toutes les lignes (déjà prefetchées)."""
+        """Somme des quantités demandées sur les seules lignes physiques.
 
-        return sum(ligne.quantite_demandee for ligne in obj.lignes.all())
+        Un article virtuel — nettoyage, montage — ne se charge pas dans le
+        camion : le compter donnait au livreur un total supérieur au nombre
+        d'objets à embarquer, et différent de celui du bon de ramassage.
+        """
+
+        return sum(ligne.quantite_demandee for ligne in lignes_a_ramasser(obj))
 
 
 class CatalogPartSerializer(serializers.Serializer):

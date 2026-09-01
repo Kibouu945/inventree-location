@@ -75,6 +75,7 @@ class InvenTreeLocation(
         )
         from .views import (
             BonRamassageView,
+            DeliveryMarquerLivreeView,
             CatalogPartDetailView,
             CatalogPartListView,
             ConflictsListView,
@@ -253,6 +254,11 @@ class InvenTreeLocation(
                 "backoffice/roles/",
                 BackOfficeRoleListView.as_view(),
                 name="backoffice-role-list",
+            ),
+            path(
+                "deliveries/<int:pk>/livrer/",
+                DeliveryMarquerLivreeView.as_view(),
+                name="delivery-marquer-livree",
             ),
             path("conflicts/", ConflictsListView.as_view(), name="conflict-list"),
             path(

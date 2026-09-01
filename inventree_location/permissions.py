@@ -79,6 +79,17 @@ class DeliveryPermission(RoleBasedPermission):
     write_roles = (roles.ADMIN, roles.GESTIONNAIRE)
 
 
+class MarquerLivreePermission(RoleBasedPermission):
+    """Marquer une réservation livrée : celui qui livre, plus l'encadrement.
+
+    Écriture volontairement étroite, distincte de `ReservationPermission` :
+    ouvrir cette dernière au livreur lui donnerait aussi la validation, le
+    refus et l'annulation d'une réservation.
+    """
+
+    write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.LIVREUR)
+
+
 class ReturnCheckinPermission(RoleBasedPermission):
     """Check-in retour ligne par ligne (OK / manquant / cassé) : rôle magasinier."""
 

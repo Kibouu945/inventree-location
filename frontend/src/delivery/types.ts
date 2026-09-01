@@ -6,6 +6,8 @@ export interface DeliveryLigne {
   part: number;
   part_name: string;
   quantite_demandee: number;
+  /** Un service : listé à part sur le bon, hors du total à charger. */
+  is_virtual: boolean;
 }
 
 /** Livraison telle que renvoyée par l'API (`DeliverySerializer`). */

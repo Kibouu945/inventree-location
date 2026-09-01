@@ -33,6 +33,10 @@ export function DeliveryNote({
   delivery: Delivery | null;
   onClose: () => void;
 }) {
+  const lignes = delivery?.lignes ?? [];
+  const materiel = lignes.filter((ligne) => !ligne.is_virtual);
+  const services = lignes.filter((ligne) => ligne.is_virtual);
+
   return (
     <Modal
       opened={delivery != null}
@@ -74,6 +78,8 @@ export function DeliveryNote({
               Gérant interne : {delivery.demandeur_nom || '—'}
             </Text>
 
+            {/* Les services sont listés à part : ils ne se chargent pas dans
+                le camion et n'entrent donc pas dans le total. */}
             <Divider my='sm' label='Matériel' labelPosition='left' />
             <Table striped>
               <Table.Thead>
@@ -83,7 +89,7 @@ export function DeliveryNote({
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {delivery.lignes.map((ligne) => (
+                {materiel.map((ligne) => (
                   <Table.Tr key={ligne.id}>
                     <Table.Td>{ligne.part_name}</Table.Td>
                     <Table.Td>{ligne.quantite_demandee}</Table.Td>
@@ -94,6 +100,28 @@ export function DeliveryNote({
             <Text size='sm' fw={500} ta='right'>
               Total : {delivery.quantite_totale}
             </Text>
+
+            {services.length > 0 && (
+              <>
+                <Divider my='sm' label='Prestations' labelPosition='left' />
+                <Table striped>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Prestation</Table.Th>
+                      <Table.Th>Quantité</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {services.map((ligne) => (
+                      <Table.Tr key={ligne.id}>
+                        <Table.Td>{ligne.part_name}</Table.Td>
+                        <Table.Td>{ligne.quantite_demandee}</Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </>
+            )}
 
             {delivery.commentaire && (
               <>

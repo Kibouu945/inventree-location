@@ -16,6 +16,7 @@ from inventree_location.models import (
     LigneReservation,
     Manifestation,
     Prestation,
+    RentableItem,
     Reservation,
     StatutReservation,
 )
@@ -363,3 +364,79 @@ class TestRetourEndpointGardeFous:
 
         ligne_tente.refresh_from_db()
         assert ligne_tente.quantite_retournee == 0
+
+
+class TestRetourPerimetrePhysique:
+    """Un article virtuel n'a rien à rendre : il sort de la saisie retour.
+
+    Le laisser dedans classait « partiel » un bon dont tout le matériel était
+    revenu, parce que la prestation restait à zéro. Même périmètre que le bon
+    de ramassage et que `ramassages/<pk>/retour/`.
+    """
+
+    @pytest.fixture
+    def ligne_physique_et_service(self, db, reservation_livree):
+        tente = Part.objects.create(name="Tente 4 places")
+        service = Part.objects.create(name="Nettoyage")
+        RentableItem.objects.create(part=service, is_virtual=True)
+
+        physique = LigneReservation.objects.create(
+            reservation=reservation_livree, part=tente, quantite_demandee=4
+        )
+        virtuelle = LigneReservation.objects.create(
+            reservation=reservation_livree, part=service, quantite_demandee=1
+        )
+        return physique, virtuelle
+
+    @pytest.mark.django_db
+    def test_get_masque_la_ligne_virtuelle(
+        self, factory, magasinier, reservation_livree, ligne_physique_et_service
+    ):
+        physique, virtuelle = ligne_physique_et_service
+
+        request = factory.get("/plugin/inventree-location/reservations/1/retour/")
+        force_authenticate(request, user=magasinier)
+        response = ReservationRetourView.as_view()(request, pk=reservation_livree.pk)
+
+        assert response.status_code == status.HTTP_200_OK
+        ids = [ligne["id"] for ligne in response.data["lignes"]]
+        assert ids == [physique.pk]
+        assert virtuelle.pk not in ids
+        assert response.data["quantite_demandee_totale"] == 4
+
+    @pytest.mark.django_db
+    def test_rendre_tout_le_materiel_donne_un_retour_complet(
+        self, factory, magasinier, reservation_livree, ligne_physique_et_service
+    ):
+        physique, _virtuelle = ligne_physique_et_service
+
+        request = factory.post(
+            "/plugin/inventree-location/reservations/1/retour/",
+            {"lignes": [{"id": physique.pk, "quantite_rendue": 4}]},
+            format="json",
+        )
+        force_authenticate(request, user=magasinier)
+        response = ReservationRetourView.as_view()(request, pk=reservation_livree.pk)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["statut_retour"] == "complet"
+
+        reservation_livree.refresh_from_db()
+        assert reservation_livree.statut == StatutReservation.RETOURNEE
+
+    @pytest.mark.django_db
+    def test_declarer_la_ligne_virtuelle_est_refuse(
+        self, factory, magasinier, reservation_livree, ligne_physique_et_service
+    ):
+        _physique, virtuelle = ligne_physique_et_service
+
+        request = factory.post(
+            "/plugin/inventree-location/reservations/1/retour/",
+            {"lignes": [{"id": virtuelle.pk, "quantite_rendue": 1}]},
+            format="json",
+        )
+        force_authenticate(request, user=magasinier)
+        response = ReservationRetourView.as_view()(request, pk=reservation_livree.pk)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert str(virtuelle.pk) in response.data["lignes"]

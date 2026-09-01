@@ -42,11 +42,13 @@ from .models import (
     ReturnIncidentType,
     StatutReservation,
 )
+from .ramassage import lignes_a_ramasser
 from .permissions import (
     CatalogPermission,
     DeliveryPermission,
     LieuPermission,
     ManifestationPermission,
+    MarquerLivreePermission,
     PrestationPermission,
     PrestationRetourPermission,
     ReservationPermission,
@@ -304,6 +306,52 @@ class ReservationListCreateView(generics.ListCreateAPIView):
         return queryset
 
 
+class DeliveryMarquerLivreeView(APIView):
+    """Marque une réservation livrée depuis la tournée du livreur.
+
+    Endpoint dédié plutôt que `reservations/<pk>/transition/` : celui-ci
+    n'autorise qu'un seul saut, `validée → livrée`, ce qui permet de l'ouvrir
+    au livreur sans lui donner la validation ni le refus.
+    """
+
+    permission_classes = [MarquerLivreePermission]
+
+    def post(self, request, pk, *args, **kwargs):
+        """Applique la transition si la réservation est bien validée."""
+
+        reservation = Reservation.objects.filter(pk=pk).first()
+
+        if reservation is None:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if reservation.statut != StatutReservation.VALIDEE:
+            return Response(
+                {
+                    "detail": (
+                        "Seule une réservation validée peut être marquée livrée."
+                    ),
+                    "current_status": reservation.statut,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        transition_reservation_status(
+            reservation,
+            StatutReservation.LIVREE,
+            user=request.user,
+            comment=request.data.get("commentaire", ""),
+        )
+        reservation.refresh_from_db()
+
+        return Response(
+            {"reservation": reservation.pk, "statut": reservation.statut},
+            status=status.HTTP_200_OK,
+        )
+
+
 class DeliveryListView(generics.ListAPIView):
     """Tournée livreur : réservations à livrer / livrées, enrichies (US livreur).
 
@@ -334,7 +382,7 @@ class DeliveryListView(generics.ListAPIView):
                 "prestation__manifestation",
                 "prestation__manifestation__organisateur",
             )
-            .prefetch_related("lignes__part")
+            .prefetch_related("lignes__part__rentable_info")
             .all()
             .order_by("date_retrait_prevue")
         )
@@ -765,7 +813,9 @@ class ReservationRetourView(APIView):
         toutes les deux la transition.
         """
 
-        queryset = Reservation.objects.prefetch_related("lignes", "lignes__part")
+        queryset = Reservation.objects.prefetch_related(
+            "lignes", "lignes__part", "lignes__part__rentable_info"
+        )
 
         if lock:
             queryset = queryset.select_for_update()
@@ -819,7 +869,10 @@ class ReservationRetourView(APIView):
         if reservation.statut not in self.ELIGIBLE_STATUTS:
             return self._conflict_response(reservation, self.NOT_ELIGIBLE_DETAIL)
 
-        lignes = list(reservation.lignes.all())
+        # Même périmètre que le bon de ramassage : un service ne revient pas,
+        # le compter classait en « partiel » un bon dont tout le matériel
+        # était rendu.
+        lignes = lignes_a_ramasser(reservation)
         statut_retour, total_demandee, total_rendue = self._statut_retour(lignes)
 
         return Response(
@@ -856,7 +909,7 @@ class ReservationRetourView(APIView):
             if reservation.statut not in self.DECLARABLE_STATUTS:
                 return self._conflict_response(reservation, self.NOT_DECLARABLE_DETAIL)
 
-            lignes_by_id = {ligne.pk: ligne for ligne in reservation.lignes.all()}
+            lignes_by_id = {ligne.pk: ligne for ligne in lignes_a_ramasser(reservation)}
             errors = {}
             vues = set()
 
@@ -1199,7 +1252,9 @@ class ReservationCheckinView(APIView):
         perime et rejouent toutes les deux les transitions de statut.
         """
 
-        queryset = Reservation.objects.prefetch_related("lignes", "lignes__part")
+        queryset = Reservation.objects.prefetch_related(
+            "lignes", "lignes__part", "lignes__part__rentable_info"
+        )
 
         if lock:
             queryset = queryset.select_for_update()
@@ -1238,7 +1293,8 @@ class ReservationCheckinView(APIView):
                 "numero": reservation.numero,
                 "statut": reservation.statut,
                 "lignes": [
-                    self._ligne_pointee(ligne) for ligne in reservation.lignes.all()
+                    self._ligne_pointee(ligne)
+                    for ligne in lignes_a_ramasser(reservation)
                 ],
             },
             status=status.HTTP_200_OK,
@@ -1364,7 +1420,7 @@ class ReservationCheckinView(APIView):
             if reservation.statut != StatutReservation.LIVREE:
                 return self._not_livree_response(reservation)
 
-            lignes_by_id = {ligne.pk: ligne for ligne in reservation.lignes.all()}
+            lignes_by_id = {ligne.pk: ligne for ligne in lignes_a_ramasser(reservation)}
             errors = self._validate_payload_lignes(payload_lignes, lignes_by_id)
 
             if errors:
