@@ -35,7 +35,11 @@ export async function apiToken() {
  */
 export async function session({ headless = true, width = 1700, height = 1300 } = {}) {
   const browser = await chromium.launch({ headless });
-  const ctx = await browser.newContext({ viewport: { width, height } });
+  const ctx = await browser.newContext({
+    viewport: { width, height },
+    timezoneId: 'Europe/Paris',
+    locale: 'fr-FR'
+  });
   const page = await ctx.newPage();
 
   const errors = [];
