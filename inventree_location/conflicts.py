@@ -488,7 +488,7 @@ def list_current_conflicts() -> List[dict]:
 def register_stock_conflict_history(reservation, conflict_result: dict) -> None:
     """Enregistre les conflits de stock détectés dans l'historique."""
 
-    from .models import ConflictHistory, ConflictState, ConflictType, Reservation
+    from .models import ConflictHistory, ConflictState, ConflictType
 
     if not conflict_result.get("has_conflict"):
         return
@@ -504,18 +504,16 @@ def register_stock_conflict_history(reservation, conflict_result: dict) -> None:
             conflicting_ids = [None]
 
         for conflicting_id in conflicting_ids:
-            conflicting_reservation = None
-
-            if conflicting_id is not None:
-                conflicting_reservation = Reservation.objects.filter(
-                    pk=conflicting_id
-                ).first()
-
+            # Clés étrangères passées par `_id`, jamais par instance : le
+            # chargeur de plugins importe `models` deux fois et une instance
+            # issue de l'autre exemplaire fait lever « Must be "Reservation"
+            # instance ». Le bug ne sortait qu'au premier conflit réel, donc
+            # jamais sur une base neuve.
             ConflictHistory.objects.get_or_create(
                 conflict_type=ConflictType.STOCK,
                 state=ConflictState.OPEN,
-                reservation=reservation,
-                conflicting_reservation=conflicting_reservation,
+                reservation_id=reservation.pk,
+                conflicting_reservation_id=conflicting_id,
                 part_id=conflict.get("part_id"),
                 period_start=reservation.date_retrait_prevue,
                 period_end=reservation.date_retour_prevue,
@@ -621,25 +619,22 @@ def detect_location_reservation_conflicts(reservation) -> dict:
 def register_location_conflict_history(reservation, conflict_result: dict) -> None:
     """Enregistre les conflits de lieu détectés dans l'historique."""
 
-    from .models import ConflictHistory, ConflictState, ConflictType, Reservation
+    from .models import ConflictHistory, ConflictState, ConflictType
 
     if not conflict_result.get("has_conflict"):
         return
 
     for conflict in conflict_result.get("conflicts", []):
-        conflicting_reservation = Reservation.objects.filter(
-            pk=conflict.get("reservation_id")
-        ).first()
-
         location_key = (
             conflict.get("adresse") or ""
         ).strip().lower() or f"{conflict.get('latitude')}:{conflict.get('longitude')}"
 
+        # Même raison qu'au-dessus : clés étrangères par `_id`, pas par instance.
         ConflictHistory.objects.get_or_create(
             conflict_type=ConflictType.LOCATION,
             state=ConflictState.OPEN,
-            reservation=reservation,
-            conflicting_reservation=conflicting_reservation,
+            reservation_id=reservation.pk,
+            conflicting_reservation_id=conflict.get("reservation_id"),
             period_start=reservation.date_retrait_prevue,
             period_end=reservation.date_retour_prevue,
             location_key=location_key,
