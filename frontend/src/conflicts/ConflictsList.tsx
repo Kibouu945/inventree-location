@@ -12,6 +12,7 @@ import {
   Text,
   Title
 } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ReservationForm } from '../reservation/ReservationForm';
@@ -33,6 +34,7 @@ interface ConflictItem {
   demandeur_nom: string;
   conflict_count: number;
   conflicting_reservation_ids: number[];
+  conflicting_reservation_numeros: string[];
   /** Articles en pénurie et quantité manquante (CON-01). */
   shortages: Shortage[];
 }
@@ -71,6 +73,8 @@ export function ConflictsList({
 }) {
   const [modalState, setModalState] = useState<ModalState>({ open: false });
   const [historyStateFilter, setHistoryStateFilter] = useState<string>('open');
+  //: Motif de refus par entrée, renvoyé par le serveur quand la cause tient.
+  const [blocages, setBlocages] = useState<Record<number, string>>({});
   const [historyTypeFilter, setHistoryTypeFilter] = useState<string>('all');
 
   // Le lecteur voit les conflits mais ne peut pas éditer les réservations.
@@ -107,12 +111,50 @@ export function ConflictsList({
     setModalState({ open: false });
   }
 
+  /** Ce qui décrit le conflit en une ligne : l'article manquant ou le lieu. */
+  function libelleConflit(item: ConflictHistoryItem): string {
+    if (item.conflict_type === 'stock') {
+      return `${item.part_name || 'Article inconnu'} (manquant: ${item.details?.missing_quantity ?? 0})`;
+    }
+
+    return item.details?.adresse || item.location_key || 'Lieu non renseigné';
+  }
+
   async function resolveConflict(item: ConflictHistoryItem) {
-    await context.api.patch(`${CONFLICTS_HISTORY_URL}${item.id}/resolve/`, {
-      note: 'Resolved from conflicts panel'
-    });
-    await historyQuery.refetch();
-    await query.refetch();
+    try {
+      await context.api.patch(`${CONFLICTS_HISTORY_URL}${item.id}/resolve/`, {
+        note: 'Resolved from conflicts panel'
+      });
+      setBlocages((current) => {
+        const suite = { ...current };
+        delete suite[item.id];
+        return suite;
+      });
+      // La ligne quitte la vue, filtrée sur « ouverts » : sans confirmation on
+      // ne distinguait pas une résolution réussie d'un échec silencieux.
+      notifications.show({
+        title: 'Conflit résolu',
+        message: `${item.reservation_numero} — ${libelleConflit(item)}`,
+        color: 'green'
+      });
+      await historyQuery.refetch();
+      await query.refetch();
+    } catch (error: unknown) {
+      // Le serveur refuse de clore un conflit dont la cause tient : on garde
+      // le motif sous la ligne plutôt que dans une notification fugace.
+      const data = (error as { response?: { data?: { detail?: string } } })
+        ?.response?.data;
+      const motif =
+        data?.detail ??
+        'Résolution impossible : le conflit est toujours actif.';
+
+      setBlocages((current) => ({ ...current, [item.id]: motif }));
+      notifications.show({
+        title: 'Résolution refusée',
+        message: motif,
+        color: 'red'
+      });
+    }
   }
 
   return (
@@ -188,7 +230,25 @@ export function ConflictsList({
                     ))}
                   </Group>
                 </Table.Td>
-                <Table.Td>{conflict.conflict_count}</Table.Td>
+                <Table.Td>
+                  {conflict.conflicting_reservation_numeros?.length ? (
+                    <Group gap={4}>
+                      {conflict.conflicting_reservation_numeros.map(
+                        (numero) => (
+                          <Badge key={numero} variant='light' color='orange'>
+                            {numero}
+                          </Badge>
+                        )
+                      )}
+                    </Group>
+                  ) : (
+                    // Une pénurie peut venir du seul prévisionnel d'une
+                    // prestation : personne à désigner en face.
+                    <Text size='sm' c='dimmed'>
+                      —
+                    </Text>
+                  )}
+                </Table.Td>
               </Table.Tr>
             ))}
           </Table.Tbody>
@@ -266,13 +326,7 @@ export function ConflictsList({
                   </Badge>
                 </Table.Td>
                 <Table.Td>{item.reservation_numero}</Table.Td>
-                <Table.Td>
-                  {item.conflict_type === 'stock'
-                    ? `${item.part_name || 'Article inconnu'} (manquant: ${item.details?.missing_quantity ?? 0})`
-                    : item.details?.adresse ||
-                      item.location_key ||
-                      'Lieu non renseigné'}
-                </Table.Td>
+                <Table.Td>{libelleConflit(item)}</Table.Td>
                 <Table.Td>
                   {item.period_start
                     ? new Date(item.period_start).toLocaleDateString()
@@ -287,13 +341,20 @@ export function ConflictsList({
                 </Table.Td>
                 <Table.Td>
                   {item.state === 'open' ? (
-                    <Button
-                      size='xs'
-                      color='green'
-                      onClick={() => resolveConflict(item)}
-                    >
-                      Résoudre
-                    </Button>
+                    <Stack gap={4}>
+                      <Button
+                        size='xs'
+                        color='green'
+                        onClick={() => resolveConflict(item)}
+                      >
+                        Résoudre
+                      </Button>
+                      {blocages[item.id] && (
+                        <Text size='xs' c='red' maw={280}>
+                          {blocages[item.id]}
+                        </Text>
+                      )}
+                    </Stack>
                   ) : (
                     <Text c='dimmed' size='sm'>
                       {item.resolved_by || '—'}

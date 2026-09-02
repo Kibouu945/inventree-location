@@ -35,7 +35,10 @@ from inventree_location.serializers import ReservationSerializer
 from inventree_location.services.workflow_service import (
     transition_reservation_status,
 )
-from inventree_location.views import ReservationConflictCheckView
+from inventree_location.views import (
+    ConflictHistoryResolveView,
+    ReservationConflictCheckView,
+)
 from inventree_location.views import StockAvailabilityCheckView
 
 from part.models import Part
@@ -431,3 +434,106 @@ def test_stock_availability_endpoint_returns_200_when_available(gestionnaire, st
 
     assert response.status_code == status.HTTP_200_OK
     assert response.data["has_conflict"] is False
+
+
+@pytest.mark.django_db
+def test_resoudre_un_conflit_de_stock_exige_que_la_penurie_ait_disparu(
+    gestionnaire, stock_setup
+):
+    """« Résoudre » ne doit jamais taire une pénurie encore réelle.
+
+    Avant, l'endpoint posait `state = resolved` sans rien vérifier : le
+    registre annonçait « traité » pendant qu'il manquait toujours du matériel.
+    """
+
+    from inventree_location.models import ConflictHistory, ConflictState, ConflictType
+
+    candidate = _make_candidate(stock_setup, qty=1)
+    entree = ConflictHistory.objects.create(
+        conflict_type=ConflictType.STOCK,
+        state=ConflictState.OPEN,
+        reservation=candidate,
+        part=stock_setup["part"],
+        period_start=candidate.date_retrait_prevue,
+        period_end=candidate.date_retour_prevue,
+    )
+
+    factory = APIRequestFactory()
+
+    def resoudre():
+        request = factory.patch(
+            f"/plugin/inventree-location/conflicts/history/{entree.pk}/resolve/",
+            {"note": "handled"},
+            format="json",
+        )
+        force_authenticate(request, user=gestionnaire)
+        return ConflictHistoryResolveView.as_view()(request, pk=entree.pk)
+
+    refus = resoudre()
+
+    assert refus.status_code == status.HTTP_409_CONFLICT
+    assert "il manque" in refus.data["reason"]
+    assert "Tente" in refus.data["reason"]
+
+    entree.refresh_from_db()
+    assert entree.state == ConflictState.OPEN
+
+    # Cause levée : on réapprovisionne, la pénurie disparaît.
+    fixer_stock(stock_setup["part"], 10)
+
+    accepte = resoudre()
+
+    assert accepte.status_code == status.HTTP_200_OK
+    entree.refresh_from_db()
+    assert entree.state == ConflictState.RESOLVED
+
+
+@pytest.mark.django_db
+def test_une_penurie_nee_apres_coup_entre_au_registre(gestionnaire, stock_setup):
+    """Le stock peut baisser hors de toute écriture de réservation.
+
+    Avant, seule `register_stock_conflict_history` écrivait, au moment de
+    l'enregistrement : une pénurie née d'une perte de stock s'affichait dans
+    « Conflits actuels » sans jamais entrer à l'historique.
+    """
+
+    from inventree_location.conflicts import sync_conflict_registry
+    from inventree_location.models import ConflictHistory, ConflictState, ConflictType
+
+    # La réservation validée du fixture tient sur le stock existant.
+    assert ConflictHistory.objects.count() == 0
+
+    # Le stock disparaît après coup.
+    fixer_stock(stock_setup["part"], 0)
+
+    ouvertes = sync_conflict_registry()
+
+    assert ouvertes >= 1
+    entree = ConflictHistory.objects.filter(
+        conflict_type=ConflictType.STOCK,
+        state=ConflictState.OPEN,
+        reservation=stock_setup["existing"],
+    ).first()
+    assert entree is not None
+    assert entree.part_id == stock_setup["part"].pk
+    assert entree.details["missing_quantity"] >= 1
+
+    # Idempotent : une seconde passe n'ouvre pas de doublon.
+    assert sync_conflict_registry() == 0
+    assert ConflictHistory.objects.filter(state=ConflictState.OPEN).count() == 1
+
+
+@pytest.mark.django_db
+def test_la_synchronisation_ne_referme_rien(gestionnaire, stock_setup):
+    """Clore reste un geste humain, vérifié par `conflict_still_active`."""
+
+    from inventree_location.conflicts import sync_conflict_registry
+    from inventree_location.models import ConflictHistory, ConflictState
+
+    fixer_stock(stock_setup["part"], 0)
+    sync_conflict_registry()
+
+    fixer_stock(stock_setup["part"], 50)
+    sync_conflict_registry()
+
+    assert ConflictHistory.objects.filter(state=ConflictState.OPEN).count() == 1

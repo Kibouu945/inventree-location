@@ -452,12 +452,14 @@ def list_current_conflicts() -> List[dict]:
             continue
 
         conflicting_ids = set()
+        # Un nombre ne suffit pas pour arbitrer : il faut savoir contre qui.
+        numeros_par_id = {}
         shortages = []
 
         for conflict in result["conflicts"]:
-            conflicting_ids.update(
-                item["reservation_id"] for item in conflict["conflicting_reservations"]
-            )
+            for item in conflict["conflicting_reservations"]:
+                conflicting_ids.add(item["reservation_id"])
+                numeros_par_id[item["reservation_id"]] = item["numero"]
             shortages.append({
                 "part_id": conflict["part_id"],
                 "part_name": conflict["part_name"],
@@ -479,10 +481,68 @@ def list_current_conflicts() -> List[dict]:
             ),
             "conflict_count": len(conflicting_ids),
             "conflicting_reservation_ids": sorted(conflicting_ids),
+            "conflicting_reservation_numeros": [
+                numeros_par_id[pk] for pk in sorted(conflicting_ids)
+            ],
             "shortages": shortages,
         })
 
     return payload
+
+
+def sync_conflict_registry(current_conflicts=None) -> int:
+    """Inscrit au registre les pénuries en cours qui n'y figurent pas encore.
+
+    `register_stock_conflict_history` n'écrit qu'au moment où une réservation
+    est enregistrée. Une pénurie née après coup — du stock perdu, cassé ou
+    ajusté — n'entrait donc jamais à l'historique : elle s'affichait dans
+    « Conflits actuels » sans entrée à traiter. Le backlog demande d'historiser
+    tous les conflits, pas seulement ceux qui bloquent une saisie.
+
+    Ne referme rien : la clôture reste un geste humain, et `conflict_still_active`
+    en vérifie déjà le bien-fondé. Retourne le nombre d'entrées ouvertes.
+    """
+
+    from .models import ConflictHistory, ConflictState, ConflictType, Reservation
+
+    if current_conflicts is None:
+        current_conflicts = list_current_conflicts()
+
+    ouvertes = 0
+
+    for entree in current_conflicts:
+        reservation = Reservation.objects.filter(pk=entree["id"]).first()
+
+        if reservation is None:
+            continue
+
+        # Une pénurie peut n'être due qu'au prévisionnel d'une prestation :
+        # dans ce cas aucune réservation concurrente n'est à désigner.
+        concurrentes = entree.get("conflicting_reservation_ids") or [None]
+
+        for shortage in entree.get("shortages", []):
+            for concurrente_id in concurrentes:
+                _, cree = ConflictHistory.objects.get_or_create(
+                    conflict_type=ConflictType.STOCK,
+                    state=ConflictState.OPEN,
+                    reservation_id=reservation.pk,
+                    conflicting_reservation_id=concurrente_id,
+                    part_id=shortage["part_id"],
+                    period_start=reservation.date_retrait_prevue,
+                    period_end=reservation.date_retour_prevue,
+                    defaults={
+                        "details": {
+                            "part_name": shortage["part_name"],
+                            "missing_quantity": shortage["missing_quantity"],
+                            "source": "registre synchronisé",
+                        }
+                    },
+                )
+
+                if cree:
+                    ouvertes += 1
+
+    return ouvertes
 
 
 def register_stock_conflict_history(reservation, conflict_result: dict) -> None:
@@ -616,6 +676,49 @@ def detect_location_reservation_conflicts(reservation) -> dict:
     }
 
 
+def location_key_of(conflict: dict) -> str:
+    """Clé d'un lieu : son adresse normalisée, sinon ses coordonnées."""
+
+    adresse = (conflict.get("adresse") or "").strip().lower()
+
+    return adresse or f"{conflict.get('latitude')}:{conflict.get('longitude')}"
+
+
+def conflict_still_active(conflict) -> tuple[bool, str]:
+    """Dit si la cause d'une entrée d'historique tient encore, et laquelle.
+
+    Rejoue le détecteur correspondant au type du conflit : c'est la situation
+    du moment qui décide, jamais l'état stocké. Sans cette relecture, « résoudre »
+    ne faisait que taire le registre pendant que le conflit restait entier.
+    """
+
+    from .models import ConflictType
+
+    reservation = conflict.reservation
+
+    if reservation is None:
+        return False, ""
+
+    if conflict.conflict_type == ConflictType.STOCK:
+        for detail in detect_reservation_conflicts(reservation)["conflicts"]:
+            if conflict.part_id and detail["part_id"] != conflict.part_id:
+                continue
+
+            return True, (
+                f"il manque {detail['missing_quantity']} × {detail['part_name']}"
+            )
+
+        return False, ""
+
+    for detail in detect_location_reservation_conflicts(reservation)["conflicts"]:
+        if conflict.location_key and location_key_of(detail) != conflict.location_key:
+            continue
+
+        return True, f"{detail['numero']} occupe déjà {detail['lieu_nom']}"
+
+    return False, ""
+
+
 def register_location_conflict_history(reservation, conflict_result: dict) -> None:
     """Enregistre les conflits de lieu détectés dans l'historique."""
 
@@ -625,9 +728,7 @@ def register_location_conflict_history(reservation, conflict_result: dict) -> No
         return
 
     for conflict in conflict_result.get("conflicts", []):
-        location_key = (
-            conflict.get("adresse") or ""
-        ).strip().lower() or f"{conflict.get('latitude')}:{conflict.get('longitude')}"
+        location_key = location_key_of(conflict)
 
         # Même raison qu'au-dessus : clés étrangères par `_id`, pas par instance.
         ConflictHistory.objects.get_or_create(

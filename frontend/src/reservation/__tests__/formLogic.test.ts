@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   buildReservationPayload,
   canArbitrateReservation,
+  canCancelReservation,
   emptyReservationValues,
   enrichLignesFromCatalog,
   isReservationEditable,
+  readOnlyReason,
   removeLigne,
   reservationToFormValues,
   transitionErrorMessage,
@@ -278,5 +280,41 @@ describe('isReservationEditable', () => {
     ]) {
       expect(isReservationEditable(statut)).toBe(false);
     }
+  });
+});
+
+describe('canCancelReservation', () => {
+  it('autorise l’annulation tant que la réservation est vivante', () => {
+    for (const statut of [
+      'brouillon',
+      'soumise',
+      'validee',
+      'livree',
+      'retournee'
+    ]) {
+      expect(canCancelReservation(statut)).toBe(true);
+    }
+  });
+
+  it('la refuse sur un dossier clos', () => {
+    for (const statut of ['cloturee', 'refusee', 'annulee']) {
+      expect(canCancelReservation(statut)).toBe(false);
+    }
+  });
+});
+
+describe('readOnlyReason', () => {
+  it('nomme le vrai statut, pas « validée » par défaut', () => {
+    expect(readOnlyReason('annulee')).toContain('annulée');
+    expect(readOnlyReason('refusee')).toContain('refusée');
+    expect(readOnlyReason('livree')).toContain('livrée');
+    expect(readOnlyReason('cloturee')).toContain('clôturée');
+    expect(readOnlyReason('validee')).toContain('validée');
+  });
+
+  it('reste neutre sur un statut inconnu', () => {
+    expect(readOnlyReason('zzz')).toBe(
+      'Cette réservation n’est plus modifiable.'
+    );
   });
 });

@@ -29,7 +29,11 @@ import {
 } from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
 import { CheckinForm } from './CheckinForm';
-import { canArbitrateReservation, transitionErrorMessage } from './formLogic';
+import {
+  canArbitrateReservation,
+  canCancelReservation,
+  transitionErrorMessage
+} from './formLogic';
 import { ReservationForm } from './ReservationForm';
 import { RetourForm } from './RetourForm';
 import {
@@ -115,6 +119,11 @@ export function ReservationsList({
   context: InvenTreePluginContext;
 }) {
   const [modalState, setModalState] = useState<ModalState>({ open: false });
+  //: Annuler est irréversible : aucune transition ne sort de « annulée ».
+  const [cancelModal, setCancelModal] = useState<{
+    open: boolean;
+    reservation?: Reservation;
+  }>({ open: false });
   const [checkinModal, setCheckinModal] = useState<CheckinModalState>({
     open: false
   });
@@ -204,7 +213,7 @@ export function ReservationsList({
         statut
       }: {
         id: number;
-        statut: 'validee' | 'refusee';
+        statut: 'validee' | 'refusee' | 'annulee';
       }) => {
         const response = await context.api.patch(
           `${RESERVATIONS_URL}${id}/transition/`,
@@ -219,14 +228,14 @@ export function ReservationsList({
         context.queryClient.invalidateQueries({ queryKey: ['reservations'] });
         context.queryClient.invalidateQueries({ queryKey: ['deliveries'] });
         context.queryClient.invalidateQueries({ queryKey: ['ramassages'] });
-        notifications.show({
-          title: variables.statut === 'validee' ? 'Validée' : 'Refusée',
-          message:
-            variables.statut === 'validee'
-              ? 'Réservation validée.'
-              : 'Réservation refusée.',
-          color: variables.statut === 'validee' ? 'green' : 'orange'
-        });
+        const libelles = {
+          validee: ['Validée', 'Réservation validée.', 'green'],
+          refusee: ['Refusée', 'Réservation refusée.', 'orange'],
+          annulee: ['Annulée', 'Réservation annulée.', 'red']
+        } as const;
+        const [titre, message, couleur] = libelles[variables.statut];
+
+        notifications.show({ title: titre, message, color: couleur });
       },
       onError: (error: unknown) => {
         notifications.show({
@@ -397,6 +406,10 @@ export function ReservationsList({
                 canRetour && reservation.statut === 'livree';
               const showArbitrageActions =
                 canArbitrate && canArbitrateReservation(reservation.statut);
+              // Seul levier d'arbitrage sur une réservation déjà validée : sa
+              // fiche s'ouvre en lecture seule et rien d'autre n'agit dessus.
+              const showCancelAction =
+                canWrite && canCancelReservation(reservation.statut);
 
               return (
                 <Table.Tr
@@ -509,9 +522,32 @@ export function ReservationsList({
                             Déclarer le retour
                           </Button>
                         )}
+                        {showCancelAction && (
+                          <Button
+                            size='xs'
+                            variant='subtle'
+                            color='red'
+                            loading={
+                              transitionMutation.isPending &&
+                              transitionMutation.variables?.id ===
+                                reservation.id &&
+                              transitionMutation.variables?.statut === 'annulee'
+                            }
+                            disabled={transitionMutation.isPending}
+                            onClick={() =>
+                              setCancelModal({
+                                open: true,
+                                reservation
+                              })
+                            }
+                          >
+                            Annuler
+                          </Button>
+                        )}
                         {!showCheckinAction &&
                           !showRetourAction &&
-                          !showArbitrageActions && (
+                          !showArbitrageActions &&
+                          !showCancelAction && (
                             <Text c='dimmed' size='sm'>
                               —
                             </Text>
@@ -600,6 +636,48 @@ export function ReservationsList({
             onSaved={closeRetourModal}
           />
         )}
+      </Modal>
+
+      <Modal
+        opened={cancelModal.open}
+        onClose={() => setCancelModal({ open: false })}
+        title='Annuler la réservation'
+      >
+        <Stack gap='md'>
+          <Text size='sm'>
+            {cancelModal.reservation?.numero} —{' '}
+            {cancelModal.reservation?.prestation_nom || 'sans prestation'}.
+          </Text>
+          <Text size='sm' c='dimmed'>
+            Le matériel engagé est libéré et la réservation sort des tournées.
+            Aucune transition ne sort de « annulée » : l'opération est
+            définitive.
+          </Text>
+
+          <Group justify='flex-end'>
+            <Button
+              variant='default'
+              onClick={() => setCancelModal({ open: false })}
+            >
+              Revenir
+            </Button>
+            <Button
+              color='red'
+              loading={transitionMutation.isPending}
+              onClick={() => {
+                if (cancelModal.reservation) {
+                  transitionMutation.mutate({
+                    id: cancelModal.reservation.id,
+                    statut: 'annulee'
+                  });
+                }
+                setCancelModal({ open: false });
+              }}
+            >
+              Annuler la réservation
+            </Button>
+          </Group>
+        </Stack>
       </Modal>
     </Stack>
   );

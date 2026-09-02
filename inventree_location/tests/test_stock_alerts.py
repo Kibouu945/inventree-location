@@ -180,3 +180,36 @@ def test_virtual_article_never_raises_a_stock_alert(manager, alert_setup):
 
     part_ids = [alert["part_id"] for alert in response.data["alerts"]]
     assert service.pk not in part_ids
+
+
+def test_seuils_ignores_sur_un_article_non_consommable(manager, alert_setup):
+    """Les deux seuils appartiennent au consommable (US-09, CDC V06).
+
+    Le back-office laisse saisir des seuils sur n'importe quel article : sans
+    cette garde, un seuil haut posé sur du matériel louable déclenchait une
+    alerte de réapprovisionnement dénuée de sens.
+    """
+
+    materiel = Part.objects.create(name="Tente 4 places")
+    RentableItem.objects.create(
+        part=materiel,
+        is_rentable=True,
+        consommable=False,
+        seuil_alerte_bas=999,
+        seuil_alerte_haut=1,
+    )
+
+    factory = APIRequestFactory()
+    request = factory.get("/plugin/inventree-location/alerts/stock/")
+    force_authenticate(request, user=manager)
+
+    response = StockAlertListView.as_view()(request)
+
+    seuils = [
+        raison["type"]
+        for alerte in response.data["alerts"]
+        if alerte["part_id"] == materiel.pk
+        for raison in alerte["reasons"]
+        if raison["type"] in {"low_threshold", "high_threshold"}
+    ]
+    assert seuils == []

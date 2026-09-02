@@ -21,10 +21,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .conflicts import (
+    conflict_still_active,
     CONFLICT_STATUSES,
     compute_part_availability,
     detect_reservation_conflicts,
     list_current_conflicts,
+    sync_conflict_registry,
 )
 from . import roles
 from .models import (
@@ -1477,9 +1479,17 @@ class ConflictsListView(APIView):
     permission_classes = [ReservationPermission]
 
     def get(self, request, *args, **kwargs):
-        """Retourne les réservations en conflit triées par date de retrait prévue."""
+        """Retourne les réservations en conflit triées par date de retrait prévue.
 
-        return Response(list_current_conflicts(), status=status.HTTP_200_OK)
+        Synchronise le registre au passage : le stock peut baisser hors de toute
+        écriture de réservation, et rien d'autre ne déclenche alors l'historisation.
+        `get_or_create` rend l'opération idempotente.
+        """
+
+        conflits = list_current_conflicts()
+        sync_conflict_registry(conflits)
+
+        return Response(conflits, status=status.HTTP_200_OK)
 
 
 class ConflictHistoryListView(APIView):
@@ -1558,6 +1568,24 @@ class ConflictHistoryResolveView(APIView):
             return Response(
                 {"detail": "Conflit deja resolu."},
                 status=status.HTTP_200_OK,
+            )
+
+        # Clore une entrée dont la cause tient encore ne résolvait rien : le
+        # registre affirmait « traité » pendant que la pénurie restait entière.
+        # On rejoue le détecteur et on renvoie le problème réel.
+        encore_actif, motif = conflict_still_active(conflict)
+
+        if encore_actif:
+            return Response(
+                {
+                    "detail": (
+                        f"Conflit toujours actif : {motif}. "
+                        "Traitez la cause avant de le clore."
+                    ),
+                    "reason": motif,
+                    "state": conflict.state,
+                },
+                status=status.HTTP_409_CONFLICT,
             )
 
         conflict.state = ConflictState.RESOLVED
@@ -1689,7 +1717,11 @@ class StockAlertListView(APIView):
                     ),
                 })
 
-            if high is not None and stock_total >= high:
+            # Seuil haut réservé aux consommables comme le seuil bas : le CDC
+            # V06 attache les deux seuils au consommable. Sans cette condition,
+            # un seuil haut posé sur un article louable déclenchait une alerte
+            # de réapprovisionnement qui n'a pas de sens pour du matériel.
+            if rentable.consommable and high is not None and stock_total >= high:
                 part_reasons.append({
                     "type": "high_threshold",
                     "message": (

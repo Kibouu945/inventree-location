@@ -25,6 +25,7 @@ import {
   emptyReservationValues,
   enrichLignesFromCatalog,
   isReservationEditable,
+  readOnlyReason,
   removeLigne,
   reservationToFormValues,
   upsertLigne,
@@ -369,7 +370,7 @@ export function ReservationForm({
       {effectiveReadOnly && (
         <Alert color='blue' title='Lecture seule'>
           {locked
-            ? 'Cette réservation est validée : elle n’est plus modifiable.'
+            ? readOnlyReason(existingQuery.data?.statut ?? '')
             : 'Votre rôle ne permet pas de modifier cette réservation.'}
         </Alert>
       )}

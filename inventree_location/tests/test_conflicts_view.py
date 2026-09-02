@@ -100,6 +100,11 @@ class TestConflictsListView:
         assert response.data[0]["id"] == setup_conflicts["first"].pk
         assert response.data[0]["conflict_count"] == 1
 
+        # Un compteur ne dit pas contre qui on arbitre : le numéro, si.
+        assert response.data[0]["conflicting_reservation_numeros"] == [
+            setup_conflicts["second"].numero
+        ]
+
     @pytest.mark.django_db
     def test_overlap_without_shortage_is_not_a_conflict(
         self, factory, user, setup_conflicts

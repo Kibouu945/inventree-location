@@ -110,6 +110,8 @@ def location_setup(db):
         "requester": requester,
         "prestation_b": prestation_b,
         "virtual_part": virtual_part,
+        # La réservation qui occupe déjà le lieu : c'est elle, la cause.
+        "existing": existing,
     }
 
 
@@ -188,14 +190,29 @@ def test_conflict_history_filters_and_resolve(manager, location_setup):
     assert list_response.status_code == status.HTTP_200_OK
     assert len(list_response.data) >= 1
 
-    resolve_request = factory.patch(
-        f"/plugin/inventree-location/conflicts/history/{history_item.pk}/resolve/",
-        {"note": "handled"},
-        format="json",
-    )
-    force_authenticate(resolve_request, user=manager)
+    def resoudre():
+        request = factory.patch(
+            f"/plugin/inventree-location/conflicts/history/{history_item.pk}/resolve/",
+            {"note": "handled"},
+            format="json",
+        )
+        force_authenticate(request, user=manager)
+        return ConflictHistoryResolveView.as_view()(request, pk=history_item.pk)
 
-    resolve_response = ConflictHistoryResolveView.as_view()(resolve_request, pk=history_item.pk)
+    # Tant que le lieu est occupé, clore l'entrée ne résoudrait rien : le
+    # serveur refuse et nomme la cause.
+    refus = resoudre()
+    assert refus.status_code == status.HTTP_409_CONFLICT
+    assert "occupe déjà" in refus.data["reason"]
+
+    history_item.refresh_from_db()
+    assert history_item.state == ConflictState.OPEN
+
+    # Cause levée : la réservation concurrente est annulée.
+    location_setup["existing"].statut = StatutReservation.ANNULEE
+    location_setup["existing"].save(update_fields=["statut"])
+
+    resolve_response = resoudre()
     assert resolve_response.status_code == status.HTTP_200_OK
 
     history_item.refresh_from_db()

@@ -196,6 +196,43 @@ export function canArbitrateReservation(statut: string): boolean {
   return statut === 'soumise';
 }
 
+/** Statuts depuis lesquels `VALID_TRANSITIONS` autorise encore l'annulation. */
+const STATUTS_ANNULABLES = [
+  'brouillon',
+  'soumise',
+  'validee',
+  'livree',
+  'retournee'
+];
+
+/** Vrai si la réservation peut encore être annulée.
+ *
+ * C'est le seul levier d'arbitrage sur une réservation déjà validée : la fiche
+ * s'ouvre alors en lecture seule et aucune autre action n'existe.
+ */
+export function canCancelReservation(statut: string): boolean {
+  return STATUTS_ANNULABLES.includes(statut);
+}
+
+/** Pourquoi la réservation est en lecture seule, dit avec son vrai statut.
+ *
+ * Le message était figé sur « validée » alors que `isReservationEditable`
+ * verrouille tout ce qui n'est ni brouillon ni soumise : une réservation
+ * annulée ou refusée s'annonçait donc comme validée.
+ */
+export function readOnlyReason(statut: string): string {
+  const raisons: Record<string, string> = {
+    validee: 'Cette réservation est validée : elle n’est plus modifiable.',
+    livree: 'Cette réservation est livrée : elle n’est plus modifiable.',
+    retournee: 'Cette réservation est retournée : elle n’est plus modifiable.',
+    cloturee: 'Cette réservation est clôturée : elle n’est plus modifiable.',
+    refusee: 'Cette réservation a été refusée : elle n’est plus modifiable.',
+    annulee: 'Cette réservation a été annulée : elle n’est plus modifiable.'
+  };
+
+  return raisons[statut] ?? 'Cette réservation n’est plus modifiable.';
+}
+
 /** Vrai tant que la réservation est modifiable (avant validation). */
 export function isReservationEditable(statut: string): boolean {
   return statut === 'brouillon' || statut === 'soumise';

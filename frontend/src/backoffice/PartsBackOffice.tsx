@@ -456,9 +456,16 @@ export function PartsBackOffice({
             }
           />
 
+          {/* Les deux seuils n'alimentent une alerte que pour un consommable
+              (US-09, CDC V06). Le dire ici évite de saisir une valeur inerte. */}
           <Group grow>
             <NumberInput
               label='Seuil bas'
+              description={
+                formValues.consommable
+                  ? undefined
+                  : 'Sans effet : les seuils ne valent que pour un consommable.'
+              }
               min={0}
               value={formValues.seuil_alerte_bas ?? ''}
               onChange={(value) =>
@@ -468,6 +475,11 @@ export function PartsBackOffice({
 
             <NumberInput
               label='Seuil haut'
+              description={
+                formValues.consommable
+                  ? undefined
+                  : 'Sans effet : les seuils ne valent que pour un consommable.'
+              }
               min={0}
               value={formValues.seuil_alerte_haut ?? ''}
               onChange={(value) =>
