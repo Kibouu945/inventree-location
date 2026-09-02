@@ -6,8 +6,16 @@ DRF, et une app `part` factice (cf. `tests/part/`) qui mime le modèle natif
 d'InvenTree afin que les FK `"part.Part"` résolvent.
 """
 
+import tempfile
+
 SECRET_KEY = "test-only-not-secret"
 USE_TZ = True
+
+# Le back-office Parts dépose la photo d'un objet (`Part.image`). Sans
+# MEDIA_ROOT, Django écrirait les fichiers de test dans le répertoire courant,
+# c'est-à-dire dans le repo. On isole dans un dossier temporaire.
+MEDIA_ROOT = tempfile.mkdtemp(prefix="inventree-location-media-")
+MEDIA_URL = "/media/"
 # Même fuseau métier que la stack (INVENTREE_TIMEZONE dans docker-compose).
 # Sans ce réglage, Django retombe sur son défaut America/Chicago : la
 # disponibilité « du jour », calculée en heure locale, désignait alors une

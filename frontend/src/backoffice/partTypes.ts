@@ -12,6 +12,8 @@ export interface BackOfficePart {
   salable: boolean;
   virtual: boolean;
   pack: boolean;
+  /** URL de la photo, ou null. Déposée par un appel à part. */
+  image_url: string | null;
   /** Stock physique louable selon InvenTree — lecture seule. */
   stock_total: number;
   is_rentable: boolean;

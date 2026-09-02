@@ -19,7 +19,11 @@ Pour l'édition, on utilise donc QuerySet.update() afin d'éviter ce déclenchem
 
 from django.db import transaction
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
 from rest_framework import generics, serializers
+from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .backoffice import BackOfficePagination, BackOfficePermission
 from .conflicts import get_part_total_stock
@@ -100,6 +104,26 @@ def _create_stock_item(part, quantity):
         payload["location"] = location
 
     return StockItem.objects.create(**payload)
+
+
+def part_image_url(part) -> str | None:
+    """URL de la photo de la Part, ou None si elle n'en a pas.
+
+    `Part.image` est un champ fichier : son `str()` donne le nom du fichier,
+    pas une URL exploitable dans un `<img src>` (cf. le même correctif dans
+    `serializers.CatalogPartSerializer.get_image_url`). InvenTree renvoie de
+    son côté une image de remplacement (`blank_image.png`) quand le champ est
+    vide : on préfère `None`, pour que le front décide quoi afficher.
+    """
+
+    image = getattr(part, "image", None)
+
+    if not image:
+        return None
+
+    url = getattr(image, "url", None)
+
+    return str(url) if url else str(image)
 
 
 def _is_pack(part) -> bool:
@@ -184,6 +208,7 @@ class PartBackOfficeSerializer(serializers.Serializer):
             "salable": bool(getattr(part, "salable", False)),
             "virtual": bool(getattr(part, "virtual", False)),
             "pack": _is_pack(part),
+            "image_url": part_image_url(part),
             "stock_total": get_part_total_stock(part),
             "is_rentable": bool(rentable_item.is_rentable) if rentable_item else False,
             "consommable": bool(rentable_item.consommable) if rentable_item else False,
@@ -378,3 +403,72 @@ class PartBackOfficeDetailView(generics.RetrieveUpdateAPIView):
         from part.models import Part
 
         return Part.objects.all()
+
+
+class PartImageSerializer(serializers.Serializer):
+    """Photo déposée sur une Part.
+
+    `ImageField` valide qu'il s'agit bien d'une image (Pillow l'ouvre) : sans
+    ça, un fichier quelconque serait stocké puis casserait la génération des
+    vignettes du catalogue.
+    """
+
+    image = serializers.ImageField(required=True)
+
+
+class PartBackOfficeImageView(APIView):
+    """Dépose (POST) ou retire (DELETE) la photo d'une Part.
+
+    Endpoint distinct du formulaire, qui reste en JSON : mélanger un fichier
+    dans le corps imposerait du multipart à tous les champs, où un booléen
+    devient « true » et un entier nul une chaîne vide.
+
+    Le CDC V06 range la photo parmi les attributs d'un objet (« un objet porte
+    […] une URL, des photos, un poids unitaire »), et le chapitre « Exigences
+    déjà satisfaites par Inventree » la donne pour acquise côté natif — mais
+    l'écran de gestion des objets du plugin, qui remplace la fiche native, n'en
+    offrait aucun champ (retour client du 02/09/2026).
+    """
+
+    permission_classes = [BackOfficePermission]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def _part(self, pk):
+        """Part visée, 404 si elle n'existe pas."""
+
+        from part.models import Part
+
+        return get_object_or_404(Part.objects.all(), pk=pk)
+
+    def post(self, request, pk):
+        """Remplace la photo de la Part."""
+
+        part = self._part(pk)
+
+        serializer = PartImageSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        part.image = serializer.validated_data["image"]
+
+        # `part.save()` et non `QuerySet.update()` : les vignettes InvenTree
+        # (thumbnail 128 px, preview 256 px) sont produites par le champ au
+        # moment du save. Un `update()` écrirait le chemin en base sans jamais
+        # générer la miniature attendue par le catalogue.
+        part.save()
+        part.refresh_from_db()
+
+        return Response({"image_url": part_image_url(part)})
+
+    def delete(self, request, pk):
+        """Retire la photo et supprime le fichier.
+
+        `delete_orphans` est à False sur le champ d'InvenTree : sans ce
+        `delete()` explicite, le fichier resterait sur le disque.
+        """
+
+        part = self._part(pk)
+
+        if part.image:
+            part.image.delete(save=True)
+
+        return Response({"image_url": None})

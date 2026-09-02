@@ -1213,13 +1213,25 @@ class CatalogPartSerializer(serializers.Serializer):
         return get_real_available_stock(obj.id)
 
     def get_image_url(self, obj):
-        """URL de l'image principale si le modèle en expose une."""
+        """URL de l'image principale si le modèle en expose une.
+
+        `Part.image` est un champ fichier : son `str()` donne le **nom**
+        (« part_images/tente.png »), pas une URL. Le front le posait tel quel
+        dans un `<img src>`, résolu relativement à `/web/…`, donc en 404 : la
+        photo d'un objet n'était jamais visible. On passe par `.url`, qui
+        préfixe avec MEDIA_URL, et on ne retombe sur `str()` que pour les
+        attributs déjà textuels (`thumbnail` d'InvenTree, par exemple).
+        """
 
         for attr in ["image", "image_url", "thumbnail", "thumbnail_url"]:
             value = getattr(obj, attr, None)
 
-            if value:
-                return str(value)
+            if not value:
+                continue
+
+            url = getattr(value, "url", None)
+
+            return str(url) if url else str(value)
 
         return None
 
