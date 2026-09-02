@@ -13,6 +13,9 @@ recrée pas ici. Le plugin se limite à 8 tables propres :
 6. Lieu — Localisation physique rattachée à une Prestation
 7. Reservation — Demande de location liée à une Prestation
 8. LigneReservation — Détail (Part native × quantité) d'une Reservation
+9. ConflictHistory — Journal des conflits (stock / lieu)
+
+S'y ajoutent, avec le SAV et les ramassages, les tables du domaine retour.
 """
 
 from django.conf import settings
@@ -43,6 +46,52 @@ class StatutReservation(models.TextChoices):
     LIVREE = "livree", _("Livrée")
     RETOURNEE = "retournee", _("Retournée")
     CLOTUREE = "cloturee", _("Clôturée")
+
+
+class TypeSavTicket(models.TextChoices):
+    REPARATION = "reparation", _("Réparation")
+    DESTRUCTION = "destruction", _("Destruction")
+
+
+class StatutSavTicket(models.TextChoices):
+    OUVERT = "ouvert", _("Ouvert")
+    EN_REPARATION = "en_reparation", _("En réparation")
+    REPARE = "repare", _("Réparé")
+    DETRUIT = "detruit", _("Détruit")
+    CLOTURE = "cloture", _("Clôturé")
+
+
+class EtatRetour(models.TextChoices):
+    """Vocabulaire unique de `LigneReservation.etat_retour`.
+
+    Trois fonctionnalités écrivaient cette colonne avec chacune ses valeurs —
+    `casse` pour le journal d'incidents et le check-in, `sav` / `detruit` /
+    `mixte` pour la saisie de ramassage. Un même retour s'affichait donc
+    différemment selon l'écran qui l'avait saisi. La nuance « au SAV » ou
+    « détruit » vit désormais dans les incidents et les tickets SAV, pas ici.
+
+    Quand plusieurs natures coexistent sur une ligne, **la plus grave
+    l'emporte** : c'est la règle de la PR #45, nommée par ses tests
+    (« casse prime sur manquant »). Le `mixte` de la PR #40 la contredisait
+    sans la remplacer — il disait qu'il s'était passé plusieurs choses sans dire
+    lesquelles, et le détail est de toute façon dans les incidents.
+
+    La valeur vide reste distincte : « pas encore pointé » n'est pas « OK ».
+    """
+
+    OK = "ok", _("Rendu conforme")
+    MANQUANT = "manquant", _("Manquant")
+    CASSE = "casse", _("Cassé")
+
+
+class ConflictType(models.TextChoices):
+    STOCK = "stock", _("Conflit de stock")
+    LOCATION = "location", _("Conflit de lieu")
+
+
+class ConflictState(models.TextChoices):
+    OPEN = "open", _("Ouvert")
+    RESOLVED = "resolved", _("Résolu")
 
 
 # ---------------------------------------------------------------------------
@@ -126,12 +175,7 @@ class Profile(models.Model):
 
 
 class RentableItem(TimestampedModel):
-    """Extension OneToOne de `part.Part` — drapeau louable + champs location.
-
-    On n'ajoute pas un catalogue parallèle : la référence matérielle reste
-    `part.Part` (natif InvenTree). Cette table porte uniquement les
-    attributs propres au domaine location.
-    """
+    """Extension OneToOne de `part.Part` — drapeau louable + champs location."""
 
     part = models.OneToOneField(
         "part.Part",
@@ -165,6 +209,14 @@ class RentableItem(TimestampedModel):
     )
     seuil_alerte_haut = models.PositiveIntegerField(
         null=True, blank=True, verbose_name=_("seuil d'alerte haut")
+    )
+    #: Coupe les alertes de seuil pour cet article, sans effacer les seuils
+    #: eux-mêmes (CDC V06 : « seuil haut + seuil bas + booléen pour désactiver
+    #: les alertes »). Un article dont on connaît les seuils mais qu'on ne veut
+    #: pas voir remonter — surplus assumé, article en fin de vie.
+    alertes_desactivees = models.BooleanField(
+        default=False,
+        verbose_name=_("alertes désactivées"),
     )
 
     class Meta:
@@ -434,7 +486,6 @@ class Reservation(TimestampedModel):
         default=StatutReservation.BROUILLON,
         verbose_name=_("statut"),
     )
-    # CON-01 : confirmée malgré conflit de dispo détecté à la création
     forced = models.BooleanField(default=False, verbose_name=_("forcée"))
     date_demande = models.DateTimeField(
         default=timezone.now, verbose_name=_("date de demande")
@@ -454,6 +505,7 @@ class Reservation(TimestampedModel):
     commentaire = models.TextField(
         blank=True, default="", verbose_name=_("commentaire")
     )
+    is_archived = models.BooleanField(default=False, verbose_name=_("archivée"))
 
     class Meta:
         app_label = "inventree_location"
@@ -465,6 +517,10 @@ class Reservation(TimestampedModel):
                 fields=["date_retrait_prevue", "date_retour_prevue", "statut"],
                 name="resa_periode_statut_idx",
             ),
+            models.Index(fields=["statut"], name="resa_statut_idx"),
+            models.Index(fields=["date_retrait_prevue"], name="resa_retrait_idx"),
+            models.Index(fields=["date_retour_prevue"], name="resa_retour_idx"),
+            models.Index(fields=["is_archived"], name="resa_archived_idx"),
         ]
 
     def __str__(self):
@@ -513,12 +569,23 @@ class LigneReservation(TimestampedModel):
     quantite_livree = models.PositiveIntegerField(
         default=0, verbose_name=_("quantité livrée")
     )
+    #: Ce qui est revenu physiquement, conforme ou non — seule quantité de
+    #: retour stockée ici. Trois fonctionnalités avaient ajouté sept colonnes
+    #: pour dire ce que le registre `ReturnIncident` dit déjà (combien manque,
+    #: combien est cassé, combien est détruit, et faut-il facturer) ; elles se
+    #: contredisaient dès que deux écrans pointaient la même ligne. Cf.
+    #: `retours.quantites_du_retour` et la migration `0021`.
     quantite_retournee = models.PositiveIntegerField(
-        default=0, verbose_name=_("quantité retournée")
+        default=0, verbose_name=_("quantité revenue")
     )
-    # Valeurs applicatives MVP : "ok" | "manquant" | "casse" (pas de choices au modèle)
+
+    # Vocabulaire unique : cf. `EtatRetour` et `retours.py`.
     etat_retour = models.CharField(
-        max_length=20, blank=True, default="", verbose_name=_("état du retour")
+        max_length=20,
+        blank=True,
+        default="",
+        choices=EtatRetour.choices,
+        verbose_name=_("état du retour"),
     )
     commentaire = models.TextField(
         blank=True, default="", verbose_name=_("commentaire")
@@ -538,6 +605,61 @@ class LigneReservation(TimestampedModel):
 
     def __str__(self):
         return f"part#{self.part_id} x{self.quantite_demandee}"
+
+
+class ReturnIncidentType(models.TextChoices):
+    MISSING = "missing", _("Manquant")
+    BROKEN = "broken", _("Cassé")
+    DESTROYED = "destroyed", _("Détruit")
+
+
+class ReturnIncident(TimestampedModel):
+    line = models.ForeignKey(
+        LigneReservation,
+        on_delete=models.CASCADE,
+        related_name="incidents",
+        verbose_name=_("ligne de réservation"),
+    )
+    type = models.CharField(
+        max_length=20,
+        choices=ReturnIncidentType.choices,
+        verbose_name=_("type d'incident"),
+    )
+    qty = models.PositiveIntegerField(verbose_name=_("quantité"))
+    comment = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("commentaire"),
+    )
+    reported_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name=_("date de signalement"),
+    )
+    reported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reported_incidents",
+        verbose_name=_("signalé par"),
+    )
+    #: Décision commerciale prise au constat, indépendante du type : un objet
+    #: manquant n'est pas toujours refacturé (geste commercial, usure normale),
+    #: et un objet cassé peut l'être. C'est ce drapeau, et non le type, qui
+    #: alimente le total « facturé » du rapport de pertes (SCRUM-96).
+    bill_client = models.BooleanField(
+        default=False,
+        verbose_name=_("facturer au client"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-reported_at"]
+        verbose_name = _("incident de retour")
+        verbose_name_plural = _("incidents de retour")
+
+    def __str__(self):
+        return f"Incident #{self.pk} ({self.type}) — Ligne#{self.line_id}"
 
 
 class ReservationStatusLog(TimestampedModel):
@@ -589,3 +711,200 @@ class ReservationStatusLog(TimestampedModel):
         return (
             f"Réservation #{self.reservation_id}: {self.from_status} → {self.to_status}"
         )
+
+
+# ---------------------------------------------------------------------------
+# 5. SAV / stock réel
+# ---------------------------------------------------------------------------
+
+
+class SavTicket(TimestampedModel):
+    """Ticket SAV ou destruction lié à une ligne de réservation.
+
+    SCRUM-112 :
+    - un article endommagé sort du stock réellement disponible ;
+    - il peut être réintégré après réparation ;
+    - les destructions restent consultables par période.
+    """
+
+    ligne_reservation = models.ForeignKey(
+        LigneReservation,
+        on_delete=models.CASCADE,
+        related_name="sav_tickets",
+        verbose_name=_("ligne de réservation"),
+    )
+    reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.CASCADE,
+        related_name="sav_tickets",
+        verbose_name=_("réservation"),
+    )
+    part = models.ForeignKey(
+        "part.Part",
+        on_delete=models.PROTECT,
+        related_name="location_sav_tickets",
+        verbose_name=_("part"),
+    )
+    type_ticket = models.CharField(
+        max_length=20,
+        choices=TypeSavTicket.choices,
+        default=TypeSavTicket.REPARATION,
+        verbose_name=_("type de ticket"),
+    )
+    statut = models.CharField(
+        max_length=20,
+        choices=StatutSavTicket.choices,
+        default=StatutSavTicket.OUVERT,
+        verbose_name=_("statut"),
+    )
+    quantite = models.PositiveIntegerField(default=1, verbose_name=_("quantité"))
+    facturer_client = models.BooleanField(
+        default=False,
+        verbose_name=_("facturer le client"),
+    )
+    description = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("description"),
+    )
+    diagnostic = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("diagnostic"),
+    )
+    resolution = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("résolution"),
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="sav_tickets_created",
+        verbose_name=_("créé par"),
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="sav_tickets_updated",
+        verbose_name=_("modifié par"),
+    )
+    closed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("date de clôture"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-created_at"]
+        verbose_name = _("ticket SAV")
+        verbose_name_plural = _("tickets SAV")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["ligne_reservation", "type_ticket"],
+                name="unique_sav_ticket_by_line_type",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["part", "statut"], name="sav_part_statut_idx"),
+            models.Index(fields=["created_at"], name="sav_created_at_idx"),
+        ]
+
+    def __str__(self):
+        return f"SAV #{self.pk} — part#{self.part_id} x{self.quantite} — {self.statut}"
+
+
+class ConflictHistory(TimestampedModel):
+    """Historique des conflits détectés (ouverts et résolus)."""
+
+    conflict_type = models.CharField(
+        max_length=20,
+        choices=ConflictType.choices,
+        verbose_name=_("type de conflit"),
+    )
+    state = models.CharField(
+        max_length=20,
+        choices=ConflictState.choices,
+        default=ConflictState.OPEN,
+        verbose_name=_("état"),
+    )
+    reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.CASCADE,
+        related_name="conflict_history",
+        verbose_name=_("réservation"),
+    )
+    conflicting_reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="conflicted_by_history",
+        verbose_name=_("réservation en conflit"),
+    )
+    part = models.ForeignKey(
+        "part.Part",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="conflict_history",
+        verbose_name=_("article"),
+    )
+    period_start = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("début période"),
+    )
+    period_end = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("fin période"),
+    )
+    location_key = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name=_("clé de lieu"),
+    )
+    details = models.JSONField(default=dict, blank=True, verbose_name=_("détails"))
+    resolved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("résolu le"),
+    )
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="resolved_conflicts",
+        verbose_name=_("résolu par"),
+    )
+    resolution_note = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("note de résolution"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-created_at"]
+        verbose_name = _("historique de conflit")
+        verbose_name_plural = _("historiques de conflit")
+        indexes = [
+            models.Index(
+                fields=["conflict_type", "state"], name="conflict_type_state_idx"
+            ),
+            models.Index(
+                fields=["reservation", "state"], name="conflict_resa_state_idx"
+            ),
+            models.Index(fields=["created_at"], name="conflict_created_at_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.conflict_type}:{self.reservation_id}:{self.state}"

@@ -9,21 +9,30 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.mail import send_mail
+from django.db import transaction
 from django.db.models import Q, Sum
+from django.http import HttpResponse
 from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
-from rest_framework.pagination import PageNumberPagination
+from rest_framework.pagination import LimitOffsetPagination, PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .conflicts import (
+    conflict_still_active,
     CONFLICT_STATUSES,
+    compute_part_availability,
     detect_reservation_conflicts,
     list_current_conflicts,
+    sync_conflict_registry,
 )
 from . import roles
 from .models import (
+    ConflictHistory,
+    ConflictState,
+    ConflictType,
     Groupe,
     Lieu,
     LigneReservation,
@@ -31,34 +40,87 @@ from .models import (
     Prestation,
     RentableItem,
     Reservation,
+    ReturnIncident,
+    ReturnIncidentType,
     StatutReservation,
 )
+from .ramassage import lignes_a_ramasser
 from .permissions import (
     CatalogPermission,
+    DeliveryPermission,
     LieuPermission,
     ManifestationPermission,
+    MarquerLivreePermission,
     PrestationPermission,
+    PrestationRetourPermission,
     ReservationPermission,
+    ReturnCheckinPermission,
     RoleBasedPermission,
+)
+from .retours import (
+    CHAMPS_CHECKIN,
+    etat_retour_de_la_ligne,
+    projeter_incidents,
+    quantites_depuis_payload,
+    quantites_du_retour,
 )
 from .serializers import (
     CatalogPartSerializer,
+    DeliverySerializer,
     ExampleSerializer,
     GroupeSerializer,
     LieuSerializer,
     ManifestationSerializer,
+    PrestationRetourSerializer,
     PrestationSerializer,
     RentableItemSerializer,
+    ReservationCheckinSerializer,
     ReservationSerializer,
+    BonRamassageSerializer,
+    RamassageSerializer,
     ReservationTransitionSerializer,
+    ReturnIncidentHistorySerializer,
+    ReturnIncidentSerializer,
     UserSerializer,
     geocode_candidates,
+    sync_ligne_etat_retour,
 )
 from .stock import _as_date, compute_prestation_stock, compute_stock_availability
+from .services.return_report import build_return_report
+from .services.return_report_pdf import (
+    PdfEngineUnavailable,
+    generate_return_report_pdf,
+)
 from .services.workflow_service import (
     get_available_transitions,
     transition_reservation_status,
 )
+
+
+def _parse_csv_int_values(values):
+    """Parse les valeurs CSV / répétables en une liste d'entiers uniques."""
+
+    parsed = []
+    seen = set()
+
+    for value in values:
+        for chunk in value.split(","):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+
+            try:
+                candidate = int(chunk)
+            except ValueError:
+                continue
+
+            if candidate in seen:
+                continue
+
+            seen.add(candidate)
+            parsed.append(candidate)
+
+    return parsed
 
 
 class ExampleView(APIView):
@@ -91,6 +153,11 @@ class LieuPagination(PageNumberPagination):
     page_size = 20
     page_size_query_param = "page_size"
     max_page_size = 100
+
+
+class ReservationPagination(LimitOffsetPagination):
+    default_limit = 50
+    max_limit = 200
 
 
 class CatalogPagination(PageNumberPagination):
@@ -184,32 +251,7 @@ class ReservationListCreateView(generics.ListCreateAPIView):
 
     serializer_class = ReservationSerializer
     permission_classes = [ReservationPermission]
-
-    @staticmethod
-    def _parse_csv_int_values(values):
-        """Parse les valeurs CSV / répétables en une liste d'entiers uniques."""
-
-        parsed = []
-        seen = set()
-
-        for value in values:
-            for chunk in value.split(","):
-                chunk = chunk.strip()
-                if not chunk:
-                    continue
-
-                try:
-                    candidate = int(chunk)
-                except ValueError:
-                    continue
-
-                if candidate in seen:
-                    continue
-
-                seen.add(candidate)
-                parsed.append(candidate)
-
-        return parsed
+    pagination_class = ReservationPagination
 
     def get_queryset(self):
         """Retourne les réservations, filtrées par statut, période et recherche."""
@@ -221,7 +263,11 @@ class ReservationListCreateView(generics.ListCreateAPIView):
             .order_by("-date_demande")
         )
 
-        # Un livreur pur ne voit que les réservations validées.
+        include_archived = self.request.query_params.get("include_archived")
+
+        if str(include_archived).lower() not in {"1", "true", "yes"}:
+            queryset = queryset.filter(is_archived=False)
+
         if roles.sees_only_deliverable_reservations(self.request.user):
             queryset = queryset.filter(statut=StatutReservation.VALIDEE)
 
@@ -230,7 +276,7 @@ class ReservationListCreateView(generics.ListCreateAPIView):
         if statuts:
             queryset = queryset.filter(statut__in=statuts)
 
-        categories = self._parse_csv_int_values(
+        categories = _parse_csv_int_values(
             self.request.query_params.getlist("categories")
         )
 
@@ -258,6 +304,111 @@ class ReservationListCreateView(generics.ListCreateAPIView):
                 | Q(demandeur__first_name__icontains=search)
                 | Q(demandeur__last_name__icontains=search)
             )
+
+        return queryset
+
+
+class DeliveryMarquerLivreeView(APIView):
+    """Marque une réservation livrée depuis la tournée du livreur.
+
+    Endpoint dédié plutôt que `reservations/<pk>/transition/` : celui-ci
+    n'autorise qu'un seul saut, `validée → livrée`, ce qui permet de l'ouvrir
+    au livreur sans lui donner la validation ni le refus.
+    """
+
+    permission_classes = [MarquerLivreePermission]
+
+    def post(self, request, pk, *args, **kwargs):
+        """Applique la transition si la réservation est bien validée."""
+
+        reservation = Reservation.objects.filter(pk=pk).first()
+
+        if reservation is None:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if reservation.statut != StatutReservation.VALIDEE:
+            return Response(
+                {
+                    "detail": (
+                        "Seule une réservation validée peut être marquée livrée."
+                    ),
+                    "current_status": reservation.statut,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        transition_reservation_status(
+            reservation,
+            StatutReservation.LIVREE,
+            user=request.user,
+            comment=request.data.get("commentaire", ""),
+        )
+        reservation.refresh_from_db()
+
+        return Response(
+            {"reservation": reservation.pk, "statut": reservation.statut},
+            status=status.HTTP_200_OK,
+        )
+
+
+class DeliveryListView(generics.ListAPIView):
+    """Tournée livreur : réservations à livrer / livrées, enrichies (US livreur).
+
+    Paramètres de filtre :
+    - statut    : filtre exact sur le statut (répétable). Absent : validée +
+                  livrée (« à livrer » et « livré » sur la période observée).
+    - date_from : réservations dont le retour prévu est >= à cette date
+    - date_to   : réservations dont le retrait prévu est <= à cette date
+    - lieu      : filtre sur le lieu de la prestation (CSV / répétable)
+
+    Tri par date de retrait prévue croissante (ordre d'une tournée), à la
+    différence de `reservations/` triée par date de demande décroissante.
+    """
+
+    serializer_class = DeliverySerializer
+    permission_classes = [DeliveryPermission]
+
+    #: Statuts affichés par défaut quand `statut` n'est pas fourni.
+    DEFAULT_STATUTS = (StatutReservation.VALIDEE, StatutReservation.LIVREE)
+
+    def get_queryset(self):
+        """Retourne les réservations à livrer, filtrées par statut, période et lieu."""
+
+        queryset = (
+            Reservation.objects.select_related(
+                "prestation",
+                "prestation__lieu",
+                "prestation__manifestation",
+                "prestation__manifestation__organisateur",
+            )
+            .prefetch_related("lignes__part__rentable_info")
+            .all()
+            .order_by("date_retrait_prevue")
+        )
+
+        # Un livreur pur ne voit que les réservations validées.
+        if roles.sees_only_deliverable_reservations(self.request.user):
+            queryset = queryset.filter(statut=StatutReservation.VALIDEE)
+        else:
+            statuts = self.request.query_params.getlist("statut")
+            queryset = queryset.filter(statut__in=statuts or self.DEFAULT_STATUTS)
+
+        date_from = self.request.query_params.get("date_from")
+        date_to = self.request.query_params.get("date_to")
+
+        if date_from:
+            queryset = queryset.filter(date_retour_prevue__gte=date_from)
+
+        if date_to:
+            queryset = queryset.filter(date_retrait_prevue__lte=date_to)
+
+        lieux = _parse_csv_int_values(self.request.query_params.getlist("lieu"))
+
+        if lieux:
+            queryset = queryset.filter(prestation__lieu_id__in=lieux)
 
         return queryset
 
@@ -293,6 +444,146 @@ class ReservationDetailView(generics.RetrieveUpdateDestroyAPIView):
                 "detail": "Seule une réservation en brouillon peut être supprimée."
             })
         instance.delete()
+
+
+class RamassageListView(generics.ListAPIView):
+    """SCRUM-89 — Liste des ramassages à effectuer.
+
+    Un ramassage correspond à une réservation avec une date de retour prévue.
+
+    Filtres disponibles :
+    - date_from : ramassages dont la date de retour prévue est >= à cette date
+    - date_to   : ramassages dont la date de retour prévue est <= à cette date
+    - lieu      : recherche sur le nom ou l'adresse du lieu
+    - statut    : filtre sur un ou plusieurs statuts
+    - search    : recherche sur numéro, prestation, manifestation ou demandeur
+    """
+
+    serializer_class = RamassageSerializer
+    permission_classes = [ReservationPermission]
+    pagination_class = LieuPagination
+
+    def get_queryset(self):
+        """Retourne les réservations à ramasser."""
+
+        queryset = (
+            Reservation.objects.select_related(
+                "prestation",
+                "prestation__manifestation",
+                "prestation__lieu",
+                "demandeur",
+            )
+            .prefetch_related(
+                "lignes__part__rentable_info",
+            )
+            .filter(date_retour_prevue__isnull=False)
+            .exclude(
+                statut__in=[
+                    StatutReservation.ANNULEE,
+                    StatutReservation.REFUSEE,
+                    StatutReservation.CLOTUREE,
+                ]
+            )
+            .order_by("date_retour_prevue")
+        )
+
+        # Un livreur pur ne voit que les réservations validées, comme sur
+        # `reservations/` et `deliveries/` (cf. roles.py).
+        if roles.sees_only_deliverable_reservations(self.request.user):
+            queryset = queryset.filter(statut=StatutReservation.VALIDEE)
+
+        date_from = self.request.query_params.get("date_from")
+        date_to = self.request.query_params.get("date_to")
+        lieu = self.request.query_params.get("lieu")
+        search = self.request.query_params.get("search")
+        statuts = self.request.query_params.getlist("statut")
+
+        if not statuts:
+            statut_param = self.request.query_params.get("statut")
+
+            if statut_param:
+                statuts = [
+                    value.strip() for value in statut_param.split(",") if value.strip()
+                ]
+
+        if statuts:
+            queryset = queryset.filter(statut__in=statuts)
+
+        if date_from:
+            queryset = queryset.filter(date_retour_prevue__gte=date_from)
+
+        if date_to:
+            queryset = queryset.filter(date_retour_prevue__lte=date_to)
+
+        if lieu:
+            queryset = queryset.filter(
+                Q(prestation__lieu__nom__icontains=lieu)
+                | Q(prestation__lieu__adresse__icontains=lieu)
+            )
+
+        if search:
+            queryset = queryset.filter(
+                Q(numero__icontains=search)
+                | Q(prestation__nom__icontains=search)
+                | Q(prestation__manifestation__nom__icontains=search)
+                | Q(demandeur__username__icontains=search)
+                | Q(demandeur__first_name__icontains=search)
+                | Q(demandeur__last_name__icontains=search)
+            )
+
+        return queryset
+
+
+class BonRamassageView(APIView):
+    """SCRUM-89 — Bon de ramassage imprimable."""
+
+    permission_classes = [ReservationPermission]
+    serializer_class = BonRamassageSerializer
+
+    def get(self, request, pk, *args, **kwargs):
+        """Retourne les données nécessaires pour imprimer un bon de ramassage."""
+
+        reservation = (
+            Reservation.objects.select_related(
+                "prestation",
+                "prestation__manifestation",
+                "prestation__lieu",
+                "demandeur",
+            )
+            .prefetch_related(
+                "lignes__part__rentable_info",
+            )
+            .filter(pk=pk)
+            .first()
+        )
+
+        if reservation is None:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Même restriction que la liste : un livreur pur n'imprime pas le bon
+        # d'une réservation qu'il n'a pas le droit de voir.
+        if (
+            roles.sees_only_deliverable_reservations(request.user)
+            and reservation.statut != StatutReservation.VALIDEE
+        ):
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = self.serializer_class(reservation)
+
+        return Response(
+            {
+                "titre": f"Bon de ramassage {reservation.numero}",
+                "generated_at": timezone.now(),
+                "reservation": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class ReservationConflictCheckView(APIView):
@@ -391,15 +682,936 @@ class ReservationTransitionView(APIView):
         return Response(result, status=status.HTTP_200_OK)
 
 
+class StockAvailabilityCheckView(APIView):
+    """Verifie en temps reel la disponibilite stock d'un article sur une periode."""
+
+    permission_classes = [ReservationPermission]
+
+    def get(self, request, *args, **kwargs):
+        from part.models import Part
+
+        part_id = request.query_params.get("part")
+        quantity = request.query_params.get("quantity", "1")
+        start_raw = request.query_params.get("date_retrait_prevue")
+        end_raw = request.query_params.get("date_retour_prevue")
+        reservation_raw = request.query_params.get("reservation")
+
+        if not part_id or not start_raw or not end_raw:
+            return Response(
+                {
+                    "detail": (
+                        "Les parametres part, date_retrait_prevue et "
+                        "date_retour_prevue sont obligatoires."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            part_id = int(part_id)
+            quantity = max(int(quantity), 1)
+        except ValueError:
+            return Response(
+                {"detail": "Les parametres part et quantity doivent etre numeriques."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        start = parse_datetime(start_raw) or parse_date(start_raw)
+        end = parse_datetime(end_raw) or parse_date(end_raw)
+
+        if start is None or end is None:
+            return Response(
+                {
+                    "detail": (
+                        "Les dates fournies sont invalides. "
+                        "Utilisez un format ISO 8601."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        part = Part.objects.filter(pk=part_id).first()
+
+        if part is None:
+            return Response(
+                {"detail": "Article introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        exclude_reservation_id = None
+
+        if reservation_raw:
+            try:
+                exclude_reservation_id = int(reservation_raw)
+            except ValueError:
+                return Response(
+                    {"detail": "Le parametre reservation doit etre numerique."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        availability = compute_part_availability(
+            part,
+            quantity,
+            start,
+            end,
+            exclude_resa_id=exclude_reservation_id,
+        )
+
+        return Response(
+            {
+                "part_id": part.pk,
+                "part_name": getattr(part, "name", str(part)),
+                "requested_quantity": quantity,
+                "total_stock": availability["total_stock"],
+                "already_reserved_quantity": availability["already_reserved_quantity"],
+                "available_quantity": availability["available_quantity"],
+                "missing_quantity": availability["missing_quantity"],
+                "is_virtual": availability["is_virtual"],
+                "has_conflict": availability["has_conflict"],
+                "tension_level": availability["tension_level"],
+                "occupation_rate": availability["occupation_rate"],
+            },
+            status=(
+                status.HTTP_409_CONFLICT
+                if availability["has_conflict"]
+                else status.HTTP_200_OK
+            ),
+        )
+
+
+class ReservationRetourView(APIView):
+    """Déclaration du retour d'une prestation ligne par ligne (SCRUM-95).
+
+    - GET  : accessible quand la réservation est livrée ou retournée ;
+      renvoie les lignes du bon avec la quantité déjà déclarée rendue.
+    - POST : enregistre la quantité rendue par ligne (retour possible en
+      plusieurs fois), calcule le statut de retour (partiel / complet) et
+      fait passer la réservation en "retournée" une fois le retour complet.
+    """
+
+    permission_classes = [PrestationRetourPermission]
+    serializer_class = PrestationRetourSerializer
+
+    #: Consultable tant que le bon est livré ou déjà retourné.
+    ELIGIBLE_STATUTS = {StatutReservation.LIVREE, StatutReservation.RETOURNEE}
+    #: Déclarable seulement tant que le bon est livré. Un bon « retourné » est
+    #: complet par construction : le rouvrir permettait de *baisser* les
+    #: quantités, et aucune transition ne ramène ensuite vers « livrée ».
+    DECLARABLE_STATUTS = {StatutReservation.LIVREE}
+
+    NOT_DECLARABLE_DETAIL = (
+        "La déclaration de retour n'est accessible que pour une réservation livrée."
+    )
+    NOT_ELIGIBLE_DETAIL = (
+        "La déclaration de retour n'est accessible que pour "
+        "une réservation livrée ou déjà en cours de retour."
+    )
+
+    def _get_reservation(self, pk, *, lock=False):
+        """Charge la réservation ; `lock` pose un verrou de ligne.
+
+        Le verrou sérialise deux déclarations concurrentes : sans lui, les
+        deux franchissent la garde de statut avec un objet périmé et rejouent
+        toutes les deux la transition.
+        """
+
+        queryset = Reservation.objects.prefetch_related(
+            "lignes", "lignes__part", "lignes__part__rentable_info"
+        )
+
+        if lock:
+            queryset = queryset.select_for_update()
+
+        return queryset.filter(pk=pk).first()
+
+    def _conflict_response(self, reservation, detail):
+        return Response(
+            {"detail": detail, "current_status": reservation.statut},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    @staticmethod
+    def _statut_retour(lignes):
+        total_demandee = sum(ligne.quantite_demandee for ligne in lignes)
+        total_rendue = sum(
+            min(ligne.quantite_retournee, ligne.quantite_demandee) for ligne in lignes
+        )
+
+        if total_demandee <= 0 or total_rendue <= 0:
+            return "aucun", total_demandee, total_rendue
+
+        if total_rendue >= total_demandee:
+            return "complet", total_demandee, total_rendue
+
+        return "partiel", total_demandee, total_rendue
+
+    def _serialize_lignes(self, lignes):
+        return [
+            {
+                "id": ligne.pk,
+                "part": ligne.part_id,
+                "part_name": getattr(ligne.part, "name", str(ligne.part)),
+                "quantite_demandee": ligne.quantite_demandee,
+                "quantite_retournee": ligne.quantite_retournee,
+            }
+            for ligne in lignes
+        ]
+
+    def get(self, request, pk, *args, **kwargs):
+        """Retourne la réservation et ses lignes si un retour est possible."""
+
+        reservation = self._get_reservation(pk)
+
+        if reservation is None:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if reservation.statut not in self.ELIGIBLE_STATUTS:
+            return self._conflict_response(reservation, self.NOT_ELIGIBLE_DETAIL)
+
+        # Même périmètre que le bon de ramassage : un service ne revient pas,
+        # le compter classait en « partiel » un bon dont tout le matériel
+        # était rendu.
+        lignes = lignes_a_ramasser(reservation)
+        statut_retour, total_demandee, total_rendue = self._statut_retour(lignes)
+
+        return Response(
+            {
+                "reservation": reservation.pk,
+                "numero": reservation.numero,
+                "statut": reservation.statut,
+                "statut_retour": statut_retour,
+                "quantite_demandee_totale": total_demandee,
+                "quantite_rendue_totale": total_rendue,
+                "lignes": self._serialize_lignes(lignes),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request, pk, *args, **kwargs):
+        """Enregistre les quantités rendues et met à jour le statut de retour."""
+
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Les écritures de lignes et la transition sont indissociables : sans
+        # la transaction, une transition qui échoue laissait les quantités
+        # déjà persistées et le bon coincé en « livrée ».
+        with transaction.atomic():
+            reservation = self._get_reservation(pk, lock=True)
+
+            if reservation is None:
+                return Response(
+                    {"detail": "Réservation introuvable."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            if reservation.statut not in self.DECLARABLE_STATUTS:
+                return self._conflict_response(reservation, self.NOT_DECLARABLE_DETAIL)
+
+            lignes_by_id = {ligne.pk: ligne for ligne in lignes_a_ramasser(reservation)}
+            errors = {}
+            vues = set()
+
+            for entry in serializer.validated_data["lignes"]:
+                ligne = lignes_by_id.get(entry["id"])
+
+                if ligne is None:
+                    errors[str(entry["id"])] = (
+                        "Cette ligne n'appartient pas à la réservation."
+                    )
+                    continue
+
+                # Un doublon était traité en dernier-gagnant silencieux : deux
+                # envois pour la même ligne sous-comptaient le retour.
+                if entry["id"] in vues:
+                    errors[str(entry["id"])] = (
+                        "Cette ligne est présente plusieurs fois dans l'envoi."
+                    )
+                    continue
+
+                vues.add(entry["id"])
+
+                if entry["quantite_rendue"] > ligne.quantite_demandee:
+                    errors[str(entry["id"])] = (
+                        f"La quantité rendue ({entry['quantite_rendue']}) ne peut "
+                        f"pas dépasser la quantité demandée "
+                        f"({ligne.quantite_demandee})."
+                    )
+
+            if errors:
+                return Response({"lignes": errors}, status=status.HTTP_400_BAD_REQUEST)
+
+            for entry in serializer.validated_data["lignes"]:
+                ligne = lignes_by_id[entry["id"]]
+                ligne.quantite_retournee = entry["quantite_rendue"]
+                ligne.save(update_fields=["quantite_retournee", "updated_at"])
+
+            lignes = list(lignes_by_id.values())
+            statut_retour, total_demandee, total_rendue = self._statut_retour(lignes)
+
+            if statut_retour == "complet":
+                transition_reservation_status(
+                    reservation=reservation,
+                    new_status=StatutReservation.RETOURNEE,
+                    user=request.user,
+                    comment="Retour complet déclaré (SCRUM-95).",
+                )
+                reservation.refresh_from_db()
+
+        return Response(
+            {
+                "reservation": reservation.pk,
+                "numero": reservation.numero,
+                "statut": reservation.statut,
+                "statut_retour": statut_retour,
+                "quantite_demandee_totale": total_demandee,
+                "quantite_rendue_totale": total_rendue,
+                "lignes": self._serialize_lignes(lignes),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ReturnIncidentListCreateView(generics.ListCreateAPIView):
+    """Liste et crée les incidents de retour (manquant / cassé)."""
+
+    permission_classes = [ReturnCheckinPermission]
+    serializer_class = ReturnIncidentSerializer
+
+    def get_queryset(self):
+        """Retourne les incidents, filtrés par réservation et type."""
+
+        queryset = (
+            ReturnIncident.objects.select_related(
+                "line__part", "line__reservation", "reported_by"
+            )
+            .all()
+            .order_by("-reported_at")
+        )
+
+        # Validé plutôt que passé tel quel : `?reservation=abc` remontait
+        # jusqu'au ORM et sortait en 500 au lieu d'un 400.
+        reservation_id = parse_optional_int_param(self.request, "reservation")
+
+        if reservation_id is not None:
+            queryset = queryset.filter(line__reservation_id=reservation_id)
+
+        incident_type = self.request.query_params.get("type")
+
+        if incident_type:
+            queryset = queryset.filter(type=incident_type)
+
+        return queryset
+
+
+class ReturnIncidentHistoryView(generics.ListAPIView):
+    """Retourne les incidents de retour des 90 derniers jours.
+
+    Filtres cumulables : `type`, `object` (nom d'article) et `event` (nom de
+    manifestation), tous en recherche partielle insensible à la casse.
+    """
+
+    permission_classes = [ReturnCheckinPermission]
+    serializer_class = ReturnIncidentHistorySerializer
+
+    #: Profondeur d'historique exposée par la vue (SCRUM-100).
+    HISTORY_DAYS = 90
+
+    def get_queryset(self):
+        cutoff = timezone.now() - timedelta(days=self.HISTORY_DAYS)
+        queryset = (
+            ReturnIncident.objects.filter(reported_at__gte=cutoff)
+            .select_related(
+                "line__part",
+                "line__reservation__prestation__manifestation",
+                "reported_by",
+            )
+            .order_by("-reported_at")
+        )
+
+        incident_type = self.request.query_params.get("type")
+        if incident_type:
+            # Un type inconnu renvoyait 200 avec une liste vide : sur une vue
+            # de suivi qualité, une faute de frappe se lisait « aucun incident ».
+            if incident_type not in ReturnIncidentType.values:
+                raise ValidationError({
+                    "type": (
+                        "Type d'incident inconnu : "
+                        f"{', '.join(ReturnIncidentType.values)} attendus."
+                    )
+                })
+
+            queryset = queryset.filter(type=incident_type)
+
+        object_name = self.request.query_params.get("object")
+        if object_name:
+            queryset = queryset.filter(line__part__name__icontains=object_name)
+
+        event_name = self.request.query_params.get("event")
+        if event_name:
+            queryset = queryset.filter(
+                line__reservation__prestation__manifestation__nom__icontains=event_name
+            )
+
+        return queryset
+
+
+class ReturnIncidentDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Détail, mise à jour et suppression d'un incident de retour."""
+
+    permission_classes = [ReturnCheckinPermission]
+    serializer_class = ReturnIncidentSerializer
+    queryset = ReturnIncident.objects.select_related(
+        "line__part", "line__reservation", "reported_by"
+    )
+
+    def perform_destroy(self, instance):
+        """Supprime l'incident puis réaligne l'état de retour de la ligne.
+
+        Sans ça, supprimer le dernier incident d'une ligne la laissait
+        indéfiniment marquée « manquant » ou « cassé ».
+        """
+
+        ligne = instance.line
+        super().perform_destroy(instance)
+        sync_ligne_etat_retour(ligne)
+
+
+class ReturnLossReportView(APIView):
+    """Rapport de pertes agrégé : manquants, cassés, détruits et facturés.
+
+    Complète `ReturnReportView`, qui détaille **une** réservation : ici on
+    agrège sur l'ensemble des incidents, avec ventilation par article et par
+    réservation, pour répondre à « qu'est-ce qui se perd, et sur quoi ».
+    Le filtre `reservation` permet de retomber sur une seule réservation.
+
+    Totaux et ventilations sont calculés dans la même passe, avec la même
+    définition de « facturé » — tout incident portant `bill_client`, quel que
+    soit son type — pour qu'ils se réconcilient toujours.
+    """
+
+    permission_classes = [ReturnCheckinPermission]
+
+    #: Clés d'agrégation par type d'incident, alignées sur ReturnIncidentType.
+    TOTAL_KEYS = {
+        ReturnIncidentType.MISSING: "missing",
+        ReturnIncidentType.BROKEN: "broken",
+        ReturnIncidentType.DESTROYED: "destroyed",
+    }
+
+    def _nouvelle_entree(self, **identite):
+        """Entrée de ventilation à zéro, une clé par type plus « facturé »."""
+
+        entree = dict(identite)
+        entree.update({cle: 0 for cle in self.TOTAL_KEYS.values()})
+        entree["billed"] = 0
+
+        return entree
+
+    def get(self, request, *args, **kwargs):
+        """Retourne le rapport de pertes agrégé."""
+
+        reservation_id = parse_optional_int_param(request, "reservation")
+
+        incidents = ReturnIncident.objects.select_related(
+            "line__part", "line__reservation"
+        )
+
+        if reservation_id is not None:
+            incidents = incidents.filter(line__reservation_id=reservation_id)
+
+        incidents = list(incidents)
+
+        totaux = self._nouvelle_entree()
+        by_part = {}
+        by_reservation = {}
+
+        for incident in incidents:
+            # Un type ajouté au modèle sans passer ici ne doit pas faire tomber
+            # le rapport sur un KeyError : il reste compté dans `count` et,
+            # s'il est facturé, dans « facturé ».
+            cle = self.TOTAL_KEYS.get(incident.type)
+
+            part_entry = by_part.setdefault(
+                incident.line.part_id,
+                self._nouvelle_entree(
+                    part_id=incident.line.part_id,
+                    part_name=incident.line.part.name,
+                ),
+            )
+            reservation_entry = by_reservation.setdefault(
+                incident.line.reservation_id,
+                self._nouvelle_entree(
+                    reservation_id=incident.line.reservation_id,
+                    reservation_numero=incident.line.reservation.numero,
+                ),
+            )
+
+            if cle is not None:
+                totaux[cle] += incident.qty
+                part_entry[cle] += incident.qty
+                reservation_entry[cle] += incident.qty
+
+            if incident.bill_client:
+                totaux["billed"] += incident.qty
+                part_entry["billed"] += incident.qty
+                reservation_entry["billed"] += incident.qty
+
+        return Response(
+            {
+                "count": len(incidents),
+                "total_missing": totaux["missing"],
+                "total_broken": totaux["broken"],
+                "total_destroyed": totaux["destroyed"],
+                "total_billed": totaux["billed"],
+                "by_part": sorted(
+                    by_part.values(), key=lambda item: item["part_name"].lower()
+                ),
+                "by_reservation": sorted(
+                    by_reservation.values(),
+                    key=lambda item: item["reservation_numero"],
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ReturnReportView(APIView):
+    """Rapport synthétique du retour d'une réservation (JSON)."""
+
+    permission_classes = [ReturnCheckinPermission]
+
+    def get(self, request, pk, *args, **kwargs):
+        """Retourne le récap retour : rendu / manquant / cassé / détruit."""
+        try:
+            report = build_return_report(pk)
+        except ValueError:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(report, status=status.HTTP_200_OK)
+
+
+class ReturnReportPdfView(APIView):
+    """Export PDF imprimable du rapport de retour."""
+
+    permission_classes = [ReturnCheckinPermission]
+
+    def get(self, request, pk, *args, **kwargs):
+        """Génère et renvoie le PDF du rapport de retour."""
+        try:
+            pdf_buffer = generate_return_report_pdf(pk)
+        except ValueError:
+            return Response(
+                {"detail": "Réservation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except PdfEngineUnavailable as error:
+            # L'absence du moteur PDF ne concerne que cet export : elle ne doit
+            # pas ressortir en 500 opaque.
+            return Response(
+                {"detail": str(error)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        response = HttpResponse(
+            pdf_buffer.getvalue(),
+            content_type="application/pdf",
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="rapport-retour-{pk}.pdf"'
+        )
+        return response
+
+
+class ReservationCheckinView(APIView):
+    """Check-in retour ligne par ligne (SCRUM-94) : OK / manquant / casse.
+
+    - GET  : accessible uniquement quand la reservation est au statut
+      livree ; renvoie les lignes a pointer.
+    - POST : valide que somme(ok + manquant + casse) == quantite demandee
+      pour chaque ligne, journalise les incidents, puis cloture la
+      reservation (livree -> retournee -> cloturee).
+    """
+
+    permission_classes = [ReturnCheckinPermission]
+    serializer_class = ReservationCheckinSerializer
+
+    NOT_FOUND_DETAIL = "Reservation introuvable."
+    NOT_LIVREE_DETAIL = (
+        "Le check-in retour n'est accessible que pour une reservation livree."
+    )
+
+    def _get_reservation(self, pk, *, lock=False):
+        """Charge la reservation et ses lignes ; `lock` pose un verrou de ligne.
+
+        Le verrou serialise deux check-in concurrents : sans lui, les deux
+        requetes franchissent la garde « livree » avec un objet en memoire
+        perime et rejouent toutes les deux les transitions de statut.
+        """
+
+        queryset = Reservation.objects.prefetch_related(
+            "lignes", "lignes__part", "lignes__part__rentable_info"
+        )
+
+        if lock:
+            queryset = queryset.select_for_update()
+
+        return queryset.filter(pk=pk).first()
+
+    def _not_found_response(self):
+        return Response(
+            {"detail": self.NOT_FOUND_DETAIL},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    def _not_livree_response(self, reservation):
+        return Response(
+            {
+                "detail": self.NOT_LIVREE_DETAIL,
+                "current_status": reservation.statut,
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    def get(self, request, pk, *args, **kwargs):
+        """Retourne la reservation et ses lignes si elle est livree."""
+
+        reservation = self._get_reservation(pk)
+
+        if reservation is None:
+            return self._not_found_response()
+
+        if reservation.statut != StatutReservation.LIVREE:
+            return self._not_livree_response(reservation)
+
+        return Response(
+            {
+                "reservation": reservation.pk,
+                "numero": reservation.numero,
+                "statut": reservation.statut,
+                "lignes": [
+                    self._ligne_pointee(ligne)
+                    for ligne in lignes_a_ramasser(reservation)
+                ],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @staticmethod
+    def _validate_payload_lignes(payload_lignes, lignes_by_id):
+        """Erreurs par ligne : appartenance, somme, et couverture complete.
+
+        Le check-in cloture definitivement la reservation : toutes ses lignes
+        doivent donc etre pointees dans la meme requete, sinon on cloturerait
+        un retour partiel sans possibilite de le corriger ensuite.
+        """
+
+        errors = {}
+        seen = set()
+
+        for entry in payload_lignes:
+            ligne = lignes_by_id.get(entry["id"])
+
+            if ligne is None:
+                errors[str(entry["id"])] = (
+                    "Cette ligne n'appartient pas a la reservation."
+                )
+                continue
+
+            if entry["id"] in seen:
+                errors[str(entry["id"])] = "Cette ligne est presente en double."
+                continue
+
+            seen.add(entry["id"])
+            total = entry["ok"] + entry["manquant"] + entry["casse"]
+
+            if total != ligne.quantite_demandee:
+                errors[str(entry["id"])] = (
+                    "La somme OK + manquant + casse (" + str(total) + ") doit "
+                    "egaler la quantite demandee ("
+                    + str(ligne.quantite_demandee)
+                    + ")."
+                )
+
+        for ligne_id in lignes_by_id:
+            if ligne_id not in seen:
+                errors[str(ligne_id)] = (
+                    "Cette ligne doit etre pointee pour cloturer le check-in."
+                )
+
+        return errors
+
+    @staticmethod
+    def _ligne_pointee(ligne):
+        """Ligne telle que la renvoie le check-in.
+
+        Forme inchangée pour le front ; les chiffres se déduisent désormais du
+        registre d'incidents, une seule passe par ligne.
+        """
+
+        quantites = quantites_du_retour(ligne)
+
+        return {
+            "id": ligne.pk,
+            "part": ligne.part_id,
+            "part_name": getattr(ligne.part, "name", str(ligne.part)),
+            "quantite_demandee": ligne.quantite_demandee,
+            "quantite_retour_ok": quantites["ok"],
+            "quantite_retour_manquant": quantites["manquant"],
+            "quantite_retour_casse": quantites["casse"],
+            "commentaire": ligne.commentaire,
+        }
+
+    @staticmethod
+    def _apply_checkin_ligne(ligne, entry, user=None):
+        """Reporte une entree de check-in sur la ligne et la sauvegarde."""
+
+        # Seule quantité conservée sur la ligne : ce qui est revenu
+        # physiquement. Le manquant n'est pas revenu, le cassé si.
+        ligne.quantite_retournee = entry["ok"] + entry["casse"]
+
+        update_fields = [
+            "quantite_retournee",
+            "etat_retour",
+            "updated_at",
+        ]
+
+        # `commentaire` porte aussi la note saisie a la reservation : on ne
+        # l'ecrase que si le check-in en fournit une explicitement.
+        if "commentaire" in entry:
+            ligne.commentaire = entry["commentaire"]
+            update_fields.append("commentaire")
+
+        ligne.save(update_fields=update_fields)
+
+        # Le pointage alimente le registre d'incidents comme la saisie de
+        # ramassage, sinon un objet cassé constaté au check-in n'apparaissait
+        # dans aucun rapport. Pas de décision de facturation ici : `facturer`
+        # reste à None, le drapeau déjà posé est conservé.
+        projeter_incidents(
+            ligne,
+            user,
+            quantites_depuis_payload(entry, CHAMPS_CHECKIN),
+        )
+        # La règle était réécrite ici alors qu'elle existait déjà dans
+        # `retours.py` : deux copies pour une seule règle.
+        ligne.etat_retour = etat_retour_de_la_ligne(ligne)
+        ligne.save(update_fields=["etat_retour", "updated_at"])
+
+    def post(self, request, pk, *args, **kwargs):
+        """Enregistre le check-in retour et cloture la reservation."""
+
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload_lignes = serializer.validated_data["lignes"]
+
+        # Ecritures des lignes et transitions de statut dans une seule
+        # transaction : un echec en cours de route ne doit pas laisser la
+        # reservation coincee en « retournee » avec un check-in a moitie pose.
+        with transaction.atomic():
+            reservation = self._get_reservation(pk, lock=True)
+
+            if reservation is None:
+                return self._not_found_response()
+
+            if reservation.statut != StatutReservation.LIVREE:
+                return self._not_livree_response(reservation)
+
+            lignes_by_id = {ligne.pk: ligne for ligne in lignes_a_ramasser(reservation)}
+            errors = self._validate_payload_lignes(payload_lignes, lignes_by_id)
+
+            if errors:
+                return Response({"lignes": errors}, status=status.HTTP_400_BAD_REQUEST)
+
+            incidents = []
+
+            for entry in payload_lignes:
+                ligne = lignes_by_id[entry["id"]]
+                self._apply_checkin_ligne(ligne, entry, request.user)
+
+                if entry["manquant"] > 0 or entry["casse"] > 0:
+                    incidents.append(
+                        str(getattr(ligne.part, "name", ligne.part_id))
+                        + ": "
+                        + str(entry["manquant"])
+                        + " manquant(s), "
+                        + str(entry["casse"])
+                        + " casse(s)"
+                    )
+
+            incident_comment = (
+                "Incidents check-in : " + "; ".join(incidents)
+                if incidents
+                else "Check-in retour sans incident."
+            )
+
+            transition_reservation_status(
+                reservation=reservation,
+                new_status=StatutReservation.RETOURNEE,
+                user=request.user,
+                comment=incident_comment,
+            )
+            transition_reservation_status(
+                reservation=reservation,
+                new_status=StatutReservation.CLOTUREE,
+                user=request.user,
+                comment="Cloturee automatiquement apres check-in retour.",
+            )
+
+        return Response(
+            {
+                "reservation": reservation.pk,
+                "statut": reservation.statut,
+                "incidents": incidents,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class ConflictsListView(APIView):
     """Liste les réservations actuellement en conflit."""
 
     permission_classes = [ReservationPermission]
 
     def get(self, request, *args, **kwargs):
-        """Retourne les réservations en conflit triées par date de retrait prévue."""
+        """Retourne les réservations en conflit triées par date de retrait prévue.
 
-        return Response(list_current_conflicts(), status=status.HTTP_200_OK)
+        Synchronise le registre au passage : le stock peut baisser hors de toute
+        écriture de réservation, et rien d'autre ne déclenche alors l'historisation.
+        `get_or_create` rend l'opération idempotente.
+        """
+
+        conflits = list_current_conflicts()
+        sync_conflict_registry(conflits)
+
+        return Response(conflits, status=status.HTTP_200_OK)
+
+
+class ConflictHistoryListView(APIView):
+    """Liste l'historique des conflits (ouverts et resolus)."""
+
+    permission_classes = [ReservationPermission]
+
+    def get(self, request, *args, **kwargs):
+        conflict_type = request.query_params.get("type", "all")
+        state = request.query_params.get("state", "all")
+        reservation_id = request.query_params.get("reservation")
+
+        queryset = (
+            ConflictHistory.objects.select_related(
+                "reservation",
+                "conflicting_reservation",
+                "resolved_by",
+                "part",
+            )
+            .all()
+            .order_by("-created_at")
+        )
+
+        if conflict_type in {ConflictType.STOCK, ConflictType.LOCATION}:
+            queryset = queryset.filter(conflict_type=conflict_type)
+
+        if state in {ConflictState.OPEN, ConflictState.RESOLVED}:
+            queryset = queryset.filter(state=state)
+
+        if reservation_id and str(reservation_id).isdigit():
+            queryset = queryset.filter(reservation_id=int(reservation_id))
+
+        payload = []
+        for item in queryset:
+            payload.append({
+                "id": item.pk,
+                "conflict_type": item.conflict_type,
+                "state": item.state,
+                "reservation_id": item.reservation_id,
+                "reservation_numero": item.reservation.numero,
+                "conflicting_reservation_id": item.conflicting_reservation_id,
+                "part_id": item.part_id,
+                "part_name": getattr(item.part, "name", "") if item.part_id else "",
+                "period_start": item.period_start,
+                "period_end": item.period_end,
+                "location_key": item.location_key,
+                "details": item.details,
+                "created_at": item.created_at,
+                "resolved_at": item.resolved_at,
+                "resolved_by": (
+                    item.resolved_by.get_full_name() or item.resolved_by.username
+                    if item.resolved_by
+                    else ""
+                ),
+                "resolution_note": item.resolution_note,
+            })
+
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class ConflictHistoryResolveView(APIView):
+    """Marque une entree d'historique de conflit comme resolue."""
+
+    permission_classes = [ReservationPermission]
+
+    def patch(self, request, pk, *args, **kwargs):
+        conflict = ConflictHistory.objects.filter(pk=pk).first()
+
+        if conflict is None:
+            return Response(
+                {"detail": "Conflit introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if conflict.state == ConflictState.RESOLVED:
+            return Response(
+                {"detail": "Conflit deja resolu."},
+                status=status.HTTP_200_OK,
+            )
+
+        # Clore une entrée dont la cause tient encore ne résolvait rien : le
+        # registre affirmait « traité » pendant que la pénurie restait entière.
+        # On rejoue le détecteur et on renvoie le problème réel.
+        encore_actif, motif = conflict_still_active(conflict)
+
+        if encore_actif:
+            return Response(
+                {
+                    "detail": (
+                        f"Conflit toujours actif : {motif}. "
+                        "Traitez la cause avant de le clore."
+                    ),
+                    "reason": motif,
+                    "state": conflict.state,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        conflict.state = ConflictState.RESOLVED
+        conflict.resolved_at = timezone.now()
+        conflict.resolved_by = request.user
+        conflict.resolution_note = str(request.data.get("note", "")).strip()
+        conflict.save(
+            update_fields=[
+                "state",
+                "resolved_at",
+                "resolved_by",
+                "resolution_note",
+                "updated_at",
+            ]
+        )
+
+        return Response(
+            {
+                "id": conflict.pk,
+                "state": conflict.state,
+                "resolved_at": conflict.resolved_at,
+                "resolved_by": conflict.resolved_by.username,
+                "resolution_note": conflict.resolution_note,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class StockAlertListView(APIView):
@@ -459,8 +1671,12 @@ class StockAlertListView(APIView):
         # Les articles virtuels (services, ex. « nettoyage ») n'ont pas de stock
         # physique : ni seuil, ni tension n'ont de sens pour eux. Sans ce filtre
         # ils remontaient en alerte à 200 % de « 0 louable(s) ».
+        # `alertes_desactivees` coupe l'article sans effacer ses seuils : sans
+        # ce filtre, le booléen du CDC n'aurait aucun effet.
         rentable_items = (
-            RentableItem.objects.select_related("part").filter(is_virtual=False).all()
+            RentableItem.objects.select_related("part")
+            .filter(is_virtual=False, alertes_desactivees=False)
+            .all()
         )
 
         if scope_ids is not None:
@@ -501,7 +1717,11 @@ class StockAlertListView(APIView):
                     ),
                 })
 
-            if high is not None and stock_total >= high:
+            # Seuil haut réservé aux consommables comme le seuil bas : le CDC
+            # V06 attache les deux seuils au consommable. Sans cette condition,
+            # un seuil haut posé sur un article louable déclenchait une alerte
+            # de réapprovisionnement qui n'a pas de sens pour du matériel.
+            if rentable.consommable and high is not None and stock_total >= high:
                 part_reasons.append({
                     "type": "high_threshold",
                     "message": (
@@ -831,6 +2051,8 @@ class CatalogPartDetailView(APIView):
     serializer_class = CatalogPartSerializer
 
     def get(self, request, pk, *args, **kwargs):
+        """Retourne le détail d'un article du catalogue."""
+
         from part.models import Part
 
         part = (
@@ -853,6 +2075,7 @@ class CatalogPartDetailView(APIView):
         )
 
         serializer = self.serializer_class(part)
+
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 

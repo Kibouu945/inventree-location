@@ -188,6 +188,33 @@ Modéliser les consommables (objets non récupérables / non réutilisables) afi
 
 **Attendu :** type d'objet « consommable », décrément de stock définitif (pas de retour attendu). (Critères détaillés à compléter sur la fiche.)
 
+> ⚠️ **Fiche à deux têtes, une seule livrée.** Le statut « Backlog » masque le
+> fait que la moitié « modélisation » tourne en production depuis S2.
+>
+> **Fait (S2, cf. `docs/mises-a-jour-s2.md`) :** le drapeau `consommable` existe
+> sur `RentableItem`, il est câblé (CAT-05), exposé en lecture dans le catalogue
+> et modifiable en masse. Il pilote aussi l'alerte de seuil bas et son
+> coupe-circuit `alertes_desactivees` (CDC V06).
+>
+> **Reste à faire — c'est ce qui bloque :** le **décrément de stock définitif**.
+> Aucune écriture de décrément n'existe dans le plugin ; il ne lit que les
+> `StockItem` d'InvenTree. Un consommable livré est donc « engagé » le temps de
+> sa réservation puis **redevient disponible**, alors qu'il a été consommé. Les
+> critères ne sont pas écrits : à quel moment décrémenter (livraison ? clôture
+> ?), via quel mouvement InvenTree (« Ajustement d'inventaire » ?), et avec
+> quelle traçabilité (`StockItemTracking`).
+>
+> **Dépendance à ne pas inverser :** le CDC V06 demande qu'« un consommable
+> n'entre pas dans les listes de ramassage » (cf. fiche BO-Parts). Ce filtre
+> n'est **pas** appliqué, volontairement — voir `inventree_location/ramassage.py`.
+> Aujourd'hui la colonne « manquante » de la saisie retour (RET-04) est le seul
+> levier qui sort un consommable du stock réellement disponible. L'exclure du
+> ramassage avant d'avoir le décrément le rendrait éternellement « possédé ».
+> Ordre correct : décrément définitif d'abord, exclusion du ramassage ensuite.
+>
+> Les **articles virtuels**, eux, sont exclus du ramassage depuis 2026-08-27 :
+> aucun objet physique, donc rien à compter et aucun effet de bord.
+
 ### 16 · US-01 — Ajouter coordonnées GPS aux lieux
 
 **Épic A · 🟠 Haute · 👤 Gestionnaire, Admin · ⏱️ 2 j · Statut : Backlog**

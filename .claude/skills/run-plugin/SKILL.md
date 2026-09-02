@@ -85,30 +85,29 @@ erreurs JS sans effet visible immédiat.
 Catalogue, Organisation, Réservations, Conflits actuels, Alertes stock. Les
 `get_ui_panels` ne s'affichent que sur `target_model == "part"` (fiche article).
 
-### Les widgets n'apparaissent pas tout seuls — c'est un manque, pas une norme
+### Les widgets sont posés automatiquement à l'attribution d'un rôle
 
-La disposition du dashboard est **propre à chaque utilisateur** : un widget
-nouvellement enregistré n'est pas ajouté automatiquement. Aujourd'hui il faut
-donc le poser à la main, ce qui n'est pas acceptable pour un utilisateur final
-et bloque **UX-01** (« à la connexion, chaque persona voit d'abord son contenu
-pertinent »).
+La disposition du dashboard est **propre à chaque utilisateur**, et InvenTree
+n'ajoute jamais un widget de plugin de lui-même : un compte neuf tombe sur
+« No Widgets Selected ». C'est ce qui a fait conclure au client, en août 2026,
+qu'il avait « la version de base d'InvenTree ».
 
-La bonne réponse existe côté hôte : **`get_ui_navigation_items`**, qui injecte
-de vraies entrées de navigation, toujours visibles, sans configuration. Hooks
-disponibles sur `UserInterfaceMixin` :
+Le plugin pose donc les écrans lui-même (`dashboards.py` pour le calcul,
+`dashboard_provisioning.py` pour le signal `m2m_changed` sur `User.groups`).
+La disposition est écrite dans `users.models.UserProfile.widgets`. La fusion est
+**non destructive** : les widgets du cœur InvenTree et le rangement de
+l'utilisateur sont conservés, seuls les widgets du plugin devenus interdits
+partent. Rattrapage des comptes existants :
+`python manage.py provision_dashboards`.
 
-```
-get_ui_panels · get_ui_dashboard_items · get_ui_navigation_items
-get_ui_features · get_ui_spotlight_actions
-get_ui_template_editors · get_ui_template_previews
-```
+**Ne pas repartir sur `get_ui_navigation_items` : c'est une impasse en 1.5.1.**
+Le hook existe et la barre de nav rend bien un onglet, mais il navigue via
+`navigateToLink`, qui fait **toujours** un `navigate()` react-router — et la SPA
+n'a aucune route générique de page plugin. Un onglet vers
+`/plugin/inventree-location/...` tombe donc sur le `path:"*"`, c'est-à-dire la
+page 404.
 
-Contrat d'une entrée (`UIFeature`, `plugin/base/ui/mixins.py`) :
-`key`, `title`, `description`, `icon`, `feature_type: 'navigation'`, `options`,
-`context`, `source`. Le filtrage par rôle se fait comme pour les widgets, via
-`roles.py` (miroir de `permissions.py`).
-
-Tant que ce n'est pas fait, pour tester un widget il faut l'ajouter :
+Pour tester un widget qu'aucun rôle ne pose, l'ajouter à la main :
 
 1. cliquer le `⋮` **de la carte du dashboard** (même ligne que le titre
    « InvenTree - admin », à droite) — pas celui du profil en haut à droite ;

@@ -12,6 +12,7 @@ SAV arriveront avec leurs endpoints aux sprints suivants) :
 | Catalogue     | tous les rôles     | admin, gestionnaire               |
 | Lieux         | tous les rôles     | admin, gestionnaire               |
 | Réservations  | tous les rôles     | admin, gestionnaire, organisateur |
+| Livraisons    | tous les rôles     | admin, gestionnaire               |
 """
 
 from __future__ import annotations
@@ -70,3 +71,43 @@ class PrestationPermission(RoleBasedPermission):
     """Lecture pour tous ; gestion pour admin / gestionnaire / organisateur."""
 
     write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR)
+
+
+class DeliveryPermission(RoleBasedPermission):
+    """Lecture pour tous (dont livreur) ; aucune écriture ouverte cette itération."""
+
+    write_roles = (roles.ADMIN, roles.GESTIONNAIRE)
+
+
+class MarquerLivreePermission(RoleBasedPermission):
+    """Marquer une réservation livrée : celui qui livre, plus l'encadrement.
+
+    Écriture volontairement étroite, distincte de `ReservationPermission` :
+    ouvrir cette dernière au livreur lui donnerait aussi la validation, le
+    refus et l'annulation d'une réservation.
+    """
+
+    write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.LIVREUR)
+
+
+class ReturnCheckinPermission(RoleBasedPermission):
+    """Check-in retour ligne par ligne (OK / manquant / cassé) : rôle magasinier."""
+
+    write_roles = (roles.ADMIN, roles.MAGASINIER)
+
+
+class PrestationRetourPermission(RoleBasedPermission):
+    """Déclaration du retour d'une prestation (SCRUM-95) : rôle magasinier."""
+
+    write_roles = (roles.ADMIN, roles.MAGASINIER)
+
+
+class SavPermission(RoleBasedPermission):
+    """Tickets SAV et objets détruits (SCRUM-112) : rôle sav.
+
+    Le défaut de `RoleBasedPermission` n'ouvre l'écriture qu'à l'admin : le
+    rôle dont c'est précisément le métier — « tickets réparation + historique »
+    dans `roles.py` — ne pouvait que lire ses propres tickets.
+    """
+
+    write_roles = (roles.ADMIN, roles.SAV)

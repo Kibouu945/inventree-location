@@ -35,7 +35,11 @@ from inventree_location.serializers import ReservationSerializer
 from inventree_location.services.workflow_service import (
     transition_reservation_status,
 )
-from inventree_location.views import ReservationConflictCheckView
+from inventree_location.views import (
+    ConflictHistoryResolveView,
+    ReservationConflictCheckView,
+)
+from inventree_location.views import StockAvailabilityCheckView
 
 from part.models import Part
 
@@ -311,20 +315,29 @@ def test_validation_refused_when_validee_and_conflict(stock_setup):
 
 
 @pytest.mark.django_db
-def test_forced_reservation_bypasses_validation(stock_setup):
-    """`forced=True` permet de valider malgré le conflit (US-03)."""
+def test_forced_reservation_bypasses_the_block(stock_setup):
+    """`forced=True` valide malgré le conflit (US-03, « forcer malgré »).
+
+    SCRUM-105 voulait bloquer toute sauvegarde en conflit, y compris forcée.
+    La règle retenue reste celle de develop : le blocage ne porte que sur le
+    passage en « validée », et le forçage reste la porte de sortie de
+    l'arbitrage.
+    """
 
     candidate = _make_candidate(
         stock_setup, qty=1, statut=StatutReservation.VALIDEE, forced=True
     )
 
-    # Ne doit pas lever.
     ReservationSerializer()._validate_stock_conflicts_if_needed(candidate)
 
 
 @pytest.mark.django_db
-def test_non_validee_status_is_not_blocked(stock_setup):
-    """Un statut autre que `validée` n'est jamais bloqué par le check conflit."""
+def test_non_validee_status_is_saved_despite_conflict(stock_setup):
+    """Une réservation non validée se sauvegarde malgré le conflit.
+
+    L'arbitrage a lieu à la validation : refuser la sauvegarde empêcherait
+    l'organisateur d'enregistrer sa demande.
+    """
 
     candidate = _make_candidate(stock_setup, qty=1, statut=StatutReservation.SOUMISE)
 
@@ -358,3 +371,169 @@ def test_transition_to_validee_allowed_when_forced(stock_setup):
 
     candidate.refresh_from_db()
     assert candidate.statut == StatutReservation.VALIDEE
+
+
+@pytest.mark.django_db
+def test_day_granularity_detects_same_day_conflict(stock_setup):
+    """Conflit même jour même si les heures ne se chevauchent pas strictement."""
+
+    now = stock_setup["now"]
+    candidate = Reservation.objects.create(
+        prestation=stock_setup["prestation"],
+        demandeur=stock_setup["user"],
+        date_demande=now,
+        statut=StatutReservation.SOUMISE,
+        date_retrait_prevue=now.replace(hour=23, minute=0),
+        date_retour_prevue=now.replace(hour=23, minute=30),
+    )
+    LigneReservation.objects.create(
+        reservation=candidate, part=stock_setup["part"], quantite_demandee=1
+    )
+
+    result = detect_reservation_conflicts(candidate)
+    assert result["has_conflict"] is True
+
+
+@pytest.mark.django_db
+def test_stock_availability_endpoint_returns_409_on_shortage(gestionnaire, stock_setup):
+    now = stock_setup["now"]
+    factory = APIRequestFactory()
+    request = factory.get(
+        "/plugin/inventree-location/reservations/check-stock/",
+        {
+            "part": stock_setup["part"].pk,
+            "quantity": 1,
+            "date_retrait_prevue": (now + timedelta(hours=1)).isoformat(),
+            "date_retour_prevue": (now + timedelta(hours=2)).isoformat(),
+        },
+    )
+    force_authenticate(request, user=gestionnaire)
+
+    response = StockAvailabilityCheckView.as_view()(request)
+
+    assert response.status_code == status.HTTP_409_CONFLICT
+    assert response.data["has_conflict"] is True
+
+
+@pytest.mark.django_db
+def test_stock_availability_endpoint_returns_200_when_available(gestionnaire, stock_setup):
+    now = stock_setup["now"]
+    factory = APIRequestFactory()
+    request = factory.get(
+        "/plugin/inventree-location/reservations/check-stock/",
+        {
+            "part": stock_setup["part"].pk,
+            "quantity": 1,
+            "date_retrait_prevue": (now + timedelta(days=7)).isoformat(),
+            "date_retour_prevue": (now + timedelta(days=8)).isoformat(),
+        },
+    )
+    force_authenticate(request, user=gestionnaire)
+
+    response = StockAvailabilityCheckView.as_view()(request)
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["has_conflict"] is False
+
+
+@pytest.mark.django_db
+def test_resoudre_un_conflit_de_stock_exige_que_la_penurie_ait_disparu(
+    gestionnaire, stock_setup
+):
+    """« Résoudre » ne doit jamais taire une pénurie encore réelle.
+
+    Avant, l'endpoint posait `state = resolved` sans rien vérifier : le
+    registre annonçait « traité » pendant qu'il manquait toujours du matériel.
+    """
+
+    from inventree_location.models import ConflictHistory, ConflictState, ConflictType
+
+    candidate = _make_candidate(stock_setup, qty=1)
+    entree = ConflictHistory.objects.create(
+        conflict_type=ConflictType.STOCK,
+        state=ConflictState.OPEN,
+        reservation=candidate,
+        part=stock_setup["part"],
+        period_start=candidate.date_retrait_prevue,
+        period_end=candidate.date_retour_prevue,
+    )
+
+    factory = APIRequestFactory()
+
+    def resoudre():
+        request = factory.patch(
+            f"/plugin/inventree-location/conflicts/history/{entree.pk}/resolve/",
+            {"note": "handled"},
+            format="json",
+        )
+        force_authenticate(request, user=gestionnaire)
+        return ConflictHistoryResolveView.as_view()(request, pk=entree.pk)
+
+    refus = resoudre()
+
+    assert refus.status_code == status.HTTP_409_CONFLICT
+    assert "il manque" in refus.data["reason"]
+    assert "Tente" in refus.data["reason"]
+
+    entree.refresh_from_db()
+    assert entree.state == ConflictState.OPEN
+
+    # Cause levée : on réapprovisionne, la pénurie disparaît.
+    fixer_stock(stock_setup["part"], 10)
+
+    accepte = resoudre()
+
+    assert accepte.status_code == status.HTTP_200_OK
+    entree.refresh_from_db()
+    assert entree.state == ConflictState.RESOLVED
+
+
+@pytest.mark.django_db
+def test_une_penurie_nee_apres_coup_entre_au_registre(gestionnaire, stock_setup):
+    """Le stock peut baisser hors de toute écriture de réservation.
+
+    Avant, seule `register_stock_conflict_history` écrivait, au moment de
+    l'enregistrement : une pénurie née d'une perte de stock s'affichait dans
+    « Conflits actuels » sans jamais entrer à l'historique.
+    """
+
+    from inventree_location.conflicts import sync_conflict_registry
+    from inventree_location.models import ConflictHistory, ConflictState, ConflictType
+
+    # La réservation validée du fixture tient sur le stock existant.
+    assert ConflictHistory.objects.count() == 0
+
+    # Le stock disparaît après coup.
+    fixer_stock(stock_setup["part"], 0)
+
+    ouvertes = sync_conflict_registry()
+
+    assert ouvertes >= 1
+    entree = ConflictHistory.objects.filter(
+        conflict_type=ConflictType.STOCK,
+        state=ConflictState.OPEN,
+        reservation=stock_setup["existing"],
+    ).first()
+    assert entree is not None
+    assert entree.part_id == stock_setup["part"].pk
+    assert entree.details["missing_quantity"] >= 1
+
+    # Idempotent : une seconde passe n'ouvre pas de doublon.
+    assert sync_conflict_registry() == 0
+    assert ConflictHistory.objects.filter(state=ConflictState.OPEN).count() == 1
+
+
+@pytest.mark.django_db
+def test_la_synchronisation_ne_referme_rien(gestionnaire, stock_setup):
+    """Clore reste un geste humain, vérifié par `conflict_still_active`."""
+
+    from inventree_location.conflicts import sync_conflict_registry
+    from inventree_location.models import ConflictHistory, ConflictState
+
+    fixer_stock(stock_setup["part"], 0)
+    sync_conflict_registry()
+
+    fixer_stock(stock_setup["part"], 50)
+    sync_conflict_registry()
+
+    assert ConflictHistory.objects.filter(state=ConflictState.OPEN).count() == 1
