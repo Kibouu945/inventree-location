@@ -20,6 +20,10 @@ keywords = ["inventree", "plugin"]
 requires-python = ">=3.9"
 dependencies = [
     "requests>=2.28",
+    # Validation de la photo d'un objet (`serializers.ImageField` ouvre le
+    # fichier avec Pillow). InvenTree l'embarque déjà, mais le plugin s'en sert
+    # directement : autant le déclarer plutôt que d'en dépendre par ricochet.
+    "Pillow>=10",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

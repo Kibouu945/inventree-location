@@ -7,6 +7,17 @@ export const ROLES_URL = `${BASE}/roles/`;
 export const GROUPES_URL = `${BASE}/groupes/`;
 export const PARTS_URL = `${BASE}/parts/`;
 
+/**
+ * Photo d'un objet : endpoint distinct du formulaire.
+ *
+ * Le formulaire reste en JSON ; y glisser un fichier imposerait du multipart à
+ * tous les champs, où un booléen devient « true » et un entier nul une chaîne
+ * vide. POST pour déposer, DELETE pour retirer.
+ */
+export function partImageUrl(partId: number): string {
+  return `${PARTS_URL}${partId}/image/`;
+}
+
 /** Doit rester aligné sur `BackOfficePagination.page_size` côté serveur. */
 export const PAGE_SIZE = 20;
 

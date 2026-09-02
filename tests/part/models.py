@@ -32,6 +32,13 @@ class Part(models.Model):
     active = models.BooleanField(default=True)
     salable = models.BooleanField(default=False)
     virtual = models.BooleanField(default=False)
+    # Photo de l'objet. En production c'est un `StdImageField` (InvenTree y
+    # génère des vignettes 128 et 256 px) ; un `ImageField` suffit ici, le
+    # plugin ne fait qu'affecter le fichier et relire `.url`. Mêmes `null` et
+    # `blank` que le champ natif, pour que les tests voient le même défaut.
+    image = models.ImageField(
+        upload_to="part_images", null=True, blank=True, default=""
+    )
     category = models.ForeignKey(
         PartCategory,
         on_delete=models.SET_NULL,

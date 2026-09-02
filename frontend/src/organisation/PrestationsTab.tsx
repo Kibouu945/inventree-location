@@ -321,6 +321,23 @@ export function PrestationsTab({
     setModalOpen(true);
   }
 
+  /**
+   * Écrit un champ du formulaire depuis une valeur **déjà lue**.
+   *
+   * React remet `event.currentTarget` à `null` dès la fin du gestionnaire.
+   * Lire `event.currentTarget.value` *à l'intérieur* d'un updater
+   * `setState((s) => …)` marche donc par accident : tant que React évalue
+   * l'updater tout de suite (cas de la première frappe, chemin « eager »), la
+   * valeur est encore là ; dès qu'il le diffère, le callback lit `null.value`
+   * et le widget Organisation entier tombe en « Error rendering component ».
+   * C'est le plantage remonté par le client le 02/09/2026 sur la saisie du nom
+   * d'une prestation, reproductible dès la deuxième frappe sur InvenTree 1.5.
+   * Toujours capturer la valeur dans le gestionnaire, jamais dans l'updater.
+   */
+  function setField<K extends keyof FormState>(field: K, value: FormState[K]) {
+    setState((current) => ({ ...current, [field]: value }));
+  }
+
   function addArticle(article: PrestationArticle) {
     setState((current) => {
       const existing = current.articles.find((a) => a.part === article.part);
@@ -425,9 +442,7 @@ export function PrestationsTab({
             label='Nom'
             required
             value={state.nom}
-            onChange={(event) =>
-              setState((s) => ({ ...s, nom: event.currentTarget.value }))
-            }
+            onChange={(event) => setField('nom', event.currentTarget.value)}
           />
           <Group grow>
             <Select
@@ -436,9 +451,7 @@ export function PrestationsTab({
               data={manifestationOptions}
               searchable
               value={state.manifestation}
-              onChange={(value) =>
-                setState((s) => ({ ...s, manifestation: value }))
-              }
+              onChange={(value) => setField('manifestation', value)}
             />
             <Select
               label='Lieu'
@@ -446,7 +459,7 @@ export function PrestationsTab({
               searchable
               clearable
               value={state.lieu}
-              onChange={(value) => setState((s) => ({ ...s, lieu: value }))}
+              onChange={(value) => setField('lieu', value)}
             />
           </Group>
           <Group grow>
@@ -455,10 +468,7 @@ export function PrestationsTab({
               required
               value={state.date_debut}
               onChange={(value) =>
-                setState((s) => ({
-                  ...s,
-                  date_debut: value ? new Date(value) : null
-                }))
+                setField('date_debut', value ? new Date(value) : null)
               }
             />
             <DateTimePicker
@@ -466,10 +476,7 @@ export function PrestationsTab({
               required
               value={state.date_fin}
               onChange={(value) =>
-                setState((s) => ({
-                  ...s,
-                  date_fin: value ? new Date(value) : null
-                }))
+                setField('date_fin', value ? new Date(value) : null)
               }
             />
           </Group>
@@ -479,10 +486,7 @@ export function PrestationsTab({
             minRows={2}
             value={state.description}
             onChange={(event) =>
-              setState((s) => ({
-                ...s,
-                description: event.currentTarget.value
-              }))
+              setField('description', event.currentTarget.value)
             }
           />
 

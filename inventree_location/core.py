@@ -65,6 +65,7 @@ class InvenTreeLocation(
         )
         from .part_backoffice import (
             PartBackOfficeDetailView,
+            PartBackOfficeImageView,
             PartBackOfficeListCreateView,
         )
         from .sav import (
@@ -239,6 +240,11 @@ class InvenTreeLocation(
                 "backoffice/parts/<int:pk>/",
                 PartBackOfficeDetailView.as_view(),
                 name="backoffice-part-detail",
+            ),
+            path(
+                "backoffice/parts/<int:pk>/image/",
+                PartBackOfficeImageView.as_view(),
+                name="backoffice-part-image",
             ),
             path(
                 "backoffice/groupes/",

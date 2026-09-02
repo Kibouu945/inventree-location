@@ -5,7 +5,9 @@ import {
   Badge,
   Button,
   Checkbox,
+  FileInput,
   Group,
+  Image,
   Loader,
   Modal,
   NumberInput,
@@ -21,7 +23,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { canManageBackOffice } from '../roles';
-import { listParams, PARTS_URL, pageCount } from './api';
+import { listParams, PARTS_URL, pageCount, partImageUrl } from './api';
 import { apiErrorMessage } from './apiError';
 import type {
   BackOfficePart,
@@ -103,6 +105,10 @@ export function PartsBackOffice({
   );
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
+  // La photo voyage à part du formulaire JSON (cf. `partImageUrl`) : on retient
+  // le fichier choisi, et l'intention de retirer la photo existante.
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [removeImage, setRemoveImage] = useState(false);
 
   const partsQuery = useQuery<Page<BackOfficePart>>(
     {
@@ -133,15 +139,22 @@ export function PartsBackOffice({
     }));
   }
 
+  function resetImageState() {
+    setImageFile(null);
+    setRemoveImage(false);
+  }
+
   function openCreateModal() {
     setFormError('');
     setFormValues(emptyForm());
+    resetImageState();
     setModalState({ open: true });
   }
 
   function openEditModal(part: BackOfficePart) {
     setFormError('');
     setFormValues(formFromPart(part));
+    resetImageState();
     setModalState({ open: true, part });
   }
 
@@ -153,6 +166,28 @@ export function PartsBackOffice({
     setModalState({ open: false });
     setFormError('');
     setFormValues(emptyForm());
+    resetImageState();
+  }
+
+  /**
+   * Applique le changement de photo, une fois la Part enregistrée.
+   *
+   * Deux appels séparés du formulaire : à la création, l'identifiant de la
+   * Part n'existe qu'après la réponse du POST.
+   */
+  async function savePartImage(partId: number) {
+    if (imageFile) {
+      const body = new FormData();
+      body.append('image', imageFile);
+
+      await context.api.post(partImageUrl(partId), body);
+
+      return;
+    }
+
+    if (removeImage) {
+      await context.api.delete(partImageUrl(partId));
+    }
   }
 
   async function savePart() {
@@ -176,10 +211,31 @@ export function PartsBackOffice({
         stock_initial: formValues.stock_initial
       };
 
-      if (modalState.part) {
-        await context.api.patch(`${PARTS_URL}${modalState.part.id}/`, payload);
+      let partId = modalState.part?.id;
+
+      if (partId != null) {
+        await context.api.patch(`${PARTS_URL}${partId}/`, payload);
       } else {
-        await context.api.post(PARTS_URL, payload);
+        const response = await context.api.post(PARTS_URL, payload);
+        partId = response.data?.id;
+      }
+
+      if (partId != null && (imageFile || removeImage)) {
+        try {
+          await savePartImage(partId);
+        } catch (error: unknown) {
+          // La Part est enregistrée : le dire, sinon l'utilisateur croit avoir
+          // tout perdu et ressaisit le formulaire.
+          await partsQuery.refetch();
+          setFormError(
+            apiErrorMessage(
+              error,
+              "La Part est enregistrée, mais la photo n'a pas pu être déposée."
+            )
+          );
+
+          return;
+        }
       }
 
       await partsQuery.refetch();
@@ -388,6 +444,55 @@ export function PartsBackOffice({
             value={formValues.link}
             onChange={(event) => updateField('link', event.currentTarget.value)}
           />
+
+          {/* Photo de l'objet (CDC V06 : « un objet porte […] des photos »).
+              Elle est déposée par un appel distinct, après l'enregistrement du
+              reste du formulaire. */}
+          <Group align='flex-end' gap='md' wrap='nowrap'>
+            {modalState.part?.image_url && !removeImage && !imageFile && (
+              <Image
+                src={modalState.part.image_url}
+                alt={modalState.part.name}
+                fit='contain'
+                w={96}
+                h={96}
+              />
+            )}
+
+            <FileInput
+              label='Photo'
+              placeholder={
+                modalState.part?.image_url
+                  ? 'Remplacer la photo…'
+                  : 'Choisir une image…'
+              }
+              accept='image/*'
+              clearable
+              value={imageFile}
+              onChange={(file) => {
+                setImageFile(file);
+                setRemoveImage(false);
+              }}
+              description="Déposée après l'enregistrement de l'objet."
+              style={{ flex: 1 }}
+            />
+
+            {modalState.part?.image_url && !imageFile && (
+              <Button
+                variant='outline'
+                color='red'
+                onClick={() => setRemoveImage((current) => !current)}
+              >
+                {removeImage ? 'Annuler le retrait' : 'Retirer la photo'}
+              </Button>
+            )}
+          </Group>
+
+          {removeImage && (
+            <Text size='sm' c='red'>
+              La photo sera retirée à l'enregistrement.
+            </Text>
+          )}
 
           <Group grow>
             <Checkbox
