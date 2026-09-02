@@ -1,4 +1,11 @@
-FROM inventree/inventree:stable
+# Version épinglée, pas `stable`. Le CDC V06 l'exige (« la version InvenTree
+# cible doit être épinglée ; chaque mise à jour d'InvenTree devra être testée
+# contre le plugin »), et le 02/09/2026 a montré pourquoi : la prod avait été
+# construite en 1.5.2 pendant que le poste de dev gardait une couche en 1.3.3.
+# Un plantage du widget Organisation, reproductible en 1.5.2, était donc
+# invisible en local. Monter de version est désormais un geste explicite :
+# changer ce tag, relancer la suite et repasser au navigateur.
+FROM inventree/inventree:1.5.2
 
 # Copy plugin source into the container
 COPY . /home/inventree/plugin/
