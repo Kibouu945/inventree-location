@@ -52,8 +52,17 @@ export async function session({ headless = true, width = 1700, height = 1300 } =
 
   await page.goto(`${BASE}/web`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2500);
-  await page.getByLabel(/username/i).fill(CREDS.user);
-  await page.getByLabel(/password/i).fill(CREDS.pass);
+  // Cibler les champs par `data-path` : depuis InvenTree 1.5, la page de login
+  // ajoute un bouton « Toggle password visibility » que `getByLabel(/password/i)`
+  // attrape aussi, et Playwright échoue en strict mode.
+  await page
+    .locator('input[data-path="username"], input[aria-label="login-username"]')
+    .first()
+    .fill(CREDS.user);
+  await page
+    .locator('input[data-path="password"], input[aria-label="login-password"]')
+    .first()
+    .fill(CREDS.pass);
   await page.getByRole('button', { name: /log ?in|se connecter/i }).click();
   await page.waitForTimeout(5000);
 
