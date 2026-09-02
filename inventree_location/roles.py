@@ -37,6 +37,55 @@ ALL_ROLES: tuple[str, ...] = (
 )
 
 
+#: Rulesets InvenTree ouverts en écriture (ajout + modification) par rôle.
+#:
+#: Les groupes du plugin ne portaient aucun droit InvenTree : les écrans
+#: natifs étaient donc réglés à la main dans l'admin, sans trace dans le code.
+#: Un compte sans droit d'écriture sur un ruleset ne voit même pas le bouton
+#: de création — c'est ce qui empêchait le client d'enregistrer un fournisseur
+#: (`company_company` relève du ruleset `purchase_order`, cf. CDC V06
+#: § « Achat fournisseur » et sa matrice RACI, qui confie les fiches
+#: fournisseurs et les achats à l'acheteur).
+#:
+#: Tout ruleset absent de cette table reste en **lecture seule** : une version
+#: future d'InvenTree qui en ajoute un n'ouvre donc rien par surprise. La
+#: suppression n'est jamais accordée — le back-office désactive (`active`), il
+#: ne supprime pas (SCRUM-111).
+ROLE_WRITE_RULESETS: dict[str, frozenset[str]] = {
+    ADMIN: frozenset({
+        "part_category",
+        "part",
+        "stock_location",
+        "stock",
+        "purchase_order",
+    }),
+    GESTIONNAIRE: frozenset({"part_category", "part", "stock_location", "stock"}),
+    MAGASINIER: frozenset({"part_category", "part", "stock_location", "stock"}),
+    ACHETEUR: frozenset({"purchase_order"}),
+    LIVREUR: frozenset(),
+    SAV: frozenset(),
+    ORGANISATEUR: frozenset(),
+    LECTEUR: frozenset(),
+}
+
+
+def ruleset_permissions(role: str, ruleset: str) -> dict[str, bool]:
+    """Droits attendus pour ce rôle sur ce ruleset InvenTree.
+
+    Les clés correspondent aux champs booléens de `users.models.RuleSet`. Un
+    rôle inconnu est traité comme un lecteur : jamais d'écriture par défaut.
+    """
+
+    writable = ruleset in ROLE_WRITE_RULESETS.get(role, frozenset())
+
+    return {
+        "can_view": True,
+        "can_add": writable,
+        "can_change": writable,
+        "can_delete": False,
+    }
+
+
 def user_roles(user) -> set[str]:
     """Retourne l'ensemble des rôles plugin de l'utilisateur."""
 
