@@ -46,6 +46,7 @@ export default defineConfig({
         "./src/Settings.tsx",
         "./src/Catalog.tsx",
         "./src/Reservations.tsx",
+        "./src/Calendar.tsx",
         "./src/Ramassages.tsx",
         "./src/BackOfficeUsers.tsx",
         "./src/BackOfficeParts.tsx",

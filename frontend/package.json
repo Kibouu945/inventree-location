@@ -11,6 +11,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@fullcalendar/core": "6.1.21",
+    "@fullcalendar/daygrid": "6.1.21",
+    "@fullcalendar/react": "6.1.19",
     "@inventreedb/ui": "latest",
     "@mantine/core": "^8.3.18",
     "@mantine/dates": "^8.3.18",

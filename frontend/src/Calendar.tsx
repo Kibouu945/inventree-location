@@ -1,0 +1,18 @@
+// Point d'entrée du calendrier des réservations (DIS-01), rendu comme
+// dashboard item.
+import {
+  checkPluginVersion,
+  type InvenTreePluginContext
+} from '@inventreedb/ui';
+
+import { ReservationCalendar } from './reservation/ReservationCalendar';
+
+/**
+ * Fonction appelée par InvenTree pour rendre l'écran calendrier.
+ */
+export function renderInvenTreeLocationCalendar(
+  context: InvenTreePluginContext
+) {
+  checkPluginVersion(context);
+  return <ReservationCalendar context={context} />;
+}

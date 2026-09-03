@@ -17,9 +17,11 @@ import {
   Title
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
-import { useQuery } from '@tanstack/react-query';
+import { notifications } from '@mantine/notifications';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
+import { hasAnyRole, LIVREUR } from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
 import { DeliveryCalendar } from './DeliveryCalendar';
 import { DeliveryMap } from './DeliveryMap';
@@ -32,6 +34,7 @@ import {
   parseDeliveryFilters,
   serializeDeliveryFilters
 } from './deliveryParams';
+import { DeliveryStatusForm } from './DeliveryStatusForm';
 import type { Delivery } from './types';
 
 const DELIVERIES_URL = '/plugin/inventree-location/deliveries/';
@@ -58,6 +61,12 @@ interface LieuOption {
   nom: string;
 }
 
+function apiErrorDetail(error: unknown): string {
+  const data = (error as { response?: { data?: { detail?: string } } })
+    ?.response?.data;
+  return data?.detail ?? 'Action impossible.';
+}
+
 const ownsDeliveryKey = ownsKeys(DELIVERY_URL_KEYS);
 
 function syncUrl(filters: DeliveryFiltersState) {
@@ -82,6 +91,10 @@ export function DeliveriesList({
 }) {
   const [filters, setFilters] = useState<DeliveryFiltersState>(initialFilters);
   const [noteDelivery, setNoteDelivery] = useState<Delivery | null>(null);
+  const [statusDelivery, setStatusDelivery] = useState<Delivery | null>(null);
+
+  const isLivreur = hasAnyRole(context, [LIVREUR]);
+  const currentUserId = context.user?.userId?.();
 
   useEffect(() => {
     syncUrl(filters);
@@ -99,6 +112,64 @@ export function DeliveriesList({
           paramsSerializer: { indexes: null }
         });
         return response.data as Delivery[];
+      },
+      // Le pool commun (US-18) change sous l'action d'autres livreurs : sans
+      // ça, une livraison relâchée par un livreur reste invisible pour les
+      // autres tant qu'ils ne rechargent pas la page à la main.
+      refetchInterval: 15000,
+      refetchOnWindowFocus: true
+    },
+    context.queryClient
+  );
+
+  const acceptMutation = useMutation(
+    {
+      mutationFn: async (deliveryId: number) => {
+        const response = await context.api.post(
+          `${DELIVERIES_URL}${deliveryId}/accepter/`
+        );
+        return response.data;
+      },
+      onSuccess: () => {
+        context.queryClient.invalidateQueries({ queryKey: ['deliveries'] });
+        notifications.show({
+          title: 'Livraison acceptée',
+          message: 'Cette livraison vous est désormais assignée.',
+          color: 'green'
+        });
+      },
+      onError: (error: unknown) => {
+        // Course perdue (livraison prise entre-temps) : la vue est stale,
+        // on la resynchronise plutôt que de laisser le bouton « Accepter »
+        // réapparaître comme si de rien n'était.
+        context.queryClient.invalidateQueries({ queryKey: ['deliveries'] });
+        notifications.show({
+          title: 'Action impossible',
+          message: apiErrorDetail(error),
+          color: 'red'
+        });
+      }
+    },
+    context.queryClient
+  );
+
+  const releaseMutation = useMutation(
+    {
+      mutationFn: async (deliveryId: number) => {
+        const response = await context.api.delete(
+          `${DELIVERIES_URL}${deliveryId}/accepter/`
+        );
+        return response.data;
+      },
+      onSuccess: () => {
+        context.queryClient.invalidateQueries({ queryKey: ['deliveries'] });
+      },
+      onError: (error: unknown) => {
+        notifications.show({
+          title: 'Action impossible',
+          message: apiErrorDetail(error),
+          color: 'red'
+        });
       }
     },
     context.queryClient
@@ -238,38 +309,97 @@ export function DeliveriesList({
               <Table.Th>Organisateur</Table.Th>
               <Table.Th>Quantité totale</Table.Th>
               <Table.Th>Statut</Table.Th>
+              <Table.Th>Assignation</Table.Th>
               <Table.Th />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {rows.map((delivery) => (
-              <Table.Tr key={delivery.id}>
-                <Table.Td>{delivery.numero}</Table.Td>
-                <Table.Td>
-                  {delivery.date_retrait_prevue
-                    ? new Date(delivery.date_retrait_prevue).toLocaleString()
-                    : '—'}
-                </Table.Td>
-                <Table.Td>{delivery.prestation_nom || '—'}</Table.Td>
-                <Table.Td>{delivery.lieu_detail?.nom ?? '—'}</Table.Td>
-                <Table.Td>{delivery.organisateur_nom || '—'}</Table.Td>
-                <Table.Td>{delivery.quantite_totale}</Table.Td>
-                <Table.Td>
-                  <Badge color={STATUT_COLORS[delivery.statut] ?? 'gray'}>
-                    {delivery.statut}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>
-                  <Button
-                    size='xs'
-                    variant='light'
-                    onClick={() => setNoteDelivery(delivery)}
-                  >
-                    Détails / Imprimer
-                  </Button>
-                </Table.Td>
-              </Table.Tr>
-            ))}
+            {rows.map((delivery) => {
+              const isMine = delivery.livreur_assigne === currentUserId;
+
+              return (
+                <Table.Tr key={delivery.id}>
+                  <Table.Td>{delivery.numero}</Table.Td>
+                  <Table.Td>
+                    {delivery.date_retrait_prevue
+                      ? new Date(delivery.date_retrait_prevue).toLocaleString()
+                      : '—'}
+                  </Table.Td>
+                  <Table.Td>{delivery.prestation_nom || '—'}</Table.Td>
+                  <Table.Td>{delivery.lieu_detail?.nom ?? '—'}</Table.Td>
+                  <Table.Td>{delivery.organisateur_nom || '—'}</Table.Td>
+                  <Table.Td>{delivery.quantite_totale}</Table.Td>
+                  <Table.Td>
+                    <Badge color={STATUT_COLORS[delivery.statut] ?? 'gray'}>
+                      {delivery.statut}
+                    </Badge>
+                  </Table.Td>
+                  <Table.Td>
+                    {delivery.livreur_assigne == null ? (
+                      <Text size='sm' c='dimmed'>
+                        Non assignée
+                      </Text>
+                    ) : (
+                      <Stack gap={2}>
+                        <Text size='sm'>
+                          {isMine ? 'Moi' : delivery.livreur_assigne_nom}
+                        </Text>
+                        <Text size='xs' c='dimmed'>
+                          {delivery.etat_livraison_display}
+                        </Text>
+                      </Stack>
+                    )}
+                  </Table.Td>
+                  <Table.Td>
+                    <Group gap='xs' wrap='nowrap'>
+                      {isLivreur && delivery.livreur_assigne == null && (
+                        <Button
+                          size='xs'
+                          loading={
+                            acceptMutation.isPending &&
+                            acceptMutation.variables === delivery.id
+                          }
+                          onClick={() => acceptMutation.mutate(delivery.id)}
+                        >
+                          Accepter
+                        </Button>
+                      )}
+                      {isMine && delivery.etat_livraison === 'assignee' && (
+                        <Button
+                          size='xs'
+                          variant='default'
+                          loading={
+                            releaseMutation.isPending &&
+                            releaseMutation.variables === delivery.id
+                          }
+                          onClick={() => releaseMutation.mutate(delivery.id)}
+                        >
+                          Relâcher
+                        </Button>
+                      )}
+                      {isMine &&
+                        (delivery.etat_livraison === 'assignee' ||
+                          delivery.etat_livraison === 'en_cours') && (
+                          <Button
+                            size='xs'
+                            variant='light'
+                            onClick={() => setStatusDelivery(delivery)}
+                          >
+                            Changer l'état
+                          </Button>
+                        )}
+                      <Button
+                        size='xs'
+                        variant='light'
+                        onClick={() => setNoteDelivery(delivery)}
+                      >
+                        Détails / Imprimer
+                      </Button>
+                    </Group>
+                  </Table.Td>
+                </Table.Tr>
+              );
+            })}
           </Table.Tbody>
         </Table>
       )}
@@ -277,6 +407,11 @@ export function DeliveriesList({
       <DeliveryNote
         delivery={noteDelivery}
         onClose={() => setNoteDelivery(null)}
+      />
+      <DeliveryStatusForm
+        context={context}
+        delivery={statusDelivery}
+        onClose={() => setStatusDelivery(null)}
       />
     </Stack>
   );

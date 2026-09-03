@@ -32,6 +32,7 @@ import {
 } from './formLogic';
 import { LieuMapLinks } from './LieuMapLinks';
 import { PartPicker } from './PartPicker';
+import { PrestationCreateModal } from './PrestationCreateModal';
 import type {
   Page,
   Prestation,
@@ -150,6 +151,7 @@ export function ReservationForm({
   const [userSearch, setUserSearch] = useState('');
   const [debouncedUserSearch] = useDebouncedValue(userSearch, 300);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [prestationModalOpen, setPrestationModalOpen] = useState(false);
 
   const existingQuery = useQuery<Reservation>(
     {
@@ -305,6 +307,17 @@ export function ReservationForm({
     context.queryClient
   );
 
+  function handlePrestationCreated(prestation: Prestation) {
+    // Évite un aller-retour réseau : le détail vient d'être renvoyé par la
+    // création, donc l'encart lieu / tooltip dates s'affiche immédiatement.
+    context.queryClient.setQueryData(
+      ['reservation-prestation', prestation.id],
+      prestation
+    );
+    form.setFieldValue('prestation', prestation.id);
+    setPrestationModalOpen(false);
+  }
+
   function submit(statut: ReservationStatut) {
     const clientErrors = validateReservationValues(
       form.values,
@@ -381,59 +394,81 @@ export function ReservationForm({
       )}
 
       {/* Tooltip sur l'icône, pas sur le Select (le wrapper casse le dropdown). */}
-      <Select
-        label={
-          <Group gap={6} component='span' align='center'>
-            <span>Événement / Prestation</span>
-            {selectedPrestation && (
-              <Tooltip
-                multiline
-                w={280}
-                openDelay={100}
-                closeDelay={2000}
-                events={{ hover: true, focus: true, touch: true }}
-                label={
-                  <Stack gap={2}>
-                    <Text size='sm' fw={600}>
-                      {selectedPrestation.nom} —{' '}
-                      {selectedPrestation.manifestation_nom}
-                    </Text>
-                    <Text size='xs'>
-                      Du{' '}
-                      {new Date(selectedPrestation.date_debut).toLocaleString()}{' '}
-                      au{' '}
-                      {new Date(selectedPrestation.date_fin).toLocaleString()}
-                    </Text>
-                    <Text size='xs'>
-                      Lieu : {selectedPrestation.lieu_detail?.nom ?? 'aucun'}
-                    </Text>
-                    <Text size='xs' c='yellow'>
-                      La réservation doit couvrir ces dates.
-                    </Text>
-                  </Stack>
-                }
-              >
-                <Text component='span' c='blue' style={{ cursor: 'help' }}>
-                  ⓘ dates
-                </Text>
-              </Tooltip>
-            )}
-          </Group>
-        }
-        placeholder='Rechercher une prestation…'
-        data={prestationOptions}
-        searchable
-        searchValue={prestationSearch}
-        onSearchChange={setPrestationSearch}
-        value={
-          form.values.prestation != null ? String(form.values.prestation) : null
-        }
-        onChange={(value) =>
-          form.setFieldValue('prestation', value ? Number(value) : null)
-        }
-        error={form.errors.prestation}
-        disabled={effectiveReadOnly}
-        required
+      <Group align='flex-end' gap='sm'>
+        <Select
+          style={{ flex: 1 }}
+          label={
+            <Group gap={6} component='span' align='center'>
+              <span>Événement / Prestation</span>
+              {selectedPrestation && (
+                <Tooltip
+                  multiline
+                  w={280}
+                  openDelay={100}
+                  closeDelay={2000}
+                  events={{ hover: true, focus: true, touch: true }}
+                  label={
+                    <Stack gap={2}>
+                      <Text size='sm' fw={600}>
+                        {selectedPrestation.nom} —{' '}
+                        {selectedPrestation.manifestation_nom}
+                      </Text>
+                      <Text size='xs'>
+                        Du{' '}
+                        {new Date(
+                          selectedPrestation.date_debut
+                        ).toLocaleString()}{' '}
+                        au{' '}
+                        {new Date(
+                          selectedPrestation.date_fin
+                        ).toLocaleString()}
+                      </Text>
+                      <Text size='xs'>
+                        Lieu : {selectedPrestation.lieu_detail?.nom ?? 'aucun'}
+                      </Text>
+                      <Text size='xs' c='yellow'>
+                        La réservation doit couvrir ces dates.
+                      </Text>
+                    </Stack>
+                  }
+                >
+                  <Text component='span' c='blue' style={{ cursor: 'help' }}>
+                    ⓘ dates
+                  </Text>
+                </Tooltip>
+              )}
+            </Group>
+          }
+          placeholder='Rechercher une prestation…'
+          data={prestationOptions}
+          searchable
+          searchValue={prestationSearch}
+          onSearchChange={setPrestationSearch}
+          value={
+            form.values.prestation != null
+              ? String(form.values.prestation)
+              : null
+          }
+          onChange={(value) =>
+            form.setFieldValue('prestation', value ? Number(value) : null)
+          }
+          error={form.errors.prestation}
+          disabled={effectiveReadOnly}
+          required
+        />
+        {!effectiveReadOnly && (
+          <Button variant='light' onClick={() => setPrestationModalOpen(true)}>
+            Nouvelle prestation
+          </Button>
+        )}
+      </Group>
+
+      <PrestationCreateModal
+        context={context}
+        opened={prestationModalOpen}
+        manifestationId={selectedPrestation?.manifestation ?? null}
+        onClose={() => setPrestationModalOpen(false)}
+        onCreated={handlePrestationCreated}
       />
 
       {selectedPrestation && (

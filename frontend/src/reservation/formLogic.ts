@@ -14,6 +14,14 @@ import type {
   ReservationStatut
 } from './types';
 
+/** Formate une date en « JJ/MM », en UTC pour rester stable quel que soit le
+ * fuseau d'exécution (tests compris). */
+function formatDayMonth(date: Date): string {
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  return `${day}/${month}`;
+}
+
 export function emptyReservationValues(): ReservationFormValues {
   return {
     prestation: null,
@@ -77,14 +85,20 @@ export function validateReservationValues(
     } else if (prestation) {
       const debut = new Date(prestation.date_debut);
       const fin = new Date(prestation.date_fin);
+      const couvreDebut = retrait <= debut;
+      const couvreFin = retour >= fin;
 
-      if (retrait > debut) {
-        errors.date_retrait_prevue =
-          'La période doit couvrir au moins les dates de la prestation.';
-      }
-      if (retour < fin) {
-        errors.date_retour_prevue =
-          'La période doit couvrir au moins les dates de la prestation.';
+      if (!couvreDebut || !couvreFin) {
+        const message =
+          'La période de réservation doit couvrir les dates du ' +
+          `${formatDayMonth(debut)} au ${formatDayMonth(fin)}.`;
+
+        if (!couvreDebut) {
+          errors.date_retrait_prevue = message;
+        }
+        if (!couvreFin) {
+          errors.date_retour_prevue = message;
+        }
       }
     }
   }

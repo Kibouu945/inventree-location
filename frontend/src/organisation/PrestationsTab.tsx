@@ -425,9 +425,10 @@ export function PrestationsTab({
             label='Nom'
             required
             value={state.nom}
-            onChange={(event) =>
-              setState((s) => ({ ...s, nom: event.currentTarget.value }))
-            }
+            onChange={(event) => {
+              const nom = event.currentTarget.value;
+              setState((s) => ({ ...s, nom }));
+            }}
           />
           <Group grow>
             <Select
@@ -478,12 +479,10 @@ export function PrestationsTab({
             autosize
             minRows={2}
             value={state.description}
-            onChange={(event) =>
-              setState((s) => ({
-                ...s,
-                description: event.currentTarget.value
-              }))
-            }
+            onChange={(event) => {
+              const description = event.currentTarget.value;
+              setState((s) => ({ ...s, description }));
+            }}
           />
 
           <Title order={6}>Articles (RES-09)</Title>
