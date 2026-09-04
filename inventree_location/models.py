@@ -48,6 +48,22 @@ class StatutReservation(models.TextChoices):
     CLOTUREE = "cloturee", _("Clôturée")
 
 
+class EtatLivraison(models.TextChoices):
+    """Avancement d'une livraison prise en charge par un livreur (US-18/US-19).
+
+    Orthogonal au statut de la réservation : une réservation validée reste
+    « à livrer » tant que personne ne l'a prise, et la chaîne complète est
+    assignée → en cours → livrée (ou problème signalé). La valeur vide, qui
+    n'est pas un choix, dit « personne ne s'en occupe » : c'est l'état du pool
+    commun où tout livreur peut se servir.
+    """
+
+    ASSIGNEE = "assignee", _("Assignée")
+    EN_COURS = "en_cours", _("En cours de livraison")
+    LIVREE = "livree", _("Livrée")
+    PROBLEME = "probleme", _("Problème signalé")
+
+
 class TypeSavTicket(models.TextChoices):
     REPARATION = "reparation", _("Réparation")
     DESTRUCTION = "destruction", _("Destruction")
@@ -487,6 +503,27 @@ class Reservation(TimestampedModel):
         verbose_name=_("statut"),
     )
     forced = models.BooleanField(default=False, verbose_name=_("forcée"))
+    # US-18 : les livraisons validées forment un pool commun ; le premier
+    # livreur qui accepte se l'attribue, et peut la relâcher tant qu'il ne l'a
+    # pas commencée.
+    livreur_assigne = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="livraisons_assignees",
+        verbose_name=_("livreur assigné"),
+    )
+    date_assignation = models.DateTimeField(
+        null=True, blank=True, verbose_name=_("date d'assignation")
+    )
+    etat_livraison = models.CharField(
+        max_length=20,
+        choices=EtatLivraison.choices,
+        blank=True,
+        default="",
+        verbose_name=_("état de la livraison"),
+    )
     date_demande = models.DateTimeField(
         default=timezone.now, verbose_name=_("date de demande")
     )
@@ -710,6 +747,75 @@ class ReservationStatusLog(TimestampedModel):
     def __str__(self):
         return (
             f"Réservation #{self.reservation_id}: {self.from_status} → {self.to_status}"
+        )
+
+
+class LivraisonStatusLog(TimestampedModel):
+    """Journal des changements d'état d'une livraison (US-19).
+
+    Distinct de `ReservationStatusLog`, qui suit le statut métier de la
+    réservation : ici on trace le terrain — qui a pris la livraison, quand elle
+    est partie, et la photo du problème éventuel.
+    """
+
+    reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.CASCADE,
+        related_name="livraison_status_logs",
+        verbose_name=_("réservation"),
+    )
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="livraison_status_changes",
+        verbose_name=_("modifié par"),
+    )
+    # Les deux bornes acceptent la chaîne vide : elle dit « pas d'assignation »,
+    # au départ comme après un relâchement.
+    from_etat = models.CharField(
+        max_length=20,
+        choices=EtatLivraison.choices,
+        blank=True,
+        default="",
+        verbose_name=_("ancien état"),
+    )
+    to_etat = models.CharField(
+        max_length=20,
+        choices=EtatLivraison.choices,
+        blank=True,
+        default="",
+        verbose_name=_("nouvel état"),
+    )
+    commentaire = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("commentaire"),
+    )
+    photo = models.ImageField(
+        upload_to="inventree_location/livraisons/%Y/%m/",
+        null=True,
+        blank=True,
+        verbose_name=_("photo"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-created_at"]
+        verbose_name = _("log d'état de livraison")
+        verbose_name_plural = _("logs d'état de livraison")
+        indexes = [
+            models.Index(
+                fields=["reservation", "created_at"],
+                name="livraison_status_log_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Livraison #{self.reservation_id}: "
+            f"{self.from_etat or '—'} → {self.to_etat or '—'}"
         )
 
 

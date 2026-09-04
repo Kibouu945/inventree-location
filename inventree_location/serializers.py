@@ -19,8 +19,10 @@ from .conflicts import (
     register_stock_conflict_history,
 )
 from .models import (
+    EtatLivraison,
     Groupe,
     LignePrestation,
+    LivraisonStatusLog,
     LigneReservation,
     Lieu,
     Manifestation,
@@ -1089,6 +1091,42 @@ class DeliveryLigneSerializer(serializers.ModelSerializer):
         return bool(rentable and rentable.is_virtual)
 
 
+class LivraisonStatusLogSerializer(serializers.ModelSerializer):
+    """Une ligne du journal d'état d'une livraison (US-19)."""
+
+    to_etat_display = serializers.SerializerMethodField()
+    changed_by_nom = serializers.SerializerMethodField()
+
+    class Meta:
+        """Configuration du serializer de journal de livraison."""
+
+        model = LivraisonStatusLog
+        fields = [
+            "id",
+            "from_etat",
+            "to_etat",
+            "to_etat_display",
+            "changed_by_nom",
+            "commentaire",
+            "photo",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_to_etat_display(self, obj):
+        """Libellé lisible du nouvel état ; vide = remise dans le pool."""
+
+        if not obj.to_etat:
+            return "Non assignée"
+
+        return EtatLivraison(obj.to_etat).label
+
+    def get_changed_by_nom(self, obj):
+        """Nom lisible de l'auteur du changement."""
+
+        return _user_label(obj.changed_by)
+
+
 class DeliverySerializer(serializers.ModelSerializer):
     """Vue « tournée livreur » d'une réservation validée (US livreur).
 
@@ -1106,6 +1144,9 @@ class DeliverySerializer(serializers.ModelSerializer):
     organisateur_telephone = serializers.SerializerMethodField()
     lignes = DeliveryLigneSerializer(many=True, read_only=True)
     quantite_totale = serializers.SerializerMethodField()
+    livreur_assigne_nom = serializers.SerializerMethodField()
+    etat_livraison_display = serializers.SerializerMethodField()
+    livraison_status_logs = LivraisonStatusLogSerializer(many=True, read_only=True)
 
     class Meta:
         """Configuration du serializer Delivery."""
@@ -1125,6 +1166,12 @@ class DeliverySerializer(serializers.ModelSerializer):
             "commentaire",
             "lignes",
             "quantite_totale",
+            "livreur_assigne",
+            "livreur_assigne_nom",
+            "date_assignation",
+            "etat_livraison",
+            "etat_livraison_display",
+            "livraison_status_logs",
         ]
         read_only_fields = fields
 
@@ -1132,6 +1179,19 @@ class DeliverySerializer(serializers.ModelSerializer):
         """Nom lisible du demandeur (gérant interne)."""
 
         return _user_label(obj.demandeur)
+
+    def get_livreur_assigne_nom(self, obj):
+        """Nom lisible du livreur qui a pris la livraison, vide sinon."""
+
+        return _user_label(obj.livreur_assigne) if obj.livreur_assigne_id else ""
+
+    def get_etat_livraison_display(self, obj):
+        """Libellé de l'état ; vide tant que personne n'a pris la livraison."""
+
+        if not obj.etat_livraison:
+            return ""
+
+        return EtatLivraison(obj.etat_livraison).label
 
     def get_organisateur_nom(self, obj):
         """Nom lisible de l'organisateur de la manifestation."""

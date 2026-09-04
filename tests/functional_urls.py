@@ -13,6 +13,9 @@ from django.urls import include, path
 
 from inventree_location.views import (
     CatalogPartListView,
+    DeliveryAccepterView,
+    DeliveryEtatView,
+    DeliveryListView,
     ExampleView,
     GeocodeAddressView,
     LieuDetailView,
@@ -20,6 +23,7 @@ from inventree_location.views import (
     RentableFlagBulkUpdateView,
     RentablePartDetailView,
     ReservationDetailView,
+    ReservationCalendarView,
     ReservationListCreateView,
 )
 
@@ -48,6 +52,22 @@ plugin_patterns = [
         "reservations/<int:pk>/",
         ReservationDetailView.as_view(),
         name="reservation-detail",
+    ),
+    path(
+        "reservations/calendar/",
+        ReservationCalendarView.as_view(),
+        name="reservation-calendar",
+    ),
+    path("deliveries/", DeliveryListView.as_view(), name="delivery-list"),
+    path(
+        "deliveries/<int:pk>/accepter/",
+        DeliveryAccepterView.as_view(),
+        name="delivery-accepter",
+    ),
+    path(
+        "deliveries/<int:pk>/etat/",
+        DeliveryEtatView.as_view(),
+        name="delivery-etat",
     ),
 ]
 

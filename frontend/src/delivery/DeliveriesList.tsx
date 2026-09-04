@@ -454,18 +454,23 @@ export function DeliveriesList({
                   </Table.Td>
                   <Table.Td>
                     <Group gap='xs' wrap='nowrap'>
-                      {isLivreur && delivery.livreur_assigne == null && (
-                        <Button
-                          size='xs'
-                          loading={
-                            acceptMutation.isPending &&
-                            acceptMutation.variables === delivery.id
-                          }
-                          onClick={() => acceptMutation.mutate(delivery.id)}
-                        >
-                          Accepter
-                        </Button>
-                      )}
+                      {/* Une réservation déjà livrée n'a plus rien à prendre
+                          en charge : sans ce garde, le bouton s'affichait et
+                          le serveur répondait 409. */}
+                      {isLivreur &&
+                        delivery.statut === 'validee' &&
+                        delivery.livreur_assigne == null && (
+                          <Button
+                            size='xs'
+                            loading={
+                              acceptMutation.isPending &&
+                              acceptMutation.variables === delivery.id
+                            }
+                            onClick={() => acceptMutation.mutate(delivery.id)}
+                          >
+                            Accepter
+                          </Button>
+                        )}
                       {isMine && delivery.etat_livraison === 'assignee' && (
                         <Button
                           size='xs'

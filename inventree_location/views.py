@@ -17,6 +17,7 @@ from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import LimitOffsetPagination, PageNumberPagination
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -44,9 +45,17 @@ from .models import (
     ReturnIncidentType,
     StatutReservation,
 )
+from .calendrier import evenements_calendrier
+from .livraison import (
+    LivraisonRefusee,
+    accepter_livraison,
+    changer_etat_livraison,
+    relacher_livraison,
+)
 from .ramassage import lignes_a_ramasser
 from .permissions import (
     CatalogPermission,
+    DeliveryAssignationPermission,
     DeliveryPermission,
     LieuPermission,
     ManifestationPermission,
@@ -332,6 +341,33 @@ class ReservationListCreateView(generics.ListCreateAPIView):
         return queryset
 
 
+class ReservationCalendarView(APIView):
+    """Évènements du calendrier mensuel des réservations (DIS-01).
+
+    Paramètres `from` / `to` : la fenêtre affichée, envoyée par FullCalendar à
+    chaque changement de mois. Bornes comparées au jour entier, comme les
+    listes filtrables (cf. `_borne_journee`).
+    """
+
+    permission_classes = [ReservationPermission]
+
+    def get(self, request, *args, **kwargs):
+        """Retourne les réservations de la fenêtre, au format FullCalendar."""
+
+        depuis = request.query_params.get("from")
+        jusqua = request.query_params.get("to")
+
+        # Une réservation est affichée dès qu'elle chevauche la fenêtre : celle
+        # qui a commencé le mois dernier et court toujours doit rester visible.
+        debut = _borne_journee("fin_calendrier", depuis, "gte") if depuis else None
+        fin = _borne_journee("debut_calendrier", jusqua, "lte") if jusqua else None
+
+        return Response(
+            evenements_calendrier(request.user, debut=debut, fin=fin),
+            status=status.HTTP_200_OK,
+        )
+
+
 class DeliveryMarquerLivreeView(APIView):
     """Marque une réservation livrée depuis la tournée du livreur.
 
@@ -378,6 +414,76 @@ class DeliveryMarquerLivreeView(APIView):
         )
 
 
+def _refus_livraison(refus):
+    """Traduit un refus métier de livraison en réponse HTTP."""
+
+    return Response({"detail": refus.detail}, status=refus.status_code)
+
+
+class DeliveryAccepterView(APIView):
+    """Pool commun des livraisons (US-18) : prendre en charge, ou relâcher.
+
+    `POST` s'attribue une livraison libre, `DELETE` la remet à disposition.
+    Deux verbes sur la même URL plutôt que deux endpoints : c'est la même
+    ressource — l'assignation de cette livraison — qu'on crée puis qu'on
+    supprime.
+    """
+
+    permission_classes = [DeliveryAssignationPermission]
+    serializer_class = DeliverySerializer
+
+    def post(self, request, pk, *args, **kwargs):
+        """S'attribue la livraison si elle est encore libre."""
+
+        try:
+            reservation = accepter_livraison(pk, request.user)
+        except LivraisonRefusee as refus:
+            return _refus_livraison(refus)
+
+        return Response(DeliverySerializer(reservation).data, status=status.HTTP_200_OK)
+
+    def delete(self, request, pk, *args, **kwargs):
+        """Remet la livraison dans le pool commun."""
+
+        try:
+            reservation = relacher_livraison(pk, request.user)
+        except LivraisonRefusee as refus:
+            return _refus_livraison(refus)
+
+        return Response(DeliverySerializer(reservation).data, status=status.HTTP_200_OK)
+
+
+class DeliveryEtatView(APIView):
+    """Progression d'une livraison assignée (US-19) : en route, livrée, problème.
+
+    Accepte du multipart : le livreur peut joindre une photo au constat, et
+    l'écran envoie donc un `FormData` plutôt que du JSON.
+    """
+
+    permission_classes = [DeliveryAssignationPermission]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    serializer_class = DeliverySerializer
+
+    def patch(self, request, pk, *args, **kwargs):
+        """Applique le changement d'état demandé."""
+
+        etat = str(request.data.get("etat") or "").strip()
+        commentaire = str(request.data.get("commentaire") or "")
+
+        try:
+            reservation = changer_etat_livraison(
+                pk,
+                etat,
+                request.user,
+                commentaire=commentaire,
+                photo=request.FILES.get("photo"),
+            )
+        except LivraisonRefusee as refus:
+            return _refus_livraison(refus)
+
+        return Response(DeliverySerializer(reservation).data, status=status.HTTP_200_OK)
+
+
 class DeliveryListView(generics.ListAPIView):
     """Tournée livreur : réservations à livrer / livrées, enrichies (US livreur).
 
@@ -407,8 +513,12 @@ class DeliveryListView(generics.ListAPIView):
                 "prestation__lieu",
                 "prestation__manifestation",
                 "prestation__manifestation__organisateur",
+                "livreur_assigne",
             )
-            .prefetch_related("lignes__part__rentable_info")
+            .prefetch_related(
+                "lignes__part__rentable_info",
+                "livraison_status_logs__changed_by",
+            )
             .all()
             .order_by("date_retrait_prevue")
         )

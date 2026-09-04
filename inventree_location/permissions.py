@@ -90,6 +90,18 @@ class MarquerLivreePermission(RoleBasedPermission):
     write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.LIVREUR)
 
 
+class DeliveryAssignationPermission(RoleBasedPermission):
+    """Prendre, relâcher et faire avancer une livraison : le livreur, plus
+    l'encadrement qui doit pouvoir dépanner une tournée en cours.
+
+    Même périmètre que `MarquerLivreePermission`, dont elle reste distincte :
+    marquer livré est une transition de statut métier, s'attribuer une livraison
+    n'en est pas une.
+    """
+
+    write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.LIVREUR)
+
+
 class ReturnCheckinPermission(RoleBasedPermission):
     """Check-in retour ligne par ligne (OK / manquant / cassé) : rôle magasinier."""
 
