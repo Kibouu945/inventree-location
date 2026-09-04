@@ -21,10 +21,10 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
+import type { Page, Ramassage } from '../ramassage/types';
 import { canMarquerLivree } from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
 import { DeliveryCalendar } from './DeliveryCalendar';
-import { DeliveryMap } from './DeliveryMap';
 import { DeliveryNote } from './DeliveryNote';
 import {
   buildDeliveryQuery,
@@ -34,10 +34,15 @@ import {
   parseDeliveryFilters,
   serializeDeliveryFilters
 } from './deliveryParams';
+import { TourneeView } from './TourneeView';
 import type { Delivery } from './types';
 
 const DELIVERIES_URL = '/plugin/inventree-location/deliveries/';
 const LIEUX_URL = '/plugin/inventree-location/lieux/';
+const RAMASSAGES_URL = '/plugin/inventree-location/ramassages/';
+
+/** Plafond de `LieuPagination` côté serveur : au-delà, on le signale. */
+const MAX_RAMASSAGES_TOURNEE = 100;
 
 const STATUT_COLORS: Record<string, string> = {
   validee: 'green',
@@ -52,7 +57,7 @@ const STATUT_OPTIONS = [
 const VIEW_OPTIONS = [
   { value: 'liste', label: 'Liste' },
   { value: 'calendrier', label: 'Calendrier' },
-  { value: 'carte', label: 'Carte' }
+  { value: 'carte', label: 'Tournée' }
 ];
 
 interface LieuOption {
@@ -121,6 +126,10 @@ export function DeliveriesList({
         context.queryClient.invalidateQueries({ queryKey: ['deliveries'] });
         context.queryClient.invalidateQueries({ queryKey: ['reservations'] });
         context.queryClient.invalidateQueries({ queryKey: ['ramassages'] });
+        // Une réservation livrée devient un ramassage à venir.
+        context.queryClient.invalidateQueries({
+          queryKey: ['tournee-ramassages']
+        });
         notifications.show({
           title: 'Livrée',
           message: 'Réservation marquée livrée.',
@@ -152,6 +161,45 @@ export function DeliveriesList({
     },
     context.queryClient
   );
+
+  // La tournée mélange dépose et reprise : les ramassages ne sont chargés que
+  // pour cette vue, et l'API les filtre par nom de lieu là où les livraisons
+  // le font par id — on retombe donc sur un filtrage client par id.
+  const ramassagesQuery = useQuery<Page<Ramassage>>(
+    {
+      queryKey: ['tournee-ramassages', params.date_from, params.date_to],
+      enabled: filters.viewMode === 'carte',
+      queryFn: async () => {
+        const response = await context.api.get(RAMASSAGES_URL, {
+          params: {
+            page_size: MAX_RAMASSAGES_TOURNEE,
+            ...(params.date_from ? { date_from: params.date_from } : {}),
+            ...(params.date_to ? { date_to: params.date_to } : {})
+          }
+        });
+        return response.data as Page<Ramassage>;
+      }
+    },
+    context.queryClient
+  );
+
+  const ramassages = useMemo(() => {
+    const resultats = ramassagesQuery.data?.results ?? [];
+
+    if (filters.lieux.length === 0) {
+      return resultats;
+    }
+
+    const retenus = new Set(filters.lieux);
+
+    return resultats.filter(
+      (ramassage) => ramassage.lieu && retenus.has(ramassage.lieu.id)
+    );
+  }, [ramassagesQuery.data, filters.lieux]);
+
+  const ramassagesTronques =
+    (ramassagesQuery.data?.count ?? 0) >
+    (ramassagesQuery.data?.results.length ?? 0);
 
   const lieuOptions = useMemo(() => {
     const payload = lieuxQuery.data;
@@ -252,6 +300,30 @@ export function DeliveriesList({
         <Group justify='center' p='xl'>
           <Loader />
         </Group>
+      ) : filters.viewMode === 'carte' ? (
+        <Stack gap='sm'>
+          {ramassagesQuery.isError && (
+            <Alert color='yellow' variant='light'>
+              Les ramassages n'ont pas pu être chargés : la tournée ne montre
+              que les livraisons.
+            </Alert>
+          )}
+
+          {ramassagesTronques && (
+            <Alert color='yellow' variant='light'>
+              Plus de {MAX_RAMASSAGES_TOURNEE} ramassages sur cette période :
+              seuls les {MAX_RAMASSAGES_TOURNEE} premiers sont dans la tournée.
+              Resserrez la période.
+            </Alert>
+          )}
+
+          <TourneeView
+            deliveries={rows}
+            ramassages={ramassages}
+            ordre={filters.ordre}
+            onOrdreChange={(ordre) => updateFilters({ ordre })}
+          />
+        </Stack>
       ) : rows.length === 0 ? (
         <Text c='dimmed'>Aucune livraison sur cette période.</Text>
       ) : filters.viewMode === 'calendrier' ? (
@@ -259,8 +331,6 @@ export function DeliveriesList({
           deliveries={rows}
           onSelectDay={(day) => updateFilters({ dateRange: [day, day] })}
         />
-      ) : filters.viewMode === 'carte' ? (
-        <DeliveryMap deliveries={rows} />
       ) : (
         <Table striped highlightOnHover>
           <Table.Thead>

@@ -5,13 +5,22 @@ export interface DeliveryFiltersState {
   statuts: string[];
   lieux: number[];
   viewMode: DeliveryViewMode;
+  /**
+   * Ordre de passage de la tournée (LIV-04), clés `l<id>` / `r<id>`.
+   *
+   * Vide = ordre chronologique. Il vit dans l'URL comme les filtres : la
+   * tournée survit au rechargement et se partage par simple lien, sans table
+   * d'ordre côté serveur.
+   */
+  ordre: string[];
 }
 
 export const DEFAULT_DELIVERY_FILTERS: DeliveryFiltersState = {
   dateRange: [null, null],
   statuts: [],
   lieux: [],
-  viewMode: 'liste'
+  viewMode: 'liste',
+  ordre: []
 };
 
 export function buildDeliveryQuery(
@@ -49,7 +58,8 @@ export const DELIVERY_URL_KEYS = [
   'livr_to',
   'livr_statut',
   'livr_lieu',
-  'livr_view'
+  'livr_view',
+  'livr_ordre'
 ];
 
 function isViewMode(value: string | null): value is DeliveryViewMode {
@@ -79,6 +89,10 @@ export function serializeDeliveryFilters(
 
   if (filters.viewMode !== DEFAULT_DELIVERY_FILTERS.viewMode) {
     search.set('livr_view', filters.viewMode);
+  }
+
+  if (filters.ordre.length > 0) {
+    search.set('livr_ordre', filters.ordre.join(','));
   }
 
   return search.toString();
@@ -130,6 +144,7 @@ export function parseDeliveryFilters(query: string): DeliveryFiltersState {
     dateRange: [from || null, to || null],
     statuts: parseStringList(search.get('livr_statut')),
     lieux: parseIntList(search.get('livr_lieu')),
-    viewMode: isViewMode(view) ? view : DEFAULT_DELIVERY_FILTERS.viewMode
+    viewMode: isViewMode(view) ? view : DEFAULT_DELIVERY_FILTERS.viewMode,
+    ordre: parseStringList(search.get('livr_ordre'))
   };
 }
