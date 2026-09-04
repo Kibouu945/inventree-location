@@ -1,24 +1,25 @@
 // Calendrier mensuel des réservations (DIS-01) : vue d'ensemble pour le
 // gestionnaire, chaque réservation placée entre sa date de retrait et de
 // retour prévues, colorée par statut.
-import type { InvenTreePluginContext } from '@inventreedb/ui';
-import dayGridPlugin from '@fullcalendar/daygrid';
-import frLocale from '@fullcalendar/core/locales/fr';
-import FullCalendar from '@fullcalendar/react';
+
 import type { EventInput } from '@fullcalendar/core';
+import frLocale from '@fullcalendar/core/locales/fr';
+import dayGridPlugin from '@fullcalendar/daygrid';
+import FullCalendar from '@fullcalendar/react';
+import type { InvenTreePluginContext } from '@inventreedb/ui';
 import { Group, Stack, Text, Title } from '@mantine/core';
 
 const CALENDAR_URL = '/plugin/inventree-location/reservations/calendar/';
 
-/** Reprend les couleurs de statut déjà utilisées pour les badges de
- * `ReservationsList.tsx`, pour une légende cohérente avec le reste de
- * l'écran (le calendrier reçoit ses propres couleurs hex depuis l'API, qui
- * suivent la même palette côté serveur). */
+/** Miroir de `STATUT_COULEURS` (`inventree_location/calendrier.py`) : les
+ * pastilles des évènements viennent de l'API, cette légende doit donc lui
+ * répondre statut pour statut. */
 const STATUT_LEGEND: Array<{ label: string; color: string }> = [
   { label: 'Brouillon', color: '#868e96' },
   { label: 'Soumise', color: '#228be6' },
   { label: 'Validée', color: '#40c057' },
   { label: 'Refusée', color: '#fa5252' },
+  { label: 'Annulée', color: '#e8590c' },
   { label: 'Livrée', color: '#12b886' },
   { label: 'Retournée', color: '#be4bdb' },
   { label: 'Clôturée', color: '#343a40' }
@@ -68,15 +69,11 @@ export function ReservationCalendar({
             .get(CALENDAR_URL, {
               params: { from: info.startStr, to: info.endStr }
             })
-            .then((response) =>
-              successCallback(response.data as EventInput[])
-            )
+            .then((response) => successCallback(response.data as EventInput[]))
             .catch((error) => failureCallback(error));
         }}
         eventDidMount={(info) => {
-          const statut = info.event.extendedProps.statut as
-            | string
-            | undefined;
+          const statut = info.event.extendedProps.statut as string | undefined;
           if (statut) {
             info.el.title = `${info.event.title} — ${statut}`;
           }

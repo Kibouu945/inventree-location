@@ -33,6 +33,7 @@ WIDGET_SIZES: dict[str, tuple[int, int]] = {
     "inventree-location-catalog": (12, 8),
     "inventree-location-organisation": (12, 8),
     "inventree-location-reservations": (12, 8),
+    "inventree-location-calendrier": (12, 8),
     "inventree-location-ramassages": (12, 8),
     "inventree-location-deliveries": (12, 8),
     "inventree-location-conflicts": (12, 8),

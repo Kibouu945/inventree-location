@@ -160,6 +160,10 @@ DASHBOARD_WIDGET_ROLES: dict[str, set[str]] = {
         ORGANISATEUR,
         LECTEUR,
     },
+    # DIS-01 le destine au pilotage de l'activité : gestionnaire et lecteur,
+    # plus l'admin. Le magasinier et le livreur ont leurs propres écrans
+    # d'exploitation, l'organisateur ne suit que ses manifestations.
+    "inventree-location-calendrier": {ADMIN, GESTIONNAIRE, LECTEUR},
     "inventree-location-ramassages": {
         ADMIN,
         GESTIONNAIRE,

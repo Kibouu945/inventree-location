@@ -76,6 +76,8 @@ class InvenTreeLocation(
         )
         from .views import (
             BonRamassageView,
+            DeliveryAccepterView,
+            DeliveryEtatView,
             DeliveryMarquerLivreeView,
             CatalogPartDetailView,
             CatalogPartListView,
@@ -97,6 +99,7 @@ class InvenTreeLocation(
             RamassageListView,
             RentableFlagBulkUpdateView,
             RentablePartDetailView,
+            ReservationCalendarView,
             ReservationCheckinView,
             ReservationConflictCheckView,
             ReservationDetailView,
@@ -192,6 +195,11 @@ class InvenTreeLocation(
             ),
             path("deliveries/", DeliveryListView.as_view(), name="delivery-list"),
             path(
+                "reservations/calendar/",
+                ReservationCalendarView.as_view(),
+                name="reservation-calendar",
+            ),
+            path(
                 "reservations/<int:pk>/conflicts/",
                 ReservationConflictCheckView.as_view(),
                 name="reservation-conflict-check",
@@ -265,6 +273,16 @@ class InvenTreeLocation(
                 "deliveries/<int:pk>/livrer/",
                 DeliveryMarquerLivreeView.as_view(),
                 name="delivery-marquer-livree",
+            ),
+            path(
+                "deliveries/<int:pk>/accepter/",
+                DeliveryAccepterView.as_view(),
+                name="delivery-accepter",
+            ),
+            path(
+                "deliveries/<int:pk>/etat/",
+                DeliveryEtatView.as_view(),
+                name="delivery-etat",
             ),
             path("conflicts/", ConflictsListView.as_view(), name="conflict-list"),
             path(
@@ -429,6 +447,26 @@ class InvenTreeLocation(
                 "icon": "ti:calendar-event:outline",
                 "source": self.plugin_static_file(
                     "Reservations.js:renderInvenTreeLocationReservations"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-calendrier"):
+            items.append({
+                "key": "inventree-location-calendrier",
+                "title": "Calendrier des réservations",
+                "description": (
+                    "Vue mensuelle des réservations en cours et planifiées"
+                ),
+                "icon": "ti:calendar-month:outline",
+                "source": self.plugin_static_file(
+                    "Calendar.js:renderInvenTreeLocationCalendar"
                 ),
                 "options": {
                     "width": 12,
