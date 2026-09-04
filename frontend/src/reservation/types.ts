@@ -18,6 +18,13 @@ export interface LieuSummary {
   longitude: string | null;
 }
 
+/** Manifestation minimale pour le sélecteur de la pop-up de création de
+ * prestation (RES-08). */
+export interface ManifestationOption {
+  id: number;
+  nom: string;
+}
+
 export interface Prestation {
   id: number;
   nom: string;

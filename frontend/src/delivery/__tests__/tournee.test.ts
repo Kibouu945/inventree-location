@@ -47,7 +47,13 @@ function livraison(
     date_retour_prevue: null,
     commentaire: '',
     lignes: [],
-    quantite_totale: 3
+    quantite_totale: 3,
+    livreur_assigne: null,
+    livreur_assigne_nom: '',
+    date_assignation: null,
+    etat_livraison: '',
+    etat_livraison_display: '',
+    livraison_status_logs: []
   };
 }
 

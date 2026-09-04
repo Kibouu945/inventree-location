@@ -10,6 +10,26 @@ export interface DeliveryLigne {
   is_virtual: boolean;
 }
 
+/** Sous-état de la tournée livreur (US-18/US-19), vide tant que non assignée. */
+export type EtatLivraison =
+  | ''
+  | 'assignee'
+  | 'en_cours'
+  | 'livree'
+  | 'probleme';
+
+/** Entrée du journal d'état de livraison (`LivraisonStatusLogSerializer`). */
+export interface LivraisonStatusLogEntry {
+  id: number;
+  from_etat: EtatLivraison;
+  to_etat: EtatLivraison;
+  to_etat_display: string;
+  changed_by_nom: string;
+  commentaire: string;
+  photo: string | null;
+  created_at: string;
+}
+
 /** Livraison telle que renvoyée par l'API (`DeliverySerializer`). */
 export interface Delivery {
   id: number;
@@ -25,4 +45,10 @@ export interface Delivery {
   commentaire: string;
   lignes: DeliveryLigne[];
   quantite_totale: number;
+  livreur_assigne: number | null;
+  livreur_assigne_nom: string;
+  date_assignation: string | null;
+  etat_livraison: EtatLivraison;
+  etat_livraison_display: string;
+  livraison_status_logs: LivraisonStatusLogEntry[];
 }
