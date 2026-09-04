@@ -137,6 +137,16 @@ class TestRamassageList:
         assert response.status_code == status.HTTP_200_OK
         assert response.data["count"] == attendu
 
+    def test_date_to_couvre_la_journee_entiere(self, factory, user, reservation):
+        """Un ramassage prévu à 16 h le 10 doit sortir sur un filtre « le 10 »."""
+
+        reservation.date_retour_prevue = "2026-09-10T16:00:00Z"
+        reservation.save(update_fields=["date_retour_prevue"])
+
+        response = _get(factory, user, date_from="2026-09-10", date_to="2026-09-10")
+
+        assert response.data["count"] == 1
+
     def test_sans_date_de_retour_pas_de_ramassage(self, factory, user, reservation):
         reservation.date_retour_prevue = None
         reservation.save(update_fields=["date_retour_prevue"])

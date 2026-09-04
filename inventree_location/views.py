@@ -123,6 +123,26 @@ def _parse_csv_int_values(values):
     return parsed
 
 
+def _borne_journee(champ, valeur, sens):
+    """Filtre de borne temporelle, comparé au jour entier si la borne est un jour.
+
+    Une borne fournie au jour (`2026-09-10`) est lue comme minuit : filtrer une
+    tournée sur « le 10 » excluait alors toutes les livraisons de ce jour-là,
+    dont le retrait est prévu à 8 h 30. On compare donc à la date, dans le
+    fuseau du serveur, conformément à la règle transverse « tout se calcule au
+    jour entier ». Une borne horodatée complète reste comparée telle quelle.
+    """
+
+    valeur = valeur.strip()
+
+    # `parse_datetime` accepte aussi une date seule : c'est l'absence d'heure
+    # qui distingue « toute la journée » d'un instant précis.
+    if ":" not in valeur and parse_date(valeur) is not None:
+        return {f"{champ}__date__{sens}": valeur}
+
+    return {f"{champ}__{sens}": valeur}
+
+
 class ExampleView(APIView):
     """Example API view for the InvenTreeLocation plugin."""
 
@@ -289,10 +309,14 @@ class ReservationListCreateView(generics.ListCreateAPIView):
         date_to = self.request.query_params.get("date_to")
 
         if date_from:
-            queryset = queryset.filter(date_retour_prevue__gte=date_from)
+            queryset = queryset.filter(
+                **_borne_journee("date_retour_prevue", date_from, "gte")
+            )
 
         if date_to:
-            queryset = queryset.filter(date_retrait_prevue__lte=date_to)
+            queryset = queryset.filter(
+                **_borne_journee("date_retrait_prevue", date_to, "lte")
+            )
 
         search = self.request.query_params.get("search")
 
@@ -400,10 +424,14 @@ class DeliveryListView(generics.ListAPIView):
         date_to = self.request.query_params.get("date_to")
 
         if date_from:
-            queryset = queryset.filter(date_retour_prevue__gte=date_from)
+            queryset = queryset.filter(
+                **_borne_journee("date_retour_prevue", date_from, "gte")
+            )
 
         if date_to:
-            queryset = queryset.filter(date_retrait_prevue__lte=date_to)
+            queryset = queryset.filter(
+                **_borne_journee("date_retrait_prevue", date_to, "lte")
+            )
 
         lieux = _parse_csv_int_values(self.request.query_params.getlist("lieu"))
 
@@ -510,10 +538,14 @@ class RamassageListView(generics.ListAPIView):
             queryset = queryset.filter(statut__in=statuts)
 
         if date_from:
-            queryset = queryset.filter(date_retour_prevue__gte=date_from)
+            queryset = queryset.filter(
+                **_borne_journee("date_retour_prevue", date_from, "gte")
+            )
 
         if date_to:
-            queryset = queryset.filter(date_retour_prevue__lte=date_to)
+            queryset = queryset.filter(
+                **_borne_journee("date_retour_prevue", date_to, "lte")
+            )
 
         if lieu:
             queryset = queryset.filter(

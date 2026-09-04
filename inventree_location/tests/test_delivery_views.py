@@ -210,6 +210,52 @@ class TestDeliveryListView:
         assert ids == [in_range.pk]
 
     @pytest.mark.django_db
+    def test_date_to_couvre_la_journee_entiere(self, factory, gestionnaire, prestation, part):
+        """Filtrer sur « le 2 juin » doit montrer la tournée de ce jour-là.
+
+        Une borne au jour est lue comme minuit : un retrait prévu à 8 h 30
+        tombait hors filtre, et l'écran tournée du jour restait vide.
+        """
+
+        du_jour = _make_reservation(
+            prestation,
+            part,
+            statut="validee",
+            date_retrait="2026-06-02T08:30:00Z",
+            date_retour="2026-06-06T00:00:00Z",
+        )
+
+        request = factory.get(
+            "/plugin/inventree-location/deliveries/",
+            {"date_from": "2026-06-02", "date_to": "2026-06-02"},
+        )
+        force_authenticate(request, user=gestionnaire)
+        response = DeliveryListView.as_view()(request)
+
+        assert [row["id"] for row in response.data] == [du_jour.pk]
+
+    @pytest.mark.django_db
+    def test_borne_horodatee_reste_exacte(self, factory, gestionnaire, prestation, part):
+        """Une borne complète garde sa précision à l'heure près."""
+
+        _make_reservation(
+            prestation,
+            part,
+            statut="validee",
+            date_retrait="2026-06-02T08:30:00Z",
+            date_retour="2026-06-06T00:00:00Z",
+        )
+
+        request = factory.get(
+            "/plugin/inventree-location/deliveries/",
+            {"date_to": "2026-06-02T08:00:00Z"},
+        )
+        force_authenticate(request, user=gestionnaire)
+        response = DeliveryListView.as_view()(request)
+
+        assert response.data == []
+
+    @pytest.mark.django_db
     def test_lieu_filter(self, factory, gestionnaire, manifestation, part, lieu):
         other_lieu = Lieu.objects.create(nom="Gymnase", adresse="2 rue du Sport")
         other_prestation = Prestation.objects.create(
