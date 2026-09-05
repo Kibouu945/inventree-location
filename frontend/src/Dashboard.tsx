@@ -17,6 +17,8 @@ import {
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 
+import { WidgetScroll } from './WidgetScroll';
+
 const STOCK_ALERTS_URL = '/plugin/inventree-location/alerts/stock/';
 
 interface StockAlertItem {
@@ -196,5 +198,9 @@ export function renderInvenTreeLocationDashboardItem(
   context: InvenTreePluginContext
 ) {
   checkPluginVersion(context);
-  return <InvenTreeLocationDashboardItem context={context} />;
+  return (
+    <WidgetScroll>
+      <InvenTreeLocationDashboardItem context={context} />
+    </WidgetScroll>
+  );
 }

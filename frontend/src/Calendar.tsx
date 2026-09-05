@@ -6,6 +6,7 @@ import {
 } from '@inventreedb/ui';
 
 import { ReservationCalendar } from './reservation/ReservationCalendar';
+import { WidgetScroll } from './WidgetScroll';
 
 /**
  * Fonction appelée par InvenTree pour rendre l'écran calendrier.
@@ -14,5 +15,9 @@ export function renderInvenTreeLocationCalendar(
   context: InvenTreePluginContext
 ) {
   checkPluginVersion(context);
-  return <ReservationCalendar context={context} />;
+  return (
+    <WidgetScroll>
+      <ReservationCalendar context={context} />
+    </WidgetScroll>
+  );
 }

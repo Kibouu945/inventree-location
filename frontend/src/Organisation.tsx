@@ -5,6 +5,7 @@ import {
 } from '@inventreedb/ui';
 
 import { OrganisationPanel } from './organisation/OrganisationPanel';
+import { WidgetScroll } from './WidgetScroll';
 
 /**
  * Fonction appelée par InvenTree pour rendre l'écran de gestion des
@@ -14,5 +15,9 @@ export function renderInvenTreeLocationOrganisation(
   context: InvenTreePluginContext
 ) {
   checkPluginVersion(context);
-  return <OrganisationPanel context={context} />;
+  return (
+    <WidgetScroll>
+      <OrganisationPanel context={context} />
+    </WidgetScroll>
+  );
 }
