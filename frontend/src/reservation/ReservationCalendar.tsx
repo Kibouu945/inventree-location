@@ -7,7 +7,8 @@ import frLocale from '@fullcalendar/core/locales/fr';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import FullCalendar from '@fullcalendar/react';
 import type { InvenTreePluginContext } from '@inventreedb/ui';
-import { Group, Stack, Text, Title } from '@mantine/core';
+import { Alert, Group, Stack, Text, Title } from '@mantine/core';
+import { useState } from 'react';
 
 const CALENDAR_URL = '/plugin/inventree-location/reservations/calendar/';
 
@@ -30,11 +31,21 @@ export function ReservationCalendar({
 }: {
   context: InvenTreePluginContext;
 }) {
+  // Le serveur refuse une fenêtre trop large ou incohérente : sans ce message,
+  // FullCalendar se contenterait d'afficher une grille vide.
+  const [erreur, setErreur] = useState<string | null>(null);
+
   return (
     <Stack gap='md'>
       <Title order={4} c={context.theme.primaryColor}>
         Calendrier des réservations
       </Title>
+
+      {erreur && (
+        <Alert color='red' title='Calendrier indisponible'>
+          {erreur}
+        </Alert>
+      )}
 
       <Group gap='lg'>
         {STATUT_LEGEND.map((entry) => (
@@ -69,8 +80,20 @@ export function ReservationCalendar({
             .get(CALENDAR_URL, {
               params: { from: info.startStr, to: info.endStr }
             })
-            .then((response) => successCallback(response.data as EventInput[]))
-            .catch((error) => failureCallback(error));
+            .then((response) => {
+              setErreur(null);
+              successCallback(response.data as EventInput[]);
+            })
+            .catch((error) => {
+              const detail = (
+                error as { response?: { data?: { detail?: string } } }
+              )?.response?.data?.detail;
+
+              setErreur(
+                detail ?? 'Les réservations n’ont pas pu être chargées.'
+              );
+              failureCallback(error);
+            });
         }}
         eventDidMount={(info) => {
           const statut = info.event.extendedProps.statut as string | undefined;

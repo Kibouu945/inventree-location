@@ -28,6 +28,11 @@ User = get_user_model()
 
 URL = "/plugin/inventree-location/reservations/calendar/"
 
+#: Fenêtre par défaut des tests : le mois des fixtures. Les deux bornes sont
+#: obligatoires côté serveur (le calendrier n'est pas paginé, c'est la période
+#: qui est bornée).
+FENETRE = {"from": "2026-06-01", "to": "2026-06-30"}
+
 pytestmark = [pytest.mark.django_db, pytest.mark.urls("tests.functional_urls")]
 
 
@@ -93,7 +98,7 @@ class TestCalendrier:
         )
         client, _ = client_for(roles.GESTIONNAIRE, "gina")
 
-        response = client.get(URL)
+        response = client.get(URL, FENETRE)
 
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data) == 1
@@ -132,7 +137,7 @@ class TestCalendrier:
         )
         client, _ = client_for(roles.GESTIONNAIRE, "gina")
 
-        response = client.get(URL, {"from": "2026-06-01", "to": "2026-06-30"})
+        response = client.get(URL, FENETRE)
 
         ids = {event["id"] for event in response.data}
         assert ids == {str(dedans.pk), str(a_cheval.pk)}
@@ -146,7 +151,7 @@ class TestCalendrier:
         )
         client, _ = client_for(roles.GESTIONNAIRE, "gina")
 
-        response = client.get(URL, {"from": "2026-06-01", "to": "2026-06-30"})
+        response = client.get(URL, FENETRE)
 
         assert [event["id"] for event in response.data] == [str(du_jour.pk)]
 
@@ -159,7 +164,7 @@ class TestCalendrier:
         )
         client, _ = client_for(roles.GESTIONNAIRE, "gina")
 
-        response = client.get(URL, {"from": "2026-06-01", "to": "2026-06-30"})
+        response = client.get(URL, FENETRE)
 
         event = response.data[0]
         assert event["id"] == str(brouillon.pk)
@@ -177,7 +182,7 @@ class TestCalendrier:
         archivee.save(update_fields=["is_archived"])
         client, _ = client_for(roles.GESTIONNAIRE, "gina")
 
-        assert client.get(URL).data == []
+        assert client.get(URL, FENETRE).data == []
 
     def test_le_livreur_ne_voit_que_les_validees(self, prestation):
         validee = _reservation(
@@ -194,7 +199,7 @@ class TestCalendrier:
         )
         client, _ = client_for(roles.LIVREUR, "lucie")
 
-        response = client.get(URL)
+        response = client.get(URL, FENETRE)
 
         assert [event["id"] for event in response.data] == [str(validee.pk)]
 
@@ -213,7 +218,7 @@ class TestCalendrier:
         )
         client, _ = client_for(roles.GESTIONNAIRE, "gina")
 
-        response = client.get(URL)
+        response = client.get(URL, FENETRE)
 
         assert [event["id"] for event in response.data] == [str(tot.pk), str(tard.pk)]
 
@@ -223,7 +228,76 @@ class TestCalendrier:
     def test_un_compte_sans_role_est_interdit(self, prestation):
         client, _ = client_for(None, "norole")
 
-        assert client.get(URL).status_code == status.HTTP_403_FORBIDDEN
+        assert client.get(URL, FENETRE).status_code == status.HTTP_403_FORBIDDEN
+
+
+class TestFenetre:
+    """Le calendrier n'est pas paginé : c'est la période qui est bornée."""
+
+    def test_les_deux_bornes_sont_obligatoires(self, prestation):
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        for params in ({}, {"from": "2026-06-01"}, {"to": "2026-06-30"}):
+            response = client.get(URL, params)
+
+            assert response.status_code == status.HTTP_400_BAD_REQUEST
+            assert "période" in response.data["detail"]
+
+    def test_une_periode_trop_large_est_refusee(self, prestation):
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        response = client.get(URL, {"from": "2020-01-01", "to": "2030-01-01"})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "trop large" in response.data["detail"]
+
+    def test_la_borne_maximale_passe(self, prestation):
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        # Exactement 92 jours : accepté, un jour de plus ne l'est pas.
+        assert (
+            client.get(URL, {"from": "2026-06-01", "to": "2026-09-01"}).status_code
+            == status.HTTP_200_OK
+        )
+        assert (
+            client.get(URL, {"from": "2026-06-01", "to": "2026-09-02"}).status_code
+            == status.HTTP_400_BAD_REQUEST
+        )
+
+    def test_une_fin_avant_le_debut_est_refusee(self, prestation):
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        response = client.get(URL, {"from": "2026-06-30", "to": "2026-06-01"})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "précède" in response.data["detail"]
+
+    def test_une_borne_illisible_est_refusee(self, prestation):
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        response = client.get(URL, {"from": "juin", "to": "2026-06-30"})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "from" in response.data["detail"]
+
+    def test_les_bornes_horodatees_de_fullcalendar_sont_acceptees(self, prestation):
+        """FullCalendar envoie un ISO complet dès qu'on quitte la vue mois."""
+
+        _reservation(
+            prestation,
+            statut=StatutReservation.VALIDEE,
+            retrait="2026-06-10T08:00:00Z",
+            retour="2026-06-12T18:00:00Z",
+        )
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        response = client.get(
+            URL,
+            {"from": "2026-06-01T00:00:00+02:00", "to": "2026-06-30T00:00:00+02:00"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
 
 
 class TestPalette:

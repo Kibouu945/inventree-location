@@ -45,7 +45,7 @@ from .models import (
     ReturnIncidentType,
     StatutReservation,
 )
-from .calendrier import evenements_calendrier
+from .calendrier import FenetreInvalide, bornes_fenetre, evenements_calendrier
 from .livraison import (
     LivraisonRefusee,
     accepter_livraison,
@@ -344,9 +344,13 @@ class ReservationListCreateView(generics.ListCreateAPIView):
 class ReservationCalendarView(APIView):
     """Évènements du calendrier mensuel des réservations (DIS-01).
 
-    Paramètres `from` / `to` : la fenêtre affichée, envoyée par FullCalendar à
-    chaque changement de mois. Bornes comparées au jour entier, comme les
-    listes filtrables (cf. `_borne_journee`).
+    Paramètres `from` / `to` : la fenêtre affichée, tous deux obligatoires,
+    envoyés par FullCalendar à chaque changement de mois. Bornes comparées au
+    jour entier, comme les listes filtrables (cf. `_borne_journee`).
+
+    La réponse n'est pas paginée — un calendrier doit montrer tout ce qui
+    chevauche la période — donc c'est la période elle-même qui est bornée
+    (cf. `calendrier.bornes_fenetre`).
     """
 
     permission_classes = [ReservationPermission]
@@ -354,18 +358,26 @@ class ReservationCalendarView(APIView):
     def get(self, request, *args, **kwargs):
         """Retourne les réservations de la fenêtre, au format FullCalendar."""
 
-        depuis = request.query_params.get("from")
-        jusqua = request.query_params.get("to")
+        try:
+            debut, fin = bornes_fenetre(
+                request.query_params.get("from"),
+                request.query_params.get("to"),
+            )
 
-        # Une réservation est affichée dès qu'elle chevauche la fenêtre : celle
-        # qui a commencé le mois dernier et court toujours doit rester visible.
-        debut = _borne_journee("fin_calendrier", depuis, "gte") if depuis else None
-        fin = _borne_journee("debut_calendrier", jusqua, "lte") if jusqua else None
+            # Une réservation est affichée dès qu'elle chevauche la fenêtre :
+            # celle qui a commencé le mois dernier et court toujours reste
+            # visible.
+            evenements = evenements_calendrier(
+                request.user,
+                debut={"fin_calendrier__date__gte": debut},
+                fin={"debut_calendrier__date__lte": fin},
+            )
+        except FenetreInvalide as refus:
+            return Response(
+                {"detail": refus.detail}, status=status.HTTP_400_BAD_REQUEST
+            )
 
-        return Response(
-            evenements_calendrier(request.user, debut=debut, fin=fin),
-            status=status.HTTP_200_OK,
-        )
+        return Response(evenements, status=status.HTTP_200_OK)
 
 
 class DeliveryMarquerLivreeView(APIView):
