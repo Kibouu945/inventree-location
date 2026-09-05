@@ -314,8 +314,8 @@ function BonRamassageContent({
 
       <Alert color='blue' title='SCRUM-112 — stock réel'>
         Au ramassage, renseigner pour chaque article les quantités ramassées en bon
-        état, envoyées au SAV, détruites ou manquantes. Les quantités SAV,
-        détruites et manquantes sortent du stock réellement disponible.
+        état, cassées réparables, détruites ou perdues. Les quantités Cassé réparable,
+        détruites et perdues sortent du stock réellement disponible.
       </Alert>
 
       {saveError && (
@@ -336,9 +336,9 @@ function BonRamassageContent({
             <Table.Th>Article</Table.Th>
             <Table.Th>À ramasser</Table.Th>
             <Table.Th>Ramassée OK</Table.Th>
-            <Table.Th>SAV</Table.Th>
+            <Table.Th>Cassé réparable</Table.Th>
             <Table.Th>Détruite</Table.Th>
-            <Table.Th>Manquante</Table.Th>
+            <Table.Th>Perdue</Table.Th>
             <Table.Th>Facturer</Table.Th>
             <Table.Th>Commentaire</Table.Th>
             <Table.Th>Total saisi</Table.Th>
@@ -431,7 +431,7 @@ function BonRamassageContent({
                         commentaire: event.currentTarget.value
                       })
                     }
-                    placeholder='État, casse, remarque…'
+                    placeholder='Motif obligatoire si détruit ou perdu…'
                     w={220}
                   />
                 </Table.Td>
@@ -566,8 +566,12 @@ export function RamassagesList({
     setRetourLines(bonQuery.data.reservation.lignes.map(lineFormFromBon));
     setCommentaireRetour(bonQuery.data.reservation.commentaire || '');
     setSaveRetourError('');
-    setSaveRetourSuccess('');
   }, [bonQuery.data]);
+
+  useEffect(() => {
+    setSaveRetourError('');
+    setSaveRetourSuccess('');
+  }, [bonModal.reservationId]);
 
   const rows = Array.isArray(query.data)
     ? query.data
@@ -586,6 +590,20 @@ export function RamassagesList({
       return;
     }
 
+    const lossWithoutMotif = retourLines.find(
+      (line) =>
+        (line.quantite_detruite > 0 || line.quantite_manquante > 0) &&
+        !line.commentaire.trim()
+    );
+
+    if (lossWithoutMotif) {
+      setSaveRetourSuccess('');
+      setSaveRetourError(
+        `Motif obligatoire pour ${lossWithoutMotif.partNom} : renseigne le commentaire si l'objet est détruit ou perdu.`
+      );
+      return;
+    }
+
     setIsSavingRetour(true);
     setSaveRetourError('');
     setSaveRetourSuccess('');
@@ -601,7 +619,7 @@ export function RamassagesList({
       const data = response.data as RetourRamassageResponse;
 
       setSaveRetourSuccess(
-        `Retour enregistré pour ${data.numero}. Statut : ${data.statut}. Tickets SAV : ${data.sav_tickets.length}.`
+        `Retour enregistré pour ${data.numero}. Statut : ${data.statut}. Tickets réparation créés : ${data.sav_tickets.length}.`
       );
 
       await bonQuery.refetch();

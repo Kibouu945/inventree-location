@@ -37,12 +37,13 @@ class StatutReservation(models.TextChoices):
 
 
 class TypeSavTicket(models.TextChoices):
-    REPARATION = "reparation", _("Réparation")
+    REPARATION = "reparation", _("Cassé réparable")
     DESTRUCTION = "destruction", _("Destruction")
+    PERTE = "perte", _("Perte")
 
 
 class StatutSavTicket(models.TextChoices):
-    OUVERT = "ouvert", _("Ouvert")
+    OUVERT = "ouvert", _("À réparer")
     EN_REPARATION = "en_reparation", _("En réparation")
     REPARE = "repare", _("Réparé")
     DETRUIT = "detruit", _("Détruit")
@@ -437,7 +438,7 @@ class LigneReservation(TimestampedModel):
     )
     quantite_sav = models.PositiveIntegerField(
         default=0,
-        verbose_name=_("quantité à mettre au SAV"),
+        verbose_name=_("quantité cassée réparable"),
     )
     quantite_detruite = models.PositiveIntegerField(
         default=0,

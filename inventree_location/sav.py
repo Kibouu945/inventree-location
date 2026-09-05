@@ -57,16 +57,25 @@ def get_unavailable_stock_quantity(part_id: int) -> int:
         "quantite",
     )
 
-    destroyed_quantity = _sum_or_zero(
+    destroyed_or_lost_quantity = _sum_or_zero(
         SavTicket.objects.filter(
             part_id=part_id,
-            type_ticket=TypeSavTicket.DESTRUCTION,
+            type_ticket__in=[
+                TypeSavTicket.DESTRUCTION,
+                TypeSavTicket.PERTE,
+            ],
             statut=StatutSavTicket.DETRUIT,
         ),
         "quantite",
     )
 
-    missing_quantity = _sum_or_zero(
+    lost_ticket_line_ids = SavTicket.objects.filter(
+        part_id=part_id,
+        type_ticket=TypeSavTicket.PERTE,
+        statut=StatutSavTicket.DETRUIT,
+    ).values_list("ligne_reservation_id", flat=True)
+
+    missing_quantity_without_ticket = _sum_or_zero(
         LigneReservation.objects.filter(
             part_id=part_id,
             quantite_manquante__gt=0,
@@ -75,11 +84,13 @@ def get_unavailable_stock_quantity(part_id: int) -> int:
                 StatutReservation.RETOURNEE,
                 StatutReservation.CLOTUREE,
             ],
+        ).exclude(
+            id__in=lost_ticket_line_ids,
         ),
         "quantite_manquante",
     )
 
-    return sav_quantity + destroyed_quantity + missing_quantity
+    return sav_quantity + destroyed_or_lost_quantity + missing_quantity_without_ticket
 
 
 def get_real_available_stock(part_id: int) -> int:
@@ -225,6 +236,17 @@ class RetourRamassageLigneSerializer(serializers.Serializer):
                 "ligne": ligne.pk,
                 "quantite_attendue": expected,
                 "quantite_saisie": total,
+            })
+
+        if (
+            attrs.get("quantite_detruite", 0) > 0
+            or attrs.get("quantite_manquante", 0) > 0
+        ) and not attrs.get("commentaire", "").strip():
+            raise serializers.ValidationError({
+                "commentaire": (
+                    "Le motif est obligatoire pour un objet détruit ou perdu."
+                ),
+                "ligne": ligne.pk,
             })
 
         attrs["_ligne_instance"] = ligne
@@ -411,6 +433,16 @@ class RamassageRetourView(APIView):
                 description=ligne.commentaire,
             )
 
+            perte_ticket = _close_or_update_ticket(
+                ligne=ligne,
+                type_ticket=TypeSavTicket.PERTE,
+                quantite=ligne.quantite_manquante,
+                statut_si_quantite=StatutSavTicket.DETRUIT,
+                user=request.user,
+                facturer_client=ligne.facturer_client,
+                description=ligne.commentaire,
+            )
+
             updated_lines.append({
                 "id": ligne.pk,
                 "part": ligne.part_id,
@@ -422,7 +454,7 @@ class RamassageRetourView(APIView):
                 "etat_retour": ligne.etat_retour,
             })
 
-            for ticket in [sav_ticket, destruction_ticket]:
+            for ticket in [sav_ticket, destruction_ticket, perte_ticket]:
                 if ticket is not None:
                     created_or_updated_tickets.append(ticket.pk)
 
@@ -474,6 +506,7 @@ class SavTicketListView(generics.ListAPIView):
         statut = self.request.query_params.get("statut")
         type_ticket = self.request.query_params.get("type_ticket")
         part = self.request.query_params.get("part")
+        reservation = self.request.query_params.get("reservation")
         date_from = self.request.query_params.get("date_from")
         date_to = self.request.query_params.get("date_to")
 
@@ -485,6 +518,9 @@ class SavTicketListView(generics.ListAPIView):
 
         if part and str(part).isdigit():
             queryset = queryset.filter(part_id=int(part))
+
+        if reservation and str(reservation).isdigit():
+            queryset = queryset.filter(reservation_id=int(reservation))
 
         if date_from:
             queryset = queryset.filter(created_at__date__gte=date_from)
@@ -522,7 +558,7 @@ class SavTicketDetailView(generics.RetrieveUpdateAPIView):
 
 
 class DestroyedItemsListView(generics.ListAPIView):
-    """Liste des objets détruits, filtrable par période."""
+    """Rapport des objets détruits ou perdus, filtrable par période."""
 
     permission_classes = [RoleBasedPermission]
     serializer_class = SavTicketSerializer
@@ -540,7 +576,10 @@ class DestroyedItemsListView(generics.ListAPIView):
                 "updated_by",
             )
             .filter(
-                type_ticket=TypeSavTicket.DESTRUCTION,
+                type_ticket__in=[
+                    TypeSavTicket.DESTRUCTION,
+                    TypeSavTicket.PERTE,
+                ],
                 statut=StatutSavTicket.DETRUIT,
             )
             .order_by("-created_at")
