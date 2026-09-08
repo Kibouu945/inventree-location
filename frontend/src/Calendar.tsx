@@ -16,7 +16,7 @@ export function renderInvenTreeLocationCalendar(
 ) {
   checkPluginVersion(context);
   return (
-    <WidgetScroll>
+    <WidgetScroll locale={context.locale}>
       <ReservationCalendar context={context} />
     </WidgetScroll>
   );

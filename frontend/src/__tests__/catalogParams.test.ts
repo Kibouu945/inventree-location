@@ -4,6 +4,7 @@ import {
   buildCatalogQuery,
   CATALOG_PAGE_SIZE,
   DEFAULT_FILTERS,
+  libelleColonneDisponibilite,
   parseFilters,
   serializeFilters,
   totalPages
@@ -46,6 +47,62 @@ describe('buildCatalogQuery', () => {
       buildCatalogQuery({ ...DEFAULT_FILTERS, search: '  tente ' }).search
     ).toBe('tente');
   });
+
+  it('envoie la période quand elle est renseignée', () => {
+    const params = buildCatalogQuery({
+      ...DEFAULT_FILTERS,
+      dateDebut: '2026-09-10',
+      dateFin: '2026-09-14'
+    });
+    expect(params.date_debut).toBe('2026-09-10');
+    expect(params.date_fin).toBe('2026-09-14');
+  });
+
+  it("n'envoie aucune date par défaut — le serveur répond pour aujourd'hui", () => {
+    const params = buildCatalogQuery(DEFAULT_FILTERS);
+    expect(params.date_debut).toBeUndefined();
+    expect(params.date_fin).toBeUndefined();
+  });
+
+  it('accepte une borne seule', () => {
+    const params = buildCatalogQuery({
+      ...DEFAULT_FILTERS,
+      dateDebut: '2026-09-10'
+    });
+    expect(params.date_debut).toBe('2026-09-10');
+    expect(params.date_fin).toBeUndefined();
+  });
+});
+
+describe('libelleColonneDisponibilite', () => {
+  it('sans période, parle de la journée courante', () => {
+    expect(libelleColonneDisponibilite(null, null)).toBe(
+      "Disponible aujourd'hui"
+    );
+  });
+
+  it('nomme la période demandée', () => {
+    expect(libelleColonneDisponibilite('2026-09-10', '2026-09-14')).toBe(
+      'Disponible du 10/09/2026 au 14/09/2026'
+    );
+  });
+
+  it('dit « le » quand les deux bornes sont le même jour', () => {
+    expect(libelleColonneDisponibilite('2026-09-10', '2026-09-10')).toBe(
+      'Disponible le 10/09/2026'
+    );
+  });
+
+  it('reste honnête sur une borne seule', () => {
+    // Le serveur complète l'autre borne avec aujourd'hui : afficher une plage
+    // laisserait croire à une date choisie.
+    expect(libelleColonneDisponibilite('2026-09-10', null)).toBe(
+      'Disponible à partir du 10/09/2026'
+    );
+    expect(libelleColonneDisponibilite(null, '2026-09-14')).toBe(
+      "Disponible jusqu'au 14/09/2026"
+    );
+  });
 });
 
 describe('serializeFilters / parseFilters (URL state)', () => {
@@ -54,6 +111,8 @@ describe('serializeFilters / parseFilters (URL state)', () => {
       search: 'tente',
       categories: [3, 7],
       rentable: 'all' as const,
+      dateDebut: '2026-09-10',
+      dateFin: '2026-09-14',
       page: 2
     };
     const restored = parseFilters(serializeFilters(filters));

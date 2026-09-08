@@ -2,7 +2,7 @@
 
 Couvre le CRUD prestation, le rattachement à un lieu unique géolocalisé, la
 liste d'articles + quantités imbriquée, la validation des dates dans la
-manifestation et le blocage sur stock insuffisant.
+manifestation et l'alerte (non bloquante) sur stock insuffisant.
 """
 
 from __future__ import annotations
@@ -216,9 +216,21 @@ class TestPrestationCreate:
         assert "manifestation" in response.data
         assert not Prestation.objects.filter(nom="Trop tard").exists()
 
-    def test_insufficient_stock_blocks_creation(
+    def test_insufficient_stock_alerte_mais_nenregistre_pas_moins(
         self, factory, user, manifestation, lieu
     ):
+        """Une pénurie de stock alerte, elle ne refuse plus l'enregistrement.
+
+        Recette Tassin du 07/09/2026, remarque 6 : « le système bloque alors la
+        réservation et seul annuler est possible. Il ne faut pas bloquer mais
+        alerter. (Voir les Epic E & F) ». Une prestation porte le prévisionnel ;
+        le refus d'écriture laissait l'utilisateur sans issue et cassait le
+        cycle réservation → livraison → ramassage dès la première étape.
+
+        Le garde-fou n'a pas disparu, il a changé de place : voir
+        `TestReservationStockConflict` pour le refus au passage en « validée ».
+        """
+
         part = _make_part("Chaise", stock=3)
         payload = {
             "manifestation": manifestation.pk,
@@ -232,9 +244,49 @@ class TestPrestationCreate:
         force_authenticate(request, user=user)
         response = PrestationListCreateView.as_view()(request)
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "stock" in response.data
-        assert not Prestation.objects.filter(nom="Trop de chaises").exists()
+        assert response.status_code == status.HTTP_201_CREATED
+
+        prestation = Prestation.objects.get(nom="Trop de chaises")
+        ligne = prestation.lignes_prestation.get()
+
+        # La ligne est conservée telle que saisie : on n'écrête pas
+        # silencieusement une quantité que l'utilisateur a voulue.
+        assert ligne.part_id == part.pk
+        assert ligne.quantite == 5
+
+    def test_penurie_reste_visible_sur_le_previsionnel(
+        self, factory, user, manifestation, lieu
+    ):
+        """Ne plus bloquer ne veut pas dire ne plus signaler.
+
+        L'écran interroge `stock-preview` en direct : la pénurie doit y
+        ressortir, avec la quantité manquante, sans quoi « alerter » se
+        réduirait à « laisser passer ».
+        """
+
+        from inventree_location.stock import compute_prestation_stock
+
+        part = _make_part("Chaise", stock=3)
+        payload = {
+            "manifestation": manifestation.pk,
+            "lieu": lieu.pk,
+            "nom": "Trop de chaises",
+            "date_debut": manifestation.date_debut.isoformat(),
+            "date_fin": (manifestation.date_debut + timedelta(hours=2)).isoformat(),
+            "lignes": [{"part": part.pk, "quantite": 5}],
+        }
+        request = factory.post(PRESTATIONS_URL, payload, format="json")
+        force_authenticate(request, user=user)
+        PrestationListCreateView.as_view()(request)
+
+        result = compute_prestation_stock(Prestation.objects.get(nom="Trop de chaises"))
+
+        assert result["has_shortage"] is True
+        assert [
+            (line["part_id"], line["missing"])
+            for line in result["lines"]
+            if line["shortage"]
+        ] == [(part.pk, 2)]
 
 
 @pytest.mark.django_db

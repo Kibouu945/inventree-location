@@ -15,13 +15,54 @@ from django.db import models
 
 
 class PartCategory(models.Model):
+    """Catégorie d'articles, avec sa hiérarchie.
+
+    En production `PartCategory` hérite d'`InvenTreeTree` (MPTT) et expose
+    `parent` + `get_descendants()`. Le double reprend les deux : le catalogue
+    étend désormais un filtre de catégorie à ses sous-catégories (recette du
+    07/09/2026, remarque 4 — « reprendre le type de recherche fait pour le
+    catalogue avec les libellés et les catégories, les sous-catégories »), et
+    cette cascade doit être vérifiable hors container.
+    """
+
     name = models.CharField(max_length=100)
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="children",
+    )
 
     class Meta:
         app_label = "part"
 
     def __str__(self) -> str:
         return self.name
+
+    def get_descendants(self, include_self: bool = False):
+        """Branche entière sous cette catégorie, en queryset.
+
+        MPTT le fait en une requête sur les bornes de l'arbre ; ici on descend
+        niveau par niveau. C'est plus lent, mais le contrat rendu est le même —
+        un queryset de `PartCategory` — et c'est lui que le code de production
+        consomme.
+        """
+
+        ids = {self.pk} if include_self else set()
+        frontiere = [self.pk]
+
+        while frontiere:
+            enfants = list(
+                PartCategory.objects.filter(parent_id__in=frontiere).values_list(
+                    "pk", flat=True
+                )
+            )
+            # Une boucle dans les données ne doit pas devenir une boucle infinie.
+            frontiere = [pk for pk in enfants if pk not in ids]
+            ids.update(frontiere)
+
+        return PartCategory.objects.filter(pk__in=ids)
 
 
 class Part(models.Model):
@@ -38,6 +79,15 @@ class Part(models.Model):
     # `blank` que le champ natif, pour que les tests voient le même défaut.
     image = models.ImageField(
         upload_to="part_images", null=True, blank=True, default=""
+    )
+    # Seuil de réapprovisionnement natif d'InvenTree, repli du seuil bas du
+    # plugin quand celui-ci n'est pas renseigné (recette du 07/09/2026,
+    # remarque 11 : le client avait rempli ce champ-ci, nous ne lisions que le
+    # nôtre). Même type qu'en production — un `DecimalField`, pas un entier :
+    # `StockAlertListView._seuil_bas` doit le convertir, autant que les tests
+    # le voient tel quel.
+    minimum_stock = models.DecimalField(
+        max_digits=19, decimal_places=6, default=0
     )
     category = models.ForeignKey(
         PartCategory,

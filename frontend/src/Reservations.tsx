@@ -15,7 +15,7 @@ export function renderInvenTreeLocationReservations(
 ) {
   checkPluginVersion(context);
   return (
-    <WidgetScroll>
+    <WidgetScroll locale={context.locale}>
       <ReservationsList context={context} />
     </WidgetScroll>
   );

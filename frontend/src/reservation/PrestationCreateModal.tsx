@@ -4,11 +4,11 @@
 // renvoyée via `onCreated` pour sélection automatique côté appelant.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import { Button, Group, Modal, Select, Stack, TextInput } from '@mantine/core';
-import { DateTimePicker } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { DateTimeField } from '../DateTimeField';
 
 import type {
   LieuSummary,
@@ -238,7 +238,7 @@ export function PrestationCreateModal({
           onChange={(value) => setState((s) => ({ ...s, lieu: value }))}
         />
         <Group grow>
-          <DateTimePicker
+          <DateTimeField
             label='Date de début'
             required
             value={state.date_debut}
@@ -249,7 +249,7 @@ export function PrestationCreateModal({
               }))
             }
           />
-          <DateTimePicker
+          <DateTimeField
             label='Date de fin'
             required
             value={state.date_fin}

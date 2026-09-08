@@ -15,7 +15,7 @@ export function renderInvenTreeLocationBackOfficeUsers(
 ) {
   checkPluginVersion(context);
   return (
-    <WidgetScroll>
+    <WidgetScroll locale={context.locale}>
       <UsersBackOffice context={context} />
     </WidgetScroll>
   );

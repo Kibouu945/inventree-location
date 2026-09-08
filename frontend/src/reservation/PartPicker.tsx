@@ -1,7 +1,7 @@
 // Sélecteur de matériel (autocomplete + quantité), réutilisé pour le
 // matériel réel et pour l'article virtuel obligatoire (RES-03).
 import type { InvenTreePluginContext } from '@inventreedb/ui';
-import { Button, Group, NumberInput, Select } from '@mantine/core';
+import { Button, Group, NumberInput, Select, Text } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
@@ -61,7 +61,13 @@ export function PartPicker({
         const response = await context.api.get(CATALOG_URL, {
           params: {
             search: debouncedSearch || undefined,
-            rentable: 'all',
+            // Un article non louable n'a rien à faire dans une réservation :
+            // `rentable: 'all'` laissait passer le « Banc de brasserie souple,
+            // 220 cm », pourtant marqué NON LOUABLE (recette Tassin du
+            // 07/09/2026, remarque 5). Le sélecteur d'article virtuel garde
+            // « tout » : « louable » ne veut rien dire pour un service, et
+            // filtrer là risquerait de masquer l'article virtuel obligatoire.
+            rentable: virtualOnly ? 'all' : 'true',
             // Les deux sélecteurs sont disjoints : « Matériel » ne doit pas
             // proposer les articles virtuels (services sans stock physique),
             // sinon ils échappent au garde-fou de quantité. Omettre le
@@ -121,13 +127,20 @@ export function PartPicker({
     setQuantite(1);
   }, [selectedId]);
 
+  // Dépassement du stock disponible : on le dit, on ne l'interdit pas.
+  //
+  // « Il ne faut pas bloquer mais alerter » (recette Tassin du 07/09/2026,
+  // remarque 6, qui renvoie aux épics E et F du CDC). Griser « Ajouter »
+  // laissait l'utilisateur sans issue : il ne pouvait ni saisir sa ligne, ni
+  // arbitrer. La pénurie remonte au bandeau du formulaire et au registre des
+  // conflits ; le refus ferme ne subsiste qu'au passage en statut « validée ».
   const exceedsAvailable =
     !!selectedPart &&
     !selectedPart.is_virtual &&
     quantite > selectedPart.stock_available;
 
   function handleAdd() {
-    if (!selectedPart || quantite < 1 || exceedsAvailable) {
+    if (!selectedPart || quantite < 1) {
       return;
     }
 
@@ -168,10 +181,18 @@ export function PartPicker({
         min={1}
         value={quantite}
         onChange={(value) => setQuantite(Number(value) || 1)}
-        error={exceedsAvailable ? 'Quantité indisponible' : undefined}
+        description={
+          exceedsAvailable ? (
+            // Mantine n'a pas d'état « avertissement » : `error` afficherait
+            // un champ invalide, ce qu'il n'est pas — la ligne est saisissable.
+            <Text size='xs' c='orange'>
+              Dépasse le stock disponible ({selectedPart?.stock_available})
+            </Text>
+          ) : undefined
+        }
         w={140}
       />
-      <Button onClick={handleAdd} disabled={!selectedPart || exceedsAvailable}>
+      <Button onClick={handleAdd} disabled={!selectedPart}>
         Ajouter
       </Button>
     </Group>
