@@ -15,12 +15,12 @@ import {
   TextInput,
   Title
 } from '@mantine/core';
-import { DateTimePicker } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { DateTimeField } from '../DateTimeField';
 
 import { canWriteOrganisation } from '../roles';
 import { apiErrorMessage, type Manifestation, type Page } from './types';
@@ -301,7 +301,7 @@ export function ManifestationsTab({
               {...form.getInputProps('description')}
             />
             <Group grow>
-              <DateTimePicker
+              <DateTimeField
                 label='Date de début'
                 required
                 value={form.values.date_debut}
@@ -312,7 +312,7 @@ export function ManifestationsTab({
                   )
                 }
               />
-              <DateTimePicker
+              <DateTimeField
                 label='Date de fin'
                 required
                 value={form.values.date_fin}

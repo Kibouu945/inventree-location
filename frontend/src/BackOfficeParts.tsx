@@ -15,7 +15,7 @@ export function renderInvenTreeLocationBackOfficeParts(
 ) {
   checkPluginVersion(context);
   return (
-    <WidgetScroll>
+    <WidgetScroll locale={context.locale}>
       <PartsBackOffice context={context} />
     </WidgetScroll>
   );

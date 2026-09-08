@@ -19,6 +19,7 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
+import { LocaleFrame } from './LocaleFrame';
 import { canWriteCatalog } from './roles';
 
 interface RentableFlags {
@@ -181,5 +182,9 @@ function InvenTreeLocationPanel({
 export function renderInvenTreeLocationPanel(context: InvenTreePluginContext) {
   checkPluginVersion(context);
 
-  return <InvenTreeLocationPanel context={context} />;
+  return (
+    <LocaleFrame locale={context.locale}>
+      <InvenTreeLocationPanel context={context} />
+    </LocaleFrame>
+  );
 }

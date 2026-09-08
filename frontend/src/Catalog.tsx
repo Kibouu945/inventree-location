@@ -15,7 +15,7 @@ export function renderInvenTreeLocationCatalog(
 ) {
   checkPluginVersion(context);
   return (
-    <WidgetScroll>
+    <WidgetScroll locale={context.locale}>
       <CatalogList context={context} />
     </WidgetScroll>
   );

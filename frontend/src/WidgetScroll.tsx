@@ -12,8 +12,17 @@
 // du contenu. On mesure donc la place réellement disponible dans la boîte, et
 // on la suit au redimensionnement du widget.
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { LocaleFrame } from './LocaleFrame';
 
-export function WidgetScroll({ children }: { children: ReactNode }) {
+export function WidgetScroll({
+  children,
+  locale
+}: {
+  children: ReactNode;
+  /** `context.locale` : voir `LocaleFrame`, qui s'en sert pour déclarer la
+   *  langue de la page et celle des calendriers. */
+  locale?: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [hauteur, setHauteur] = useState<number | null>(null);
 
@@ -67,7 +76,7 @@ export function WidgetScroll({ children }: { children: ReactNode }) {
         paddingRight: 4
       }}
     >
-      {children}
+      <LocaleFrame locale={locale}>{children}</LocaleFrame>
     </div>
   );
 }

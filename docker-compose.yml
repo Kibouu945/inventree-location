@@ -39,6 +39,14 @@ services:
       INVENTREE_LOG_LEVEL: INFO
       # Fuseau métier (le calcul au jour doit être en heure locale, pas UTC).
       INVENTREE_TIMEZONE: Europe/Paris
+      # Langue de l'interface. Sans elle, `LANGUAGE_CODE` retombe sur `en-us`
+      # (InvenTree `settings.py` : `get_setting('INVENTREE_LANGUAGE', 'language',
+      # 'en-us')`) : le shell est servi en anglais, Chrome conclut « page
+      # anglaise » et traduit TOUTE la page — nos libellés déjà français
+      # (« Annuler » → « Annuleur », « Enregistrer » → « Économiser ») et
+      # jusqu'aux données saisies (« Zone émargement » affiché « Zone
+      # d'émarrage »). Recette Tassin du 07/09/2026, remarques 3, 9 et 12.
+      INVENTREE_LANGUAGE: fr
       INVENTREE_ADMIN_USER: ${INVENTREE_ADMIN_USER:-admin}
       INVENTREE_ADMIN_PASSWORD: ${INVENTREE_ADMIN_PASSWORD:-admin123}
       INVENTREE_ADMIN_EMAIL: ${INVENTREE_ADMIN_EMAIL:-admin@example.com}
@@ -76,6 +84,8 @@ services:
       INVENTREE_LOG_LEVEL: INFO
       # Même fuseau métier que le serveur.
       INVENTREE_TIMEZONE: Europe/Paris
+      # Même langue que le serveur : le worker rend les rapports et les e-mails.
+      INVENTREE_LANGUAGE: fr
     volumes:
       - .:/home/inventree/plugin
       - inventree_data:/home/inventree/data

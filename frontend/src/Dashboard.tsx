@@ -199,7 +199,7 @@ export function renderInvenTreeLocationDashboardItem(
 ) {
   checkPluginVersion(context);
   return (
-    <WidgetScroll>
+    <WidgetScroll locale={context.locale}>
       <InvenTreeLocationDashboardItem context={context} />
     </WidgetScroll>
   );

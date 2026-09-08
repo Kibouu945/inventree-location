@@ -11,7 +11,7 @@ export function renderInvenTreeLocationConflicts(
 ) {
   checkPluginVersion(context);
   return (
-    <WidgetScroll>
+    <WidgetScroll locale={context.locale}>
       <ConflictsList context={context} />
     </WidgetScroll>
   );

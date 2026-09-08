@@ -15,7 +15,7 @@ export function renderInvenTreeLocationRamassages(
 ) {
   checkPluginVersion(context);
   return (
-    <WidgetScroll>
+    <WidgetScroll locale={context.locale}>
       <RamassagesList context={context} />
     </WidgetScroll>
   );

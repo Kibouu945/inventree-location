@@ -16,7 +16,7 @@ export function renderInvenTreeLocationOrganisation(
 ) {
   checkPluginVersion(context);
   return (
-    <WidgetScroll>
+    <WidgetScroll locale={context.locale}>
       <OrganisationPanel context={context} />
     </WidgetScroll>
   );

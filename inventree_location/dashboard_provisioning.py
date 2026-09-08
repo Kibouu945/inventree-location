@@ -1,4 +1,4 @@
-"""Pose des widgets du plugin sur le profil InvenTree d'un utilisateur.
+"""Pose les réglages du plugin sur le profil InvenTree d'un utilisateur.
 
 Partie « branchée » du mécanisme décrit dans `dashboards` : accès base et
 signal Django. Le calcul de la disposition, lui, reste dans `dashboards` pour
@@ -72,6 +72,49 @@ def apply_dashboard(user) -> bool:
     return True
 
 
+#: Langue de l'interface posée sur les profils sans préférence.
+#:
+#: `INVENTREE_LANGUAGE` ne suffit pas : il fixe le `LANGUAGE_CODE` de Django —
+#: donc les rendus serveur, les rapports et les e-mails — mais l'interface web
+#: d'InvenTree lit `UserProfile.language`, et ce champ est nul sur tout compte
+#: neuf. Le shell restait donc en anglais quoi qu'on mette dans
+#: l'environnement, Chrome concluait « page anglaise » et traduisait la page
+#: entière : nos libellés français réécrits (« Annuler » → « Annuleur »,
+#: « Enregistrer » → « Économiser »), les écrans du cœur en charabia
+#: (« Parties », « Actions boursières », « Aucune inscription disponible ») et
+#: jusqu'aux données saisies (« Zone émargement » affiché « Zone d'émarrage »).
+#: Recette Tassin du 07/09/2026, remarques 3, 9 et 12.
+LANGUE_PAR_DEFAUT = "fr"
+
+
+def apply_language(user) -> bool:
+    """Pose la langue de l'interface si l'utilisateur n'en a pas choisi une.
+
+    Retourne True si le profil a été écrit. Ne touche jamais à un choix
+    existant : c'est un défaut, pas une contrainte — un bénévole anglophone
+    doit pouvoir repasser son compte en anglais depuis ses préférences.
+    """
+
+    profile = _profile_for(user)
+
+    if profile is None:
+        return False
+
+    if profile.language:
+        return False
+
+    profile.language = LANGUE_PAR_DEFAUT
+    profile.save(update_fields=["language"])
+
+    logger.info(
+        "inventree-location: langue %s posée pour %s",
+        LANGUE_PAR_DEFAUT,
+        user,
+    )
+
+    return True
+
+
 def _affected_users(instance, reverse, pk_set):
     """Utilisateurs concernés par un changement d'appartenance aux groupes."""
 
@@ -90,7 +133,7 @@ def _affected_users(instance, reverse, pk_set):
 
 @receiver(m2m_changed, sender=get_user_model().groups.through)
 def sync_dashboard_on_role_change(sender, instance, action, reverse, pk_set, **kwargs):
-    """Repose les widgets dès qu'un rôle est attribué ou retiré."""
+    """Repose widgets et langue dès qu'un rôle est attribué ou retiré."""
 
     if action not in _APPLIED_ACTIONS:
         return
@@ -98,10 +141,11 @@ def sync_dashboard_on_role_change(sender, instance, action, reverse, pk_set, **k
     for user in _affected_users(instance, reverse, pk_set):
         try:
             apply_dashboard(user)
+            apply_language(user)
         except Exception:
-            # Un tableau de bord non posé ne doit jamais faire échouer
+            # Ni le tableau de bord ni la langue ne doivent faire échouer
             # l'attribution du rôle elle-même.
             logger.exception(
-                "inventree-location: pose du tableau de bord impossible pour %s",
+                "inventree-location: pose des réglages impossible pour %s",
                 user,
             )
