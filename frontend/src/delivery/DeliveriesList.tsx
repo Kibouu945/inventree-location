@@ -306,16 +306,51 @@ export function DeliveriesList({
       </Group>
 
       <Group align='flex-end' gap='md' wrap='wrap'>
+        {/* Le livreur ouvre son écran sur sa journée, pas sur l'historique
+            complet (revue interne du 07/09/2026). Choisir un horizon efface
+            la période libre, et inversement : les deux répondent à la même
+            question, les cumuler ne voudrait rien dire. */}
+        <Stack gap={4}>
+          <Text size='sm' fw={500}>
+            Quand
+          </Text>
+          <SegmentedControl
+            value={
+              filters.dateRange[0] || filters.dateRange[1]
+                ? ''
+                : filters.horizon
+            }
+            onChange={(value) =>
+              updateFilters({
+                horizon: value as DeliveryFiltersState['horizon'],
+                dateRange: [null, null]
+              })
+            }
+            data={[
+              { label: "Aujourd'hui", value: 'jour' },
+              { label: 'À venir', value: 'avenir' },
+              { label: 'Tout', value: 'tout' }
+            ]}
+          />
+        </Stack>
         <DatePickerInput
           type='range'
-          label='Période'
-          placeholder="Aujourd'hui ou une période"
+          label='Période précise'
+          placeholder='Toute autre période'
           value={filters.dateRange}
           onChange={(value) =>
-            updateFilters({ dateRange: [value[0], value[1]] })
+            updateFilters({
+              dateRange: [value[0], value[1]],
+              // Une période choisie remplace l'horizon plutôt que de s'y
+              // ajouter : sinon « Aujourd'hui » resterait allumé sur une
+              // liste qui montre le mois prochain.
+              horizon:
+                value[0] || value[1] ? 'tout' : DEFAULT_DELIVERY_FILTERS.horizon
+            })
           }
           clearable
-          w={260}
+          valueFormat='DD/MM/YYYY'
+          w={240}
         />
         <MultiSelect
           label='Lieu'

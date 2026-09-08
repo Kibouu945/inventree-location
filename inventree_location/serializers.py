@@ -1,6 +1,7 @@
 """API serializers for the InvenTreeLocation plugin."""
 
 import json
+import logging
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -45,6 +46,9 @@ from .retours import (
     quantites_du_retour,
 )
 from .sav import get_real_available_stock
+
+
+logger = logging.getLogger(__name__)
 
 
 # Produit français : on restreint le géocodage à la France pour éviter les
@@ -1510,7 +1514,7 @@ class PrestationSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        """Crée une prestation et ses lignes, puis contrôle le stock (STK-01)."""
+        """Crée une prestation et ses lignes, puis signale une pénurie (STK-01)."""
 
         lignes_data = validated_data.pop("lignes_prestation", None)
         prestation = super().create(validated_data)
@@ -1518,13 +1522,13 @@ class PrestationSerializer(serializers.ModelSerializer):
         if lignes_data:
             self._replace_lignes(prestation, lignes_data)
 
-        self._validate_stock(prestation)
+        self._signaler_penurie(prestation)
 
         return prestation
 
     @transaction.atomic
     def update(self, instance, validated_data):
-        """Met à jour une prestation et ses lignes, puis contrôle le stock."""
+        """Met à jour une prestation et ses lignes, puis signale une pénurie."""
 
         lignes_data = validated_data.pop("lignes_prestation", None)
         prestation = super().update(instance, validated_data)
@@ -1532,7 +1536,7 @@ class PrestationSerializer(serializers.ModelSerializer):
         if lignes_data is not None:
             self._replace_lignes(prestation, lignes_data)
 
-        self._validate_stock(prestation)
+        self._signaler_penurie(prestation)
 
         return prestation
 
@@ -1546,25 +1550,55 @@ class PrestationSerializer(serializers.ModelSerializer):
             for ligne_data in lignes_data
         ])
 
-    def _validate_stock(self, prestation):
-        """Bloque la sauvegarde si le stock est insuffisant (STK-01).
+    def _signaler_penurie(self, prestation):
+        """Journalise une pénurie de stock sans refuser l'enregistrement.
 
-        Le calcul est au jour entier ; la ValidationError est levée dans la
-        transaction de create/update, ce qui annule donc la sauvegarde.
+        Ce contrôle levait une `ValidationError` dans la transaction de
+        `create` / `update`, ce qui annulait la sauvegarde. En recette
+        (07/09/2026, remarque 6), le client s'est retrouvé dans une impasse :
+        « un article dépasse le stock disponible, le système bloque alors la
+        réservation et seul annuler est possible. Il ne faut pas bloquer mais
+        alerter. (Voir les Epic E & F) ». Sa prestation était perdue, donc
+        aucune réservation, donc aucune livraison ni ramassage — le cycle
+        complet n'a jamais pu être déroulé.
+
+        Il a raison sur le fond, et le CDC V06 va dans son sens : l'US 3
+        demande « une alerte immédiate dans une table avec tag de couleur », un
+        « message expliquant : disponibles / réservés / manquants » et une
+        « proposition d'alternative », et l'épic F attend des alertes de seuil
+        sur le tableau de bord. Nulle part un refus d'écriture. C'est notre
+        backlog (STK-01, CON-04) qui avait durci la règle en blocage sec.
+
+        Une prestation porte le *prévisionnel* : dire « il me faudra 6 tables »
+        avant de savoir comment les trouver est un usage normal, et le
+        prévisionnel est précisément ce qui permet d'anticiper la tension. Le
+        garde-fou reste là où il protège quelque chose de réel : le passage
+        d'une réservation en statut « validée » refuse toujours une pénurie non
+        forcée (`ReservationSerializer._validate_stock_conflicts_if_needed`).
+
+        La pénurie n'est pas inscrite au registre des conflits ici :
+        `ConflictHistory.reservation` n'est pas nullable, une pénurie purement
+        prévisionnelle n'a donc pas d'entrée à porter. Elle remonte par
+        `PrestationStockPreviewView` (que le formulaire interroge en direct) et
+        entrera au registre dès qu'une réservation la matérialisera.
         """
 
         result = compute_prestation_stock(prestation)
 
-        if result["has_shortage"]:
-            shortages = [line for line in result["lines"] if line["shortage"]]
+        if not result["has_shortage"]:
+            return
 
-            raise serializers.ValidationError({
-                "detail": (
-                    "Stock insuffisant : la prestation ne peut pas être "
-                    "enregistrée en l'état."
-                ),
-                "stock": shortages,
-            })
+        shortages = [line for line in result["lines"] if line["shortage"]]
+
+        logger.warning(
+            "Prestation %s enregistrée avec %s article(s) en pénurie : %s",
+            prestation.pk,
+            len(shortages),
+            ", ".join(
+                f"part {line['part_id']} (manque {line['missing']})"
+                for line in shortages
+            ),
+        )
 
 
 class ManifestationSerializer(serializers.ModelSerializer):

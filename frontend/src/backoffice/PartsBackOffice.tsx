@@ -538,12 +538,20 @@ export function PartsBackOffice({
             />
           </Group>
 
+          {/* Recette Tassin du 07/09/2026, remarque 9 : « il ne semble pas
+              possible d'ajouter du stock à un produit suite à un inventaire ».
+              C'est possible, mais il est passé par l'écran natif d'InvenTree,
+              qui n'incrémente que des lignes de stock existantes — sur un
+              article qui n'en a aucune, il affiche « aucun enregistrement ».
+              Le libellé nomme donc explicitement ce cas d'usage. */}
           <NumberInput
-            label='Stock initial à ajouter'
+            label={
+              modalState.part ? 'Entrée de stock' : 'Stock initial à ajouter'
+            }
             min={0}
             description={
               modalState.part
-                ? 'Ajoute une ligne de stock InvenTree si > 0. Le stock existant ne se modifie pas ici.'
+                ? 'Crée une ligne de stock InvenTree si > 0 (entrée d’inventaire, réassort). S’ajoute au stock existant, ne le remplace pas.'
                 : 'Crée le stock initial dans InvenTree si > 0.'
             }
             value={formValues.stock_initial}

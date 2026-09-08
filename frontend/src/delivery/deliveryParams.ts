@@ -1,6 +1,24 @@
 export type DeliveryViewMode = 'liste' | 'calendrier' | 'carte';
 
+/**
+ * Fenêtre de temps de la tournée.
+ *
+ * Revue interne du 07/09/2026 : « ajouter un filtre pour le livreur dans la
+ * partie tournée livreur pour qu'il voie ses livraisons pour cette journée ou
+ * demain — par défaut, afficher les livraisons du jour et lui permettre de
+ * consulter les livraisons à venir ». L'écran s'ouvrait sur *toutes* les
+ * livraisons, passées comprises : un livreur devait retrouver sa journée dans
+ * la liste avant de commencer.
+ *
+ * `jour` (défaut) : ce qui est en cours aujourd'hui. `avenir` : aujourd'hui et
+ * après. `tout` : aucune borne — c'est aussi ce que vaut l'horizon quand une
+ * période libre est saisie, les deux étant exclusifs.
+ */
+export type DeliveryHorizon = 'jour' | 'avenir' | 'tout';
+
 export interface DeliveryFiltersState {
+  horizon: DeliveryHorizon;
+  /** Période libre. Renseignée, elle l'emporte sur `horizon`. */
   dateRange: [string | null, string | null];
   statuts: string[];
   lieux: number[];
@@ -16,6 +34,7 @@ export interface DeliveryFiltersState {
 }
 
 export const DEFAULT_DELIVERY_FILTERS: DeliveryFiltersState = {
+  horizon: 'jour',
   dateRange: [null, null],
   statuts: [],
   lieux: [],
@@ -23,8 +42,20 @@ export const DEFAULT_DELIVERY_FILTERS: DeliveryFiltersState = {
   ordre: []
 };
 
+/** Aujourd'hui au format `AAAA-MM-JJ`, dans le fuseau du poste.
+ *
+ * Le serveur compare à la journée entière dans son propre fuseau
+ * (`Europe/Paris`, cf. `_borne_journee`) : envoyer une date nue plutôt qu'un
+ * horodatage évite de retrancher un jour depuis un navigateur décalé. */
+export function aujourdhuiIso(maintenant: Date = new Date()): string {
+  const mois = String(maintenant.getMonth() + 1).padStart(2, '0');
+  const jour = String(maintenant.getDate()).padStart(2, '0');
+  return `${maintenant.getFullYear()}-${mois}-${jour}`;
+}
+
 export function buildDeliveryQuery(
-  filters: DeliveryFiltersState
+  filters: DeliveryFiltersState,
+  aujourdhui: string = aujourdhuiIso()
 ): Record<string, string | string[]> {
   const params: Record<string, string | string[]> = {};
 
@@ -36,12 +67,28 @@ export function buildDeliveryQuery(
     params.lieu = filters.lieux.map(String);
   }
 
-  if (filters.dateRange[0]) {
-    params.date_from = filters.dateRange[0];
+  const [debut, fin] = filters.dateRange;
+
+  // Une période saisie à la main l'emporte : l'horizon n'est qu'un raccourci.
+  if (debut || fin) {
+    if (debut) {
+      params.date_from = debut;
+    }
+    if (fin) {
+      params.date_to = fin;
+    }
+
+    return params;
   }
 
-  if (filters.dateRange[1]) {
-    params.date_to = filters.dateRange[1];
+  // `date_from` filtre sur la date de retour, `date_to` sur celle de retrait :
+  // borner les deux à aujourd'hui garde les tournées *en cours* ce jour-là,
+  // y compris celles commencées la veille et rendues demain.
+  if (filters.horizon === 'jour') {
+    params.date_from = aujourdhui;
+    params.date_to = aujourdhui;
+  } else if (filters.horizon === 'avenir') {
+    params.date_from = aujourdhui;
   }
 
   return params;
@@ -56,11 +103,16 @@ export function buildDeliveryQuery(
 export const DELIVERY_URL_KEYS = [
   'livr_from',
   'livr_to',
+  'livr_horizon',
   'livr_statut',
   'livr_lieu',
   'livr_view',
   'livr_ordre'
 ];
+
+function isHorizon(value: string | null): value is DeliveryHorizon {
+  return value === 'jour' || value === 'avenir' || value === 'tout';
+}
 
 function isViewMode(value: string | null): value is DeliveryViewMode {
   return value === 'liste' || value === 'calendrier' || value === 'carte';
@@ -85,6 +137,13 @@ export function serializeDeliveryFilters(
 
   if (filters.dateRange[1]) {
     search.set('livr_to', filters.dateRange[1]);
+  }
+
+  // L'horizon est écrit dès qu'il n'est plus le défaut, y compris « tout » :
+  // sans cela, « voir toutes les livraisons » redeviendrait « aujourd'hui » au
+  // moindre rechargement, puisqu'une absence de clé vaut défaut.
+  if (filters.horizon !== DEFAULT_DELIVERY_FILTERS.horizon) {
+    search.set('livr_horizon', filters.horizon);
   }
 
   if (filters.viewMode !== DEFAULT_DELIVERY_FILTERS.viewMode) {
@@ -139,8 +198,10 @@ export function parseDeliveryFilters(query: string): DeliveryFiltersState {
   const from = search.get('livr_from');
   const to = search.get('livr_to');
   const view = search.get('livr_view');
+  const horizon = search.get('livr_horizon');
 
   return {
+    horizon: isHorizon(horizon) ? horizon : DEFAULT_DELIVERY_FILTERS.horizon,
     dateRange: [from || null, to || null],
     statuts: parseStringList(search.get('livr_statut')),
     lieux: parseIntList(search.get('livr_lieu')),

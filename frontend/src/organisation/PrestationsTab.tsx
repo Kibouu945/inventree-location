@@ -8,20 +8,27 @@ import {
   Group,
   Loader,
   Modal,
+  MultiSelect,
   NumberInput,
+  SegmentedControl,
   Select,
   Stack,
   Table,
   Text,
   Textarea,
   TextInput,
-  Title
+  Title,
+  Tooltip
 } from '@mantine/core';
-import { DateTimePicker } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
+import { buildCatalogQuery } from '../catalog/catalogParams';
+import { PartKindBadge } from '../catalog/PartKindBadge';
+import type { CatalogPage } from '../catalog/types';
+import { useCategoryOptions } from '../catalog/useCategoryOptions';
+import { DateTimeField } from '../DateTimeField';
 
 import { canWriteOrganisation } from '../roles';
 import {
@@ -39,6 +46,12 @@ const STOCK_PREVIEW_URL =
 const MANIFESTATIONS_URL = '/plugin/inventree-location/manifestations/';
 const LIEUX_URL = '/plugin/inventree-location/lieux/';
 const CATALOG_URL = '/plugin/inventree-location/catalog/';
+
+// Taille de la liste déroulante d'articles. Volontairement plus courte que la
+// page du catalogue (50) : au-delà, un menu ne se parcourt plus, on filtre. Le
+// compte total est affiché quand la liste est tronquée, pour que l'utilisateur
+// sache qu'il doit affiner plutôt que de conclure à un article manquant.
+const TAILLE_LISTE_ARTICLES = 30;
 
 interface FormState {
   nom: string;
@@ -62,7 +75,27 @@ function emptyState(): FormState {
   };
 }
 
-/** Sélecteur d'un article du catalogue + quantité. */
+/**
+ * Sélecteur d'un article du catalogue + quantité.
+ *
+ * Recette Tassin du 07/09/2026, remarques 4, 5 et 8. Ce sélecteur tapait déjà
+ * le même endpoint que le catalogue, mais ne lui passait que la recherche
+ * plein-texte et `rentable: 'all'`. Trois conséquences, toutes signalées :
+ *
+ *   « Rechercher un article est très compliqué et pas ergonomique, il y a
+ *     maintenant plus de 500 articles » — sans filtre de catégorie, il fallait
+ *     connaître le libellé exact. Les catégories sont désormais là, et le
+ *     backend étend le filtre aux sous-catégories.
+ *
+ *   « J'ai pu sélectionner un objet non louable » — le défaut est maintenant
+ *     « Louable », et un article non louable ne peut pas être ajouté même en
+ *     basculant sur « Tout », où il s'affiche barré d'un badge.
+ *
+ *   « Comment ai-je pu trouver "Banc de brasserie souple" alors que je ne le
+ *     retrouve pas dans les produits ? » — ce n'était pas un cache : ce
+ *     sélecteur montrait tout, le catalogue filtrait sur louable. Les deux
+ *     écrans partagent désormais `buildCatalogQuery`, donc le même défaut.
+ */
 function ArticleAdder({
   context,
   onAdd
@@ -72,69 +105,154 @@ function ArticleAdder({
 }) {
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
+  const [categories, setCategories] = useState<number[]>([]);
+  const [rentable, setRentable] = useState<boolean | 'all'>(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [quantite, setQuantite] = useState<number>(1);
 
-  const query = useQuery<{ results: Array<{ id: number; name: string }> }>(
+  const categoryOptions = useCategoryOptions(context);
+
+  // Mêmes paramètres que l'écran catalogue, aux deux réglages près qui sont
+  // propres à une liste déroulante : la taille de page, et l'exclusion des
+  // articles inactifs — un article désactivé n'est pas réservable (SCRUM-111),
+  // le proposer à la saisie n'a pas de sens.
+  const params = {
+    ...buildCatalogQuery({
+      search: debouncedSearch,
+      categories,
+      rentable,
+      // La disponibilité affichée ici est celle du jour : la période de la
+      // prestation n'est pas forcément saisie quand on ajoute les articles,
+      // et le bandeau de pénurie sous le tableau, lui, la prend en compte.
+      dateDebut: null,
+      dateFin: null,
+      page: 1
+    }),
+    page_size: String(TAILLE_LISTE_ARTICLES),
+    active: 'true'
+  };
+
+  const query = useQuery<CatalogPage>(
     {
-      queryKey: ['prestation-part-search', debouncedSearch],
+      queryKey: ['prestation-part-search', params],
       queryFn: async () => {
-        const response = await context.api.get(CATALOG_URL, {
-          params: {
-            search: debouncedSearch || undefined,
-            rentable: 'all',
-            page_size: 20
-          }
-        });
-        return response.data;
+        const response = await context.api.get(CATALOG_URL, { params });
+        return response.data as CatalogPage;
       }
     },
     context.queryClient
   );
 
   const results = query.data?.results ?? [];
+  const total = query.data?.count ?? 0;
+  const tronque = total > results.length;
+
   const options = results.map((part) => ({
     value: String(part.id),
     label: part.name
   }));
-  const selected = results.find((part) => String(part.id) === selectedId);
+  const parById = new Map(results.map((part) => [String(part.id), part]));
+  const selected = selectedId ? parById.get(selectedId) : undefined;
+
+  // Un article non louable ne peut pas entrer dans une prestation. Le message
+  // dit lequel et pourquoi, plutôt que de griser un bouton sans explication.
+  const refus =
+    selected && !selected.rentable
+      ? `« ${selected.name} » n'est pas louable : il ne peut pas être réservé.`
+      : null;
 
   return (
-    <Group align='flex-end' gap='sm' wrap='wrap'>
-      <Select
-        label='Article'
-        placeholder='Rechercher…'
-        data={options}
-        searchable
-        searchValue={search}
-        onSearchChange={setSearch}
-        value={selectedId}
-        onChange={setSelectedId}
-        nothingFoundMessage={query.isFetching ? 'Recherche…' : 'Aucun résultat'}
-        w={260}
-      />
-      <NumberInput
-        label='Quantité'
-        min={1}
-        value={quantite}
-        onChange={(value) => setQuantite(Number(value) || 1)}
-        w={100}
-      />
-      <Button
-        disabled={!selected || quantite < 1}
-        onClick={() => {
-          if (!selected) {
-            return;
+    <Stack gap='xs'>
+      <Group align='flex-end' gap='sm' wrap='wrap'>
+        <Select
+          label='Article'
+          placeholder='Nom, description, référence…'
+          data={options}
+          searchable
+          searchValue={search}
+          onSearchChange={setSearch}
+          value={selectedId}
+          onChange={setSelectedId}
+          renderOption={({ option }) => {
+            const part = parById.get(option.value);
+
+            return (
+              <Group gap='xs' justify='space-between' w='100%' wrap='nowrap'>
+                <Text size='sm' truncate>
+                  {option.label}
+                </Text>
+                <PartKindBadge
+                  isVirtual={part?.is_virtual}
+                  consommable={part?.consommable}
+                  rentable={part?.rentable}
+                />
+              </Group>
+            );
+          }}
+          nothingFoundMessage={
+            query.isFetching ? 'Recherche…' : 'Aucun résultat'
           }
-          onAdd({ part: selected.id, partName: selected.name, quantite });
-          setSelectedId(null);
-          setSearch('');
-          setQuantite(1);
-        }}
-      >
-        Ajouter
-      </Button>
-    </Group>
+          w={280}
+        />
+        <MultiSelect
+          label='Catégories'
+          placeholder='Toutes'
+          data={categoryOptions}
+          value={categories.map(String)}
+          onChange={(values) =>
+            setCategories(values.map((value) => Number(value)))
+          }
+          clearable
+          searchable
+          w={220}
+        />
+        <SegmentedControl
+          value={String(rentable)}
+          onChange={(value) =>
+            setRentable(value === 'all' ? 'all' : value === 'true')
+          }
+          data={[
+            { label: 'Louable', value: 'true' },
+            { label: 'Non-louable', value: 'false' },
+            { label: 'Tout', value: 'all' }
+          ]}
+        />
+        <NumberInput
+          label='Quantité'
+          min={1}
+          value={quantite}
+          onChange={(value) => setQuantite(Number(value) || 1)}
+          w={100}
+        />
+        <Button
+          disabled={!selected || quantite < 1 || refus != null}
+          onClick={() => {
+            if (!selected || refus) {
+              return;
+            }
+            onAdd({ part: selected.id, partName: selected.name, quantite });
+            setSelectedId(null);
+            setSearch('');
+            setQuantite(1);
+          }}
+        >
+          Ajouter
+        </Button>
+      </Group>
+
+      {refus && (
+        <Text size='xs' c='red'>
+          {refus}
+        </Text>
+      )}
+
+      {tronque && !refus && (
+        <Text size='xs' c='dimmed'>
+          {total} articles correspondent, {results.length} affichés — affinez la
+          recherche ou choisissez une catégorie.
+        </Text>
+      )}
+    </Stack>
   );
 }
 
@@ -148,6 +266,7 @@ export function PrestationsTab({
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
   const [modalOpen, setModalOpen] = useState(false);
+  const [articlesOuverts, setArticlesOuverts] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [state, setState] = useState<FormState>(emptyState());
   const [stock, setStock] = useState<StockResult | null>(null);
@@ -299,6 +418,9 @@ export function PrestationsTab({
     setEditId(null);
     setState(emptyState());
     setStock(null);
+    // Création : on ne demande pas le matériel d'entrée de jeu. Nommer la
+    // prestation, la rattacher et la dater suffit à l'enregistrer.
+    setArticlesOuverts(false);
     setModalOpen(true);
   }
 
@@ -318,6 +440,8 @@ export function PrestationsTab({
       }))
     });
     setStock(null);
+    // Édition : masquer une liste déjà saisie la ferait passer pour perdue.
+    setArticlesOuverts(prestation.lignes.length > 0);
     setModalOpen(true);
   }
 
@@ -359,16 +483,27 @@ export function PrestationsTab({
     }));
   }
 
+  // La pénurie de stock ne fait plus partie des conditions d'enregistrement.
+  //
+  // « Un article dépasse le stock disponible, le système bloque alors la
+  // réservation et seul annuler est possible. Il ne faut pas bloquer mais
+  // alerter » (recette Tassin du 07/09/2026, remarque 6, renvoyant aux épics E
+  // et F du CDC). Le CDC demande bien une alerte arbitrable — US 3 : « alerte
+  // immédiate dans une table avec tag de couleur, message expliquant :
+  // disponibles / réservés / manquants ». C'est notre backlog (STK-01, CON-04)
+  // qui avait durci la règle en blocage sec, et le résultat était une impasse :
+  // la prestation était perdue, donc pas de réservation, donc pas de livraison
+  // ni de ramassage — le cycle complet n'a jamais pu être déroulé en recette.
+  //
+  // Le garde-fou reste, mais là où il a un sens : le passage d'une réservation
+  // en statut « validée » refuse toujours une pénurie non forcée
+  // (`ReservationSerializer._validate_stock_conflicts_if_needed`).
   const canSubmit = useMemo(
     () =>
       Boolean(
-        state.nom &&
-          state.manifestation &&
-          state.date_debut &&
-          state.date_fin &&
-          !hasShortage
+        state.nom && state.manifestation && state.date_debut && state.date_fin
       ),
-    [state, hasShortage]
+    [state]
   );
 
   return (
@@ -463,7 +598,7 @@ export function PrestationsTab({
             />
           </Group>
           <Group grow>
-            <DateTimePicker
+            <DateTimeField
               label='Date de début'
               required
               value={state.date_debut}
@@ -471,7 +606,7 @@ export function PrestationsTab({
                 setField('date_debut', value ? new Date(value) : null)
               }
             />
-            <DateTimePicker
+            <DateTimeField
               label='Date de fin'
               required
               value={state.date_fin}
@@ -490,83 +625,143 @@ export function PrestationsTab({
             }
           />
 
-          <Title order={6}>Articles (RES-09)</Title>
-          <ArticleAdder context={context} onAdd={addArticle} />
+          {/* Le prévisionnel matériel, replié tant qu'on n'y touche pas.
+           *
+           * Revue interne du 07/09/2026 : la liste d'articles a été jugée
+           * redondante avec celle de la réservation, au point d'être
+           * proposée à la suppression. Elle ne l'est plus — la réservation
+           * reprend désormais celle de la prestation (recette Tassin,
+           * remarque 15) : on saisit une fois, ici. La supprimer coûterait
+           * la moitié « prévision » du moteur de stock, donc toute
+           * anticipation de tension avant qu'une réservation existe, et
+           * irait contre le CDC (« une prestation nécessite au moins une
+           * liste d'objets avec une quantité pour chacun »).
+           *
+           * Reste le grief de fond, qui est juste : le formulaire est long.
+           * La section s'ouvre donc à la demande, et d'elle-même dès qu'une
+           * prestation en édition porte déjà des articles. */}
+          {/* Le `onClick` ne vit que sur le bouton. Posé aussi sur le `Group`,
+              il partait deux fois par remontée d'événement : la section
+              s'ouvrait et se refermait dans le même clic. */}
+          <Group justify='space-between'>
+            <Title order={6}>
+              Articles{' '}
+              {state.articles.length > 0 && `(${state.articles.length})`}
+            </Title>
+            <Button
+              variant='subtle'
+              size='compact-sm'
+              onClick={() => setArticlesOuverts((ouvert) => !ouvert)}
+            >
+              {articlesOuverts ? 'Masquer' : 'Renseigner le matériel'}
+            </Button>
+          </Group>
 
-          {state.articles.length > 0 && (
-            <Table>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Article</Table.Th>
-                  <Table.Th>Quantité</Table.Th>
-                  <Table.Th>Disponible</Table.Th>
-                  <Table.Th />
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {state.articles.map((article) => {
-                  const stockLine = stock?.lines.find(
-                    (line) => line.part_id === article.part
-                  );
-                  return (
-                    <Table.Tr key={article.part}>
-                      <Table.Td>{article.partName}</Table.Td>
-                      <Table.Td>
-                        <NumberInput
-                          min={1}
-                          value={article.quantite}
-                          onChange={(value) =>
-                            setState((s) => ({
-                              ...s,
-                              articles: s.articles.map((a) =>
-                                a.part === article.part
-                                  ? { ...a, quantite: Number(value) || 1 }
-                                  : a
-                              )
-                            }))
-                          }
-                          w={90}
-                        />
-                      </Table.Td>
-                      <Table.Td>
-                        {stockLine ? (
-                          <Text
-                            size='sm'
-                            c={stockLine.shortage ? 'red' : 'green'}
-                          >
-                            {stockLine.available} / {stockLine.total_stock}
-                            {stockLine.shortage
-                              ? ` (manque ${stockLine.missing})`
-                              : ''}
-                          </Text>
-                        ) : (
-                          <Text size='sm' c='dimmed'>
-                            —
-                          </Text>
-                        )}
-                      </Table.Td>
-                      <Table.Td>
-                        <ActionIcon
-                          color='red'
-                          variant='subtle'
-                          onClick={() => removeArticle(article.part)}
-                          aria-label='Retirer'
-                        >
-                          ✕
-                        </ActionIcon>
-                      </Table.Td>
+          {/* Rendu conditionnel plutôt que `<Collapse>` : `@mantine/core` est
+              externalisé vers l'hôte (cf. `vite.config.ts`), et son `Collapse`
+              y restait fermé malgré `in={true}` — la mesure de hauteur ne se
+              faisait pas. On ne cherchait qu'à raccourcir le formulaire, pas à
+              l'animer ; démonter la section évite en prime la requête
+              catalogue de `ArticleAdder` tant qu'on ne s'en sert pas. */}
+          {articlesOuverts && (
+            <Stack gap='sm'>
+              <Text size='xs' c='dimmed'>
+                Le prévisionnel de la prestation. Les réservations rattachées le
+                reprennent automatiquement — inutile de le ressaisir.
+              </Text>
+              <ArticleAdder context={context} onAdd={addArticle} />
+
+              {state.articles.length > 0 && (
+                <Table>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Article</Table.Th>
+                      <Table.Th>Quantité</Table.Th>
+                      {/* « Sous le libellé "disponible" il y a deux chiffres, à
+                      quoi correspondent-ils ? » (recette du 07/09/2026,
+                      remarque 7). C'était `available / total_stock` : le libre
+                      sur la période, puis le parc possédé — et l'ordre se lit
+                      à l'envers de la convention « N sur M ». */}
+                      <Table.Th>Disponible / parc</Table.Th>
+                      <Table.Th />
                     </Table.Tr>
-                  );
-                })}
-              </Table.Tbody>
-            </Table>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {state.articles.map((article) => {
+                      const stockLine = stock?.lines.find(
+                        (line) => line.part_id === article.part
+                      );
+                      return (
+                        <Table.Tr key={article.part}>
+                          <Table.Td>{article.partName}</Table.Td>
+                          <Table.Td>
+                            <NumberInput
+                              min={1}
+                              value={article.quantite}
+                              onChange={(value) =>
+                                setState((s) => ({
+                                  ...s,
+                                  articles: s.articles.map((a) =>
+                                    a.part === article.part
+                                      ? { ...a, quantite: Number(value) || 1 }
+                                      : a
+                                  )
+                                }))
+                              }
+                              w={90}
+                            />
+                          </Table.Td>
+                          <Table.Td>
+                            {stockLine ? (
+                              <Tooltip
+                                multiline
+                                w={260}
+                                label={`${stockLine.available} disponible(s) sur la période, sur un parc de ${stockLine.total_stock}. Le reste est déjà engagé par d'autres prestations ou réservations.`}
+                              >
+                                <Text
+                                  size='sm'
+                                  c={stockLine.shortage ? 'orange' : 'green'}
+                                >
+                                  {stockLine.available} sur{' '}
+                                  {stockLine.total_stock}
+                                  {stockLine.shortage
+                                    ? ` — il manque ${stockLine.missing}`
+                                    : ''}
+                                </Text>
+                              </Tooltip>
+                            ) : (
+                              <Text size='sm' c='dimmed'>
+                                —
+                              </Text>
+                            )}
+                          </Table.Td>
+                          <Table.Td>
+                            <ActionIcon
+                              color='red'
+                              variant='subtle'
+                              onClick={() => removeArticle(article.part)}
+                              aria-label='Retirer'
+                            >
+                              ✕
+                            </ActionIcon>
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
+                  </Table.Tbody>
+                </Table>
+              )}
+            </Stack>
           )}
 
           {hasShortage && (
-            <Alert color='red' title='Stock insuffisant'>
-              Certains articles dépassent le stock disponible sur la période. La
-              prestation ne peut pas être enregistrée tant que le conflit n'est
-              pas résolu (réduire les quantités ou changer la période).
+            <Alert color='orange' title='Stock insuffisant sur la période'>
+              Certains articles dépassent le stock disponible. La prestation
+              reste enregistrable — le prévisionnel peut légitimement précéder
+              l'arbitrage : réduire les quantités, changer la période, ou
+              retenir un article équivalent. En revanche une réservation portant
+              cette pénurie ne pourra pas être validée tant qu'elle n'est pas
+              levée, et elle entrera alors au registre des conflits.
             </Alert>
           )}
 

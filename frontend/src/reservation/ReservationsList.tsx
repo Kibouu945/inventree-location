@@ -20,6 +20,7 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
+import { useCategoryOptions } from '../catalog/useCategoryOptions';
 
 import {
   canArbitrateReservations,
@@ -87,12 +88,6 @@ interface CheckinModalState {
   reservationId?: number;
 }
 
-interface CategoryResponseItem {
-  id?: number;
-  pk?: number;
-  name?: string;
-}
-
 const ownsReservationKey = ownsKeys(RESERVATION_URL_KEYS);
 
 function syncUrl(filters: ReservationFiltersState) {
@@ -156,21 +151,6 @@ export function ReservationsList({
     limit: String(PAGE_SIZE),
     offset: String(offset)
   };
-
-  const categoriesQuery = useQuery<
-    CategoryResponseItem[] | { results: CategoryResponseItem[] }
-  >(
-    {
-      queryKey: ['reservation-category-options'],
-      queryFn: async () => {
-        const response = await context.api.get('/api/part/category/', {
-          params: { limit: 250 }
-        });
-        return response.data;
-      }
-    },
-    context.queryClient
-  );
 
   const query = useQuery<Reservation[] | Page<Reservation>>(
     {
@@ -248,26 +228,10 @@ export function ReservationsList({
     context.queryClient
   );
 
-  const categoryOptions = useMemo(() => {
-    const payload = categoriesQuery.data;
-
-    if (!payload) {
-      return [];
-    }
-
-    const categories = Array.isArray(payload) ? payload : payload.results;
-
-    return categories
-      .map((category) => ({
-        id: category.id ?? category.pk,
-        name: category.name ?? ''
-      }))
-      .filter((category) => Number.isInteger(category.id) && category.name)
-      .map((category) => ({
-        value: String(category.id),
-        label: category.name
-      }));
-  }, [categoriesQuery.data]);
+  // Mêmes options que le catalogue et que le sélecteur d'articles : la même
+  // requête était réécrite ici, et deux variantes dégradées existaient
+  // ailleurs (recette du 07/09/2026, remarque 4).
+  const categoryOptions = useCategoryOptions(context);
 
   function updateFilters(patch: Partial<ReservationFiltersState>) {
     setFilters((current) => ({

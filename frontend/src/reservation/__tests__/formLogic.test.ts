@@ -7,6 +7,7 @@ import {
   emptyReservationValues,
   enrichLignesFromCatalog,
   isReservationEditable,
+  prestationDefaults,
   readOnlyReason,
   removeLigne,
   reservationToFormValues,
@@ -127,6 +128,107 @@ describe('validateReservationValues', () => {
       PRESTATION,
       'soumise'
     );
+    expect(errors).toEqual({});
+  });
+});
+
+describe('prestationDefaults', () => {
+  it('reprend la liste d’articles de la prestation', () => {
+    const defaults = prestationDefaults({
+      ...PRESTATION,
+      lignes: [
+        {
+          id: 1,
+          part: 7,
+          part_name: 'Table brasserie pliante 8 pers',
+          quantite: 6,
+          commentaire: ''
+        },
+        {
+          id: 2,
+          part: 9,
+          part_name: 'Barrière Vauban',
+          quantite: 8,
+          commentaire: ''
+        }
+      ]
+    });
+
+    expect(defaults.lignes).toEqual([
+      {
+        part: 7,
+        partName: 'Table brasserie pliante 8 pers',
+        quantiteDemandee: 6,
+        isVirtual: false
+      },
+      {
+        part: 9,
+        partName: 'Barrière Vauban',
+        quantiteDemandee: 8,
+        isVirtual: false
+      }
+    ]);
+  });
+
+  it('rend une liste vide quand la prestation n’a pas de prévisionnel', () => {
+    expect(prestationDefaults(PRESTATION).lignes).toEqual([]);
+    expect(prestationDefaults({ ...PRESTATION, lignes: [] }).lignes).toEqual(
+      []
+    );
+  });
+
+  it('pose 8h00 quand la période couvre encore la prestation', () => {
+    // Prestation de 10h à 16h, heure locale : 8h00 est bien avant le début
+    // pour le retrait, et bien après la fin pour le retour.
+    const debut = new Date(2026, 6, 10, 10, 0);
+    const fin = new Date(2026, 6, 10, 16, 0);
+
+    const defaults = prestationDefaults({
+      ...PRESTATION,
+      date_debut: debut.toISOString(),
+      date_fin: fin.toISOString()
+    });
+
+    expect(defaults.date_retrait_prevue).toEqual(new Date(2026, 6, 10, 8, 0));
+    expect(defaults.date_retour_prevue).toEqual(fin);
+  });
+
+  it('garde la date de la prestation quand 8h00 arriverait trop tard', () => {
+    // Prestation saisie à minuit : proposer un retrait à 8h00 donnerait une
+    // valeur que la validation RES-07 refuse (retrait postérieur au début).
+    const debut = new Date(2026, 6, 10, 0, 0);
+    const fin = new Date(2026, 6, 11, 0, 0);
+
+    const defaults = prestationDefaults({
+      ...PRESTATION,
+      date_debut: debut.toISOString(),
+      date_fin: fin.toISOString()
+    });
+
+    expect(defaults.date_retrait_prevue).toEqual(debut);
+    expect(defaults.date_retour_prevue).toEqual(new Date(2026, 6, 11, 8, 0));
+  });
+
+  it('propose une période que la validation accepte', () => {
+    const defaults = prestationDefaults({
+      ...PRESTATION,
+      lignes: [
+        { id: 1, part: 7, part_name: 'Nettoyage', quantite: 1, commentaire: '' }
+      ]
+    });
+
+    const errors = validateReservationValues(
+      values({
+        prestation: 1,
+        demandeur: 2,
+        ...defaults,
+        // `isVirtual` est résolu par le catalogue, pas par la prestation.
+        lignes: defaults.lignes.map((ligne) => ({ ...ligne, isVirtual: true }))
+      }),
+      PRESTATION,
+      'soumise'
+    );
+
     expect(errors).toEqual({});
   });
 });

@@ -1854,7 +1854,7 @@ class StockAlertListView(APIView):
             # louable (InvenTree) et ce qu'il en reste de libre aujourd'hui.
             stock_total = get_part_total_stock(part, rentable_item=rentable)
             stock_available = availability.get(part.pk, stock_total)
-            low = rentable.seuil_alerte_bas
+            low, low_source = self._seuil_bas(rentable, part)
             high = rentable.seuil_alerte_haut
 
             part_reasons = []
@@ -1862,12 +1862,23 @@ class StockAlertListView(APIView):
             # Les seuils portent sur ce qu'on possède, pas sur ce qui est libre
             # à l'instant : réapprovisionner se décide sur le parc, pas sur le
             # calendrier des réservations.
-            if rentable.consommable and low is not None and stock_total <= low:
+            #
+            # Le seuil bas n'est plus réservé aux consommables. En recette
+            # (07/09/2026, remarque 11), le client signale : « le stock minimum
+            # de ce produit est = 5, il y a 1 seul produit en stock pourtant on
+            # ne retrouve pas ce produit dans la liste des alertes de stock ».
+            # Deux pièges se cumulaient. D'abord la condition `consommable` :
+            # une trousse de secours à 1 exemplaire sur 5 attendus ne
+            # déclenchait rien parce qu'elle n'était pas cochée consommable —
+            # or « je veux consulter une alerte lorsqu'un stock disponible
+            # futur < seuil critique » (CDC V06, épic F, US 9) ne parle pas de
+            # consommables. Ensuite la source du seuil : voir `_seuil_bas`.
+            if low is not None and stock_total <= low:
                 part_reasons.append({
                     "type": "low_threshold",
                     "message": (
                         f"Stock trop bas : {stock_total} en stock, "
-                        f"seuil bas fixé à {low}"
+                        f"seuil bas fixé à {low}{low_source}"
                     ),
                 })
 
@@ -1922,6 +1933,44 @@ class StockAlertListView(APIView):
         alerts.sort(key=lambda item: item["part_name"].lower())
 
         return alerts
+
+    def _seuil_bas(self, rentable, part):
+        """Seuil bas applicable, et d'où il vient.
+
+        Le plugin ne lisait que `RentableItem.seuil_alerte_bas` et ignorait
+        `Part.minimum_stock`, le champ natif d'InvenTree — que le client avait
+        justement renseigné (recette du 07/09/2026, remarque 11 : « le stock
+        minimum de ce produit est = 5 »). Deux champs pour une même notion,
+        dont un seul était lu : l'utilisateur remplissait celui que l'interface
+        d'InvenTree lui montrait, et rien ne se passait.
+
+        Le champ du plugin garde la priorité — il est explicitement posé pour
+        la location, et le CDC V06 en attend deux (haut et bas) là où InvenTree
+        n'en offre qu'un. `minimum_stock` sert de repli : mieux vaut une alerte
+        fondée sur le champ natif que pas d'alerte du tout. La provenance est
+        rendue avec la valeur pour que le message dise où corriger le seuil.
+        """
+
+        if rentable.seuil_alerte_bas is not None:
+            return rentable.seuil_alerte_bas, ""
+
+        minimum = getattr(part, "minimum_stock", None)
+
+        if minimum is None:
+            return None, ""
+
+        try:
+            minimum = int(minimum)
+        except (TypeError, ValueError):
+            return None, ""
+
+        # `minimum_stock` vaut 0 par défaut chez InvenTree : le prendre pour un
+        # seuil mettrait en alerte tout article à stock nul, sans que personne
+        # n'ait rien demandé.
+        if minimum <= 0:
+            return None, ""
+
+        return minimum, " (stock minimum InvenTree)"
 
     def _projected_tension(
         self, part_id, total_stock, now, manifestation_id=None, lieu_id=None
@@ -2093,7 +2142,9 @@ class CatalogPartListView(APIView):
         category_ids = self._parse_category_ids(category, categories)
 
         if category_ids:
-            queryset = queryset.filter(category_id__in=category_ids)
+            queryset = queryset.filter(
+                category_id__in=self._with_descendants(category_ids)
+            )
 
         active_value = self._parse_boolean(active)
 
@@ -2142,6 +2193,54 @@ class CatalogPartListView(APIView):
                 category_ids.append(int(value))
 
         return category_ids
+
+    def _with_descendants(self, category_ids):
+        """Étend une liste de catégories à leurs sous-catégories.
+
+        Filtrer sur « Mobilier » ne rendait que les articles rangés
+        directement dans « Mobilier », pas ceux de ses sous-catégories : sur
+        une arborescence un peu profonde, le filtre paraissait ne rien
+        trouver. Le client demandait explicitement une recherche « avec les
+        libellés et les catégories, les sous-catégories » (recette du
+        07/09/2026, remarque 4).
+
+        `PartCategory` est un arbre MPTT : `get_descendants(include_self=True)`
+        donne la branche entière en une requête. Si le modèle n'est pas
+        disponible (tests avec une app `part` factice), on retombe sur le
+        filtre plat plutôt que d'échouer.
+        """
+
+        try:
+            from part.models import PartCategory
+        except ImportError:
+            return category_ids
+
+        racines = PartCategory.objects.filter(pk__in=category_ids)
+
+        try:
+            # MPTT sait descendre tout un ensemble de nœuds en une requête
+            # (`TreeQuerySet.get_descendants`). C'est la voie normale.
+            branche = racines.get_descendants(include_self=True)
+        except AttributeError:
+            # Manager sans l'extension queryset : on descend nœud par nœud.
+            try:
+                branche = PartCategory.objects.none()
+
+                for racine in racines:
+                    branche = branche | racine.get_descendants(include_self=True)
+            except (AttributeError, TypeError):
+                # Modèle sans arbre du tout : le filtre plat reste correct,
+                # juste moins large.
+                return category_ids
+
+        try:
+            ids = list(branche.values_list("pk", flat=True))
+        except (AttributeError, TypeError):
+            return category_ids
+
+        # Une catégorie demandée mais absente en base doit rester dans le
+        # filtre : elle ne rendra rien, ce qui est le résultat attendu.
+        return sorted(set(ids) | set(category_ids))
 
     def _parse_boolean(self, value):
         """Parse boolean query parameter."""
@@ -2547,10 +2646,12 @@ class GroupeListView(generics.ListAPIView):
 
 
 class UserListView(generics.ListAPIView):
-    """Liste des utilisateurs actifs (lecture seule), pour le sélecteur demandeur.
+    """Liste des utilisateurs actifs (lecture seule), pour les sélecteurs.
 
-    Paramètre de filtre :
-    - search : recherche sur username, prénom, nom ou email.
+    Paramètres de filtre :
+    - search : recherche sur username, prénom, nom ou email ;
+    - roles : ne garder que les comptes portant l'un de ces rôles (CSV) ;
+    - exclude_roles : écarter les comptes portant l'un de ces rôles (CSV).
     """
 
     permission_classes = [RoleBasedPermission]
@@ -2558,7 +2659,7 @@ class UserListView(generics.ListAPIView):
     pagination_class = CatalogPagination
 
     def get_queryset(self):
-        """Retourne les utilisateurs actifs, filtrés par recherche texte."""
+        """Retourne les utilisateurs actifs, filtrés par recherche et rôle."""
 
         queryset = get_user_model().objects.filter(is_active=True).order_by("username")
 
@@ -2572,4 +2673,38 @@ class UserListView(generics.ListAPIView):
                 | Q(email__icontains=search)
             )
 
-        return queryset
+        # Filtres de rôle. Revue interne du 07/09/2026 : « dans le champ gérant
+        # interne, ne pas afficher le client (l'organisateur) ». Le sélecteur
+        # servait la même liste à tout le monde, si bien qu'on pouvait désigner
+        # un client comme responsable interne d'une réservation. Le CDC V06
+        # sépare pourtant nettement les deux : l'organisateur est le client qui
+        # commande et signe les devis (persona 1), le gestionnaire est celui qui
+        # les traite (persona 2) — et la matrice RACI n'a même pas de colonne
+        # « organisateur », signe qu'il n'agit pas dans l'outil.
+        roles_demandes = self._roles_param("roles")
+        roles_exclus = self._roles_param("exclude_roles")
+
+        if roles_demandes:
+            queryset = queryset.filter(groups__name__in=roles_demandes)
+
+        if roles_exclus:
+            queryset = queryset.exclude(groups__name__in=roles_exclus)
+
+        # Un compte cumulant deux rôles demandés serait sinon rendu deux fois.
+        return queryset.distinct() if (roles_demandes or roles_exclus) else queryset
+
+    def _roles_param(self, name):
+        """Lit une liste de rôles en CSV, en ignorant les noms inconnus.
+
+        Un rôle inexistant est du bruit, pas une erreur : le filtrer
+        silencieusement vaut mieux qu'un 400 sur un sélecteur d'interface.
+        """
+
+        raw = self.request.query_params.get(name)
+
+        if not raw:
+            return []
+
+        demandes = {valeur.strip() for valeur in str(raw).split(",") if valeur.strip()}
+
+        return sorted(demandes & set(roles.ALL_ROLES))
