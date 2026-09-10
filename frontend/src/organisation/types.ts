@@ -53,6 +53,8 @@ export interface Client {
   telephone: string;
   type_client: string;
   siret: string;
+  gestionnaire: number | null;
+  gestionnaire_nom: string;
   actif: boolean;
 }
 

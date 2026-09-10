@@ -235,6 +235,56 @@ class TestClientList:
         assert response.status_code == status.HTTP_200_OK
         assert response.data["results"][0]["nom"] == "Jambville"
 
+    def test_gestionnaire_referent_expose(self, factory, gestionnaire, client):
+        client.gestionnaire = gestionnaire
+        client.save(update_fields=["gestionnaire"])
+
+        request = factory.get("/plugin/inventree-location/clients/")
+        force_authenticate(request, user=gestionnaire)
+        response = ClientListView.as_view()(request)
+
+        assert response.data["results"][0]["gestionnaire"] == gestionnaire.pk
+        assert response.data["results"][0]["gestionnaire_nom"] == "alice"
+
+    def test_gestionnaire_me_ne_rend_que_ses_clients(self, factory, gestionnaire, client):
+        """L'écran d'accueil du gestionnaire n'a pas à connaître son propre id."""
+
+        client.gestionnaire = gestionnaire
+        client.save(update_fields=["gestionnaire"])
+        Client.objects.create(nom="Autre maison", email="autre@exemple.test")
+
+        request = factory.get(
+            "/plugin/inventree-location/clients/", {"gestionnaire": "me"}
+        )
+        force_authenticate(request, user=gestionnaire)
+        response = ClientListView.as_view()(request)
+
+        assert [item["nom"] for item in response.data["results"]] == ["Jambville"]
+
+    def test_gestionnaire_par_identifiant(self, factory, gestionnaire, client):
+        client.gestionnaire = gestionnaire
+        client.save(update_fields=["gestionnaire"])
+        Client.objects.create(nom="Autre maison", email="autre@exemple.test")
+
+        request = factory.get(
+            "/plugin/inventree-location/clients/", {"gestionnaire": gestionnaire.pk}
+        )
+        force_authenticate(request, user=gestionnaire)
+        response = ClientListView.as_view()(request)
+
+        assert [item["nom"] for item in response.data["results"]] == ["Jambville"]
+
+    def test_gestionnaire_illisible_est_ignore(self, factory, gestionnaire, client):
+        # Un paramètre bancal ne doit pas vider l'écran d'accueil ni rendre 400.
+        request = factory.get(
+            "/plugin/inventree-location/clients/", {"gestionnaire": "moi-meme"}
+        )
+        force_authenticate(request, user=gestionnaire)
+        response = ClientListView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [item["nom"] for item in response.data["results"]] == ["Jambville"]
+
     def test_anonymous_returns_401(self, factory):
         request = factory.get("/plugin/inventree-location/groupes/")
         response = ClientListView.as_view()(request)

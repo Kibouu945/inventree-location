@@ -2645,16 +2645,22 @@ class PrestationStockPreviewView(APIView):
 
 
 class ClientListView(generics.ListAPIView):
-    """Liste des clients (lecture seule), pour le sélecteur de manifestation."""
+    """Liste des clients (lecture seule) : sélecteur de manifestation et « mes clients »."""
 
     permission_classes = [RoleBasedPermission]
     serializer_class = ClientSerializer
     pagination_class = CatalogPagination
 
     def get_queryset(self):
-        """Retourne les clients, filtrés par recherche texte."""
+        """Retourne les clients, filtrés par recherche texte et par gestionnaire.
 
-        queryset = Client.objects.all().order_by("nom")
+        `gestionnaire=me` sert l'écran d'accueil du gestionnaire, qui doit
+        retrouver ses clients pendant un appel téléphonique sans connaître son
+        propre identifiant. Une valeur inconnue est ignorée, pas refusée : un
+        400 sur un écran de liste serait pire.
+        """
+
+        queryset = Client.objects.select_related("gestionnaire").order_by("nom")
 
         search = self.request.query_params.get("search")
 
@@ -2662,6 +2668,13 @@ class ClientListView(generics.ListAPIView):
             queryset = queryset.filter(
                 Q(nom__icontains=search) | Q(email__icontains=search)
             )
+
+        gestionnaire = self.request.query_params.get("gestionnaire")
+
+        if gestionnaire == "me":
+            queryset = queryset.filter(gestionnaire=self.request.user)
+        elif gestionnaire and gestionnaire.isdigit():
+            queryset = queryset.filter(gestionnaire_id=int(gestionnaire))
 
         return queryset
 

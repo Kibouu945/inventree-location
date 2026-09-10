@@ -47,6 +47,7 @@ export interface BackOfficeClient {
   type_client: string;
   siret: string;
   gestionnaire: number | null;
+  gestionnaire_nom: string;
   actif: boolean;
   contacts: number;
 }
@@ -64,6 +65,7 @@ export interface BackOfficeClientFormValues {
 export interface BackOfficeContact {
   id: number;
   client: number;
+  client_nom: string;
   nom: string;
   prenom: string;
   email: string | null;

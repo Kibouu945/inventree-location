@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from . import profiles, roles
 from .models import Client, Contact
+from .serializers import _user_label
 
 
 class BackOfficePermission(permissions.BasePermission):
@@ -294,6 +295,7 @@ class BackOfficeClientSerializer(serializers.ModelSerializer):
     """
 
     contacts = serializers.SerializerMethodField()
+    gestionnaire_nom = serializers.SerializerMethodField()
 
     class Meta:
         model = Client
@@ -306,6 +308,7 @@ class BackOfficeClientSerializer(serializers.ModelSerializer):
             "type_client",
             "siret",
             "gestionnaire",
+            "gestionnaire_nom",
             "actif",
             "contacts",
         ]
@@ -319,6 +322,11 @@ class BackOfficeClientSerializer(serializers.ModelSerializer):
         """
 
         return Contact.objects.filter(client=obj.pk).count()
+
+    def get_gestionnaire_nom(self, obj) -> str:
+        """Nom du gestionnaire référent, pour l'afficher sans second appel."""
+
+        return _user_label(obj.gestionnaire)
 
 
 class BackOfficeClientListCreateView(generics.ListCreateAPIView):
@@ -358,13 +366,20 @@ class BackOfficeClientDetailView(generics.RetrieveUpdateAPIView):
 
 
 class BackOfficeContactSerializer(serializers.ModelSerializer):
-    """CRUD d'un contact."""
+    """CRUD d'un contact.
+
+    `client_nom` est là pour la liste tous clients confondus : sans lui, un
+    contact ne s'affiche que par l'identifiant numérique de son client.
+    """
+
+    client_nom = serializers.CharField(source="client.nom", read_only=True)
 
     class Meta:
         model = Contact
         fields = [
             "id",
             "client",
+            "client_nom",
             "nom",
             "prenom",
             "email",
@@ -381,7 +396,9 @@ class BackOfficeContactListCreateView(generics.ListCreateAPIView):
     pagination_class = BackOfficePagination
 
     def get_queryset(self):
-        queryset = Contact.objects.all().order_by("client", "nom", "prenom")
+        queryset = Contact.objects.select_related("client").order_by(
+            "client", "nom", "prenom"
+        )
 
         client = self.request.query_params.get("client")
 
@@ -410,7 +427,7 @@ class BackOfficeContactDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = BackOfficeContactSerializer
 
     def get_queryset(self):
-        return Contact.objects.all()
+        return Contact.objects.select_related("client")
 
 
 class BackOfficeRoleListView(APIView):

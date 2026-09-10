@@ -125,6 +125,30 @@ class TestListeClients:
         contacts = {item["nom"]: item["contacts"] for item in response.data["results"]}
         assert contacts == {"Alpha": 1, "Zoulou": 0}
 
+    def test_gestionnaire_referent_nomme(self, factory, admin):
+        """L'écran liste le référent sans avoir à rappeler l'API utilisateurs."""
+
+        referent = User.objects.create_user(
+            username="hanane",
+            password=STRONG_PASSWORD,
+            first_name="Hanane",
+            last_name="Bousso",
+        )
+        Client.objects.create(nom="Alpha", gestionnaire=referent)
+
+        response = _list(factory, admin)
+
+        ligne = response.data["results"][0]
+        assert ligne["gestionnaire"] == referent.pk
+        assert ligne["gestionnaire_nom"] == "Hanane Bousso (hanane)"
+
+    def test_client_sans_gestionnaire_rend_une_chaine_vide(self, factory, admin):
+        Client.objects.create(nom="Alpha")
+
+        response = _list(factory, admin)
+
+        assert response.data["results"][0]["gestionnaire_nom"] == ""
+
     def test_recherche_sur_nom_et_email(self, factory, admin):
         Client.objects.create(nom="Saint-Exupéry", email="sex@exemple.test")
         Client.objects.create(nom="Jeanne d'Arc", email="jda@exemple.test")
@@ -235,6 +259,18 @@ class TestContacts:
 
         assert response.status_code == status.HTTP_201_CREATED
         assert Contact.objects.get(email="a.khan@exemple.test").client == client
+
+    def test_nom_du_client_expose(self, factory, admin):
+        """La liste tous clients confondus doit nommer le client, pas son id."""
+
+        client = Client.objects.create(nom="Mairie de Tassin")
+        Contact.objects.create(client=client, nom="Durand")
+
+        response = _list_contacts(factory, admin)
+
+        ligne = response.data["results"][0]
+        assert ligne["client"] == client.pk
+        assert ligne["client_nom"] == "Mairie de Tassin"
 
     def test_filtre_par_client(self, factory, admin):
         premier = Client.objects.create(nom="Premier")

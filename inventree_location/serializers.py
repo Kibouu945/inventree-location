@@ -1412,7 +1412,9 @@ def _libelle_interlocuteur(manifestation):
 
 
 class ClientSerializer(serializers.ModelSerializer):
-    """Client en lecture, pour le sélecteur de manifestation."""
+    """Client en lecture, pour le sélecteur de manifestation et « mes clients »."""
+
+    gestionnaire_nom = serializers.SerializerMethodField()
 
     class Meta:
         model = Client
@@ -1424,9 +1426,15 @@ class ClientSerializer(serializers.ModelSerializer):
             "telephone",
             "type_client",
             "siret",
+            "gestionnaire",
+            "gestionnaire_nom",
             "actif",
         ]
-        read_only_fields = fields
+        # DRF interdit de reprendre un champ déclaré dans `read_only_fields`.
+        read_only_fields = [nom for nom in fields if nom != "gestionnaire_nom"]
+
+    def get_gestionnaire_nom(self, obj) -> str:
+        return _user_label(obj.gestionnaire)
 
 
 class ContactSerializer(serializers.ModelSerializer):
