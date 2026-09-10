@@ -21,7 +21,8 @@ from .conflicts import (
 )
 from .models import (
     EtatLivraison,
-    Groupe,
+    Client,
+    Contact,
     LignePrestation,
     LivraisonStatusLog,
     LigneReservation,
@@ -37,7 +38,6 @@ from .models import (
     StatutReservation,
     StatutPrestation,
 )
-from .profiles import user_phone
 from .services.workflow_service import transition_reservation_status
 from .stock import compute_prestation_stock
 from .ramassage import lignes_a_ramasser
@@ -1209,14 +1209,25 @@ class DeliverySerializer(serializers.ModelSerializer):
         return EtatLivraison(obj.etat_livraison).label
 
     def get_organisateur_nom(self, obj):
-        """Nom lisible de l'organisateur de la manifestation."""
+        """Nom de l'interlocuteur à joindre sur place.
 
-        return _user_label(obj.prestation.manifestation.organisateur)
+        Les clés `organisateur_*` sont conservées : quatre écrans de livraison
+        les consomment. Seule la source change — le contact référent de la
+        manifestation, à défaut le client lui-même.
+        """
+
+        return _libelle_interlocuteur(obj.prestation.manifestation)
 
     def get_organisateur_telephone(self, obj):
-        """Téléphone de l'organisateur, vide si non renseigné."""
+        """Téléphone de l'interlocuteur, vide si non renseigné."""
 
-        return user_phone(obj.prestation.manifestation.organisateur)
+        manifestation = obj.prestation.manifestation
+        contact = manifestation.contact
+
+        if contact is not None and contact.telephone:
+            return contact.telephone
+
+        return manifestation.client.telephone
 
     def get_quantite_totale(self, obj):
         """Somme des quantités demandées sur les seules lignes physiques.
@@ -1387,15 +1398,58 @@ class CatalogPartSerializer(serializers.Serializer):
         return rentable_info.seuil_alerte_haut
 
 
-class GroupeSerializer(serializers.ModelSerializer):
-    """Sérialiseur léger d'un groupe scout (sélecteur manifestation)."""
+def _libelle_interlocuteur(manifestation):
+    """Contact référent d'une manifestation, à défaut le nom du client."""
+
+    contact = manifestation.contact
+
+    if contact is None:
+        return manifestation.client.nom
+
+    complet = f"{contact.prenom} {contact.nom}".strip()
+
+    return complet or manifestation.client.nom
+
+
+class ClientSerializer(serializers.ModelSerializer):
+    """Client en lecture, pour le sélecteur de manifestation."""
 
     class Meta:
-        """Configuration du serializer Groupe."""
-
-        model = Groupe
-        fields = ["id", "nom", "code", "adresse"]
+        model = Client
+        fields = [
+            "id",
+            "nom",
+            "adresse",
+            "email",
+            "telephone",
+            "type_client",
+            "siret",
+            "actif",
+        ]
         read_only_fields = fields
+
+
+class ContactSerializer(serializers.ModelSerializer):
+    """Contact d'un client, en lecture."""
+
+    nom_complet = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Contact
+        fields = [
+            "id",
+            "client",
+            "nom",
+            "prenom",
+            "nom_complet",
+            "email",
+            "telephone",
+            "actif",
+        ]
+        read_only_fields = fields
+
+    def get_nom_complet(self, obj):
+        return f"{obj.prenom} {obj.nom}".strip()
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -1662,9 +1716,9 @@ class ManifestationSerializer(serializers.ModelSerializer):
             "statut_effectif",
             "couleur",
             "pourcent_remise_globale",
-            "organisateur",
+            "client",
+            "contact",
             "organisateur_nom",
-            "groupe",
             "prestations_count",
             "created_at",
             "updated_at",
@@ -1679,12 +1733,13 @@ class ManifestationSerializer(serializers.ModelSerializer):
         ]
 
     def get_organisateur_nom(self, obj):
-        """Nom lisible de l'organisateur."""
+        """Interlocuteur de la manifestation.
 
-        user = obj.organisateur
-        full_name = f"{user.first_name} {user.last_name}".strip()
+        Clé conservée pour ne pas casser les écrans qui la lisent ; la source
+        est le contact référent, à défaut le client.
+        """
 
-        return f"{full_name} ({user.username})" if full_name else user.username
+        return _libelle_interlocuteur(obj)
 
     def validate_statut(self, value):
         """Refuse un statut dérivé posé à la main."""

@@ -19,7 +19,8 @@ from django.utils.dateparse import parse_date
 
 from inventree_location import roles
 from inventree_location.models import (
-    Groupe,
+    Client,
+    Contact,
     Lieu,
     LignePrestation,
     LigneReservation,
@@ -105,10 +106,35 @@ ARTICLES = [
     ("Nettoyage du lieu", "SRV-9001", None, 0, None, 0, {"is_virtual": True}),
 ]
 
+#: (clé, nom, adresse, type, prénom et nom du contact, téléphone).
 CLIENTS = [
-    ("Pionniers de Mantes", "PIO", "12 rue des Peupliers, Mantes-la-Jolie"),
-    ("Mairie d'Évreux", "EVR", "Place du Général de Gaulle, Évreux"),
-    ("École des beaux-arts", "EBA", "8 quai Saint-Vincent, Lyon"),
+    (
+        "PIO",
+        "Pionniers de Mantes",
+        "12 rue des Peupliers, Mantes-la-Jolie",
+        "entreprise",
+        "Paul",
+        "Durand",
+        "06 11 22 33 44",
+    ),
+    (
+        "EVR",
+        "Mairie d'Évreux",
+        "Place du Général de Gaulle, Évreux",
+        "entreprise",
+        "Albert",
+        "Khan",
+        "06 22 33 44 55",
+    ),
+    (
+        "EBA",
+        "École des beaux-arts",
+        "8 quai Saint-Vincent, Lyon",
+        "particulier",
+        "Nadia",
+        "Nimbus",
+        "06 33 44 55 66",
+    ),
 ]
 
 
@@ -148,12 +174,12 @@ class Command(BaseCommand):
         self._garde_fou(force=options["force"])
 
         with transaction.atomic():
-            clients = self._clients()
             comptes = self._comptes()
+            clients, contacts = self._clients(comptes[roles.GESTIONNAIRE])
             lieux = self._lieux()
             articles = self._articles()
-            self._manifestations(pivot, clients, comptes, lieux, articles)
-            self._conflit(pivot, clients, comptes, lieux, articles)
+            self._manifestations(pivot, clients, contacts, comptes, lieux, articles)
+            self._conflit(pivot, clients, contacts, comptes, lieux, articles)
 
         self.stdout.write(
             self.style.SUCCESS(
@@ -181,7 +207,7 @@ class Command(BaseCommand):
         if force:
             return
 
-        autres = Groupe.objects.exclude(nom__in=[nom for nom, _, _ in CLIENTS])
+        autres = Client.objects.exclude(nom__in=[c[1] for c in CLIENTS])
 
         if autres.exists():
             raise CommandError(
@@ -193,31 +219,53 @@ class Command(BaseCommand):
     def _nettoyer(self):
         """Supprime ce que la commande a créé, repéré par le domaine e-mail."""
 
-        comptes = get_user_model().objects.filter(email__endswith=f"@{DOMAINE}")
-        manifestations = Manifestation.objects.filter(organisateur__in=comptes)
+        clients = Client.objects.filter(nom__in=[c[1] for c in CLIENTS])
+        manifestations = Manifestation.objects.filter(client__in=clients)
 
         Reservation.objects.filter(
             prestation__manifestation__in=manifestations
         ).delete()
         Prestation.objects.filter(manifestation__in=manifestations).delete()
         manifestations.delete()
-        comptes.delete()
-        Groupe.objects.filter(nom__in=[nom for nom, _, _ in CLIENTS]).delete()
+        Contact.objects.filter(client__in=clients).delete()
+        clients.delete()
+        get_user_model().objects.filter(email__endswith=f"@{DOMAINE}").delete()
 
         self.stdout.write("  données de démonstration supprimées")
 
     # -- construction -------------------------------------------------------
 
-    def _clients(self):
+    def _clients(self, gestionnaire):
+        """Clients et leur contact référent."""
+
         clients = {}
+        contacts = {}
 
-        for nom, code, adresse in CLIENTS:
-            clients[code], _ = Groupe.objects.get_or_create(
-                nom=nom, defaults={"code": code, "adresse": adresse}
+        for cle, nom, adresse, type_client, prenom, nom_contact, tel in CLIENTS:
+            client, _ = Client.objects.get_or_create(
+                nom=nom,
+                defaults={
+                    "adresse": adresse,
+                    "type_client": type_client,
+                    "email": f"{cle.lower()}@{DOMAINE}",
+                    "telephone": tel,
+                    "gestionnaire": gestionnaire,
+                },
             )
+            contact, _ = Contact.objects.get_or_create(
+                client=client,
+                nom=nom_contact,
+                defaults={
+                    "prenom": prenom,
+                    "email": f"{prenom.lower()}.{nom_contact.lower()}@{DOMAINE}",
+                    "telephone": tel,
+                },
+            )
+            clients[cle] = client
+            contacts[cle] = contact
 
-        self.stdout.write(f"  {len(clients)} client(s)")
-        return clients
+        self.stdout.write(f"  {len(clients)} client(s) et leur contact")
+        return clients, contacts
 
     def _comptes(self):
         from django.contrib.auth.models import Group
@@ -298,7 +346,7 @@ class Command(BaseCommand):
         self.stdout.write(f"  {len(articles)} article(s) au catalogue")
         return articles
 
-    def _manifestations(self, pivot, clients, comptes, lieux, articles):
+    def _manifestations(self, pivot, clients, contacts, comptes, lieux, articles):
         """Une terminée, une en cours, deux à venir."""
 
         gestionnaire = comptes[roles.GESTIONNAIRE]
@@ -307,7 +355,7 @@ class Command(BaseCommand):
         plan = [
             (
                 "Festival de printemps",
-                clients["PIO"],
+                "PIO",
                 -30,
                 -25,
                 StatutManifestation.TERMINEE,
@@ -315,7 +363,7 @@ class Command(BaseCommand):
             ),
             (
                 "Séminaire municipal",
-                clients["EVR"],
+                "EVR",
                 -1,
                 2,
                 StatutManifestation.EN_COURS,
@@ -323,7 +371,7 @@ class Command(BaseCommand):
             ),
             (
                 "Gala de fin d'année",
-                clients["EBA"],
+                "EBA",
                 12,
                 15,
                 StatutManifestation.PLANIFIEE,
@@ -331,7 +379,7 @@ class Command(BaseCommand):
             ),
             (
                 "Camp d'été",
-                clients["PIO"],
+                "PIO",
                 45,
                 52,
                 StatutManifestation.PLANIFIEE,
@@ -339,15 +387,15 @@ class Command(BaseCommand):
             ),
         ]
 
-        for rang, (nom, client, debut, fin, statut, statut_resa) in enumerate(plan):
+        for rang, (nom, cle, debut, fin, statut, statut_resa) in enumerate(plan):
             manifestation, _ = Manifestation.objects.get_or_create(
                 nom=nom,
                 defaults={
                     "date_debut": self._instant(pivot, debut, 9),
                     "date_fin": self._instant(pivot, fin, 19),
                     "statut": statut,
-                    "organisateur": gestionnaire,
-                    "groupe": client,
+                    "client": clients[cle],
+                    "contact": contacts[cle],
                     "couleur": ["#2563eb", "#059669", "#b45309", "#be185d"][rang],
                 },
             )
@@ -423,7 +471,7 @@ class Command(BaseCommand):
 
         self.stdout.write(f"  {len(plan)} manifestation(s) et leurs prestations")
 
-    def _conflit(self, pivot, clients, comptes, lieux, articles):
+    def _conflit(self, pivot, clients, contacts, comptes, lieux, articles):
         """Deux réservations sur le même article, au même moment, stock trop court.
 
         Sans ça, l'écran des conflits reste vide et la démonstration ne montre
@@ -441,8 +489,8 @@ class Command(BaseCommand):
                 "date_debut": self._instant(pivot, 20, 18),
                 "date_fin": self._instant(pivot, 20, 23),
                 "statut": StatutManifestation.PLANIFIEE,
-                "organisateur": comptes[roles.GESTIONNAIRE],
-                "groupe": clients["EBA"],
+                "client": clients["EBA"],
+                "contact": contacts["EBA"],
             },
         )
 

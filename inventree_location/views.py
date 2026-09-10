@@ -34,7 +34,7 @@ from .models import (
     ConflictHistory,
     ConflictState,
     ConflictType,
-    Groupe,
+    Client,
     Lieu,
     LigneReservation,
     Manifestation,
@@ -77,7 +77,7 @@ from .serializers import (
     CatalogPartSerializer,
     DeliverySerializer,
     ExampleSerializer,
-    GroupeSerializer,
+    ClientSerializer,
     LieuSerializer,
     ManifestationSerializer,
     PrestationRetourSerializer,
@@ -531,7 +531,8 @@ class DeliveryListView(generics.ListAPIView):
                 "prestation",
                 "prestation__lieu",
                 "prestation__manifestation",
-                "prestation__manifestation__organisateur",
+                "prestation__manifestation__contact",
+                "prestation__manifestation__client",
                 "livreur_assigne",
             )
             .prefetch_related(
@@ -2479,7 +2480,7 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
         """Manifestations, filtrées par statut, recherche et période."""
 
         queryset = (
-            Manifestation.objects.select_related("organisateur", "groupe")
+            Manifestation.objects.select_related("client", "contact")
             .all()
             .order_by("-date_debut")
         )
@@ -2515,7 +2516,7 @@ class ManifestationDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     permission_classes = [ManifestationPermission]
     serializer_class = ManifestationSerializer
-    queryset = Manifestation.objects.select_related("organisateur", "groupe")
+    queryset = Manifestation.objects.select_related("client", "contact")
 
 
 def _prestation_queryset():
@@ -2643,23 +2644,23 @@ class PrestationStockPreviewView(APIView):
         return Response(result, status=response_status)
 
 
-class GroupeListView(generics.ListAPIView):
-    """Liste des groupes scouts (lecture seule), pour le sélecteur manifestation."""
+class ClientListView(generics.ListAPIView):
+    """Liste des clients (lecture seule), pour le sélecteur de manifestation."""
 
     permission_classes = [RoleBasedPermission]
-    serializer_class = GroupeSerializer
+    serializer_class = ClientSerializer
     pagination_class = CatalogPagination
 
     def get_queryset(self):
-        """Retourne les groupes, filtrés par recherche texte."""
+        """Retourne les clients, filtrés par recherche texte."""
 
-        queryset = Groupe.objects.all().order_by("nom")
+        queryset = Client.objects.all().order_by("nom")
 
         search = self.request.query_params.get("search")
 
         if search:
             queryset = queryset.filter(
-                Q(nom__icontains=search) | Q(code__icontains=search)
+                Q(nom__icontains=search) | Q(email__icontains=search)
             )
 
         return queryset

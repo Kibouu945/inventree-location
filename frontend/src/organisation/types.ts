@@ -35,12 +35,37 @@ export interface Manifestation {
   statut_effectif: StatutManifestation | string;
   couleur: string;
   pourcent_remise_globale: string;
-  organisateur: number;
+  client: number;
+  contact: number | null;
+  // Clé conservée : la source est le contact référent, à défaut le client.
   organisateur_nom: string;
-  groupe: number;
   prestations_count: number;
   created_at: string;
   updated_at: string;
+}
+
+/** Client (`ClientSerializer`). */
+export interface Client {
+  id: number;
+  nom: string;
+  adresse: string;
+  email: string | null;
+  telephone: string;
+  type_client: string;
+  siret: string;
+  actif: boolean;
+}
+
+/** Contact d'un client (`ContactSerializer`). */
+export interface Contact {
+  id: number;
+  client: number;
+  nom: string;
+  prenom: string;
+  nom_complet: string;
+  email: string | null;
+  telephone: string;
+  actif: boolean;
 }
 
 /** Lieu géolocalisé autonome (`LieuSerializer`). */

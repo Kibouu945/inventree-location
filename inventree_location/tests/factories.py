@@ -2,13 +2,12 @@
 
 Deux familles. La mise en stock : le stock physique appartient à InvenTree, un
 article n'a de quantité que par ses `StockItem` (hors container, l'app `stock`
-factice de `tests/stock/`). Et la chaîne métier `groupe → manifestation →
+factice de `tests/stock/`). Et la chaîne métier `client → manifestation →
 prestation → réservation → ligne`, que chaque fichier de tests reconstruisait à
 l'identique.
 
 Les builders remplissent tout ce qui est obligatoire et créent les parents
-manquants. Un test qui ne s'intéresse pas au groupe n'a donc plus à le nommer —
-c'est ce qui le rendra insensible à la bascule `Groupe` → `Client`.
+manquants. Un test qui ne s'intéresse pas au client n'a donc plus à le nommer.
 
 Tout est surchargeable par `**overrides` : un test qui affirme quelque chose sur
 une valeur la passe explicitement.
@@ -25,7 +24,8 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from inventree_location.models import (
-    Groupe,
+    Client,
+    Contact,
     Lieu,
     LignePrestation,
     LigneReservation,
@@ -69,8 +69,8 @@ def fixer_stock(part, quantity, *, status=STATUT_OK):
 # Chaîne métier
 # ---------------------------------------------------------------------------
 
-#: Suffixe des valeurs uniques. `Groupe.nom` et `Groupe.code` sont uniques : un
-#: défaut fixe interdirait de créer deux groupes dans le même test.
+#: Suffixe des valeurs uniques. `Client.nom` et `Client.email` le sont : un
+#: défaut fixe interdirait de créer deux clients dans le même test.
 _compteur = itertools.count(1)
 
 
@@ -125,11 +125,19 @@ def make_part(name=None, *, rentable=False, stock=None, **overrides):
     return part
 
 
-def make_groupe(**overrides):
+def make_client(**overrides):
     numero = next(_compteur)
-    overrides.setdefault("nom", f"Groupe {numero}")
-    overrides.setdefault("code", f"G{numero}")
-    return Groupe.objects.create(**overrides)
+    overrides.setdefault("nom", f"Client {numero}")
+    overrides.setdefault("email", f"client-{numero}@exemple.test")
+    overrides.setdefault("type_client", "entreprise")
+    return Client.objects.create(**overrides)
+
+
+def make_contact(client=None, **overrides):
+    numero = next(_compteur)
+    overrides.setdefault("nom", f"Contact {numero}")
+    overrides.setdefault("email", f"contact-{numero}@exemple.test")
+    return Contact.objects.create(client=client or make_client(), **overrides)
 
 
 def make_lieu(**overrides):
@@ -137,8 +145,12 @@ def make_lieu(**overrides):
     return Lieu.objects.create(**overrides)
 
 
-def make_manifestation(groupe=None, organisateur=None, **overrides):
-    """Manifestation, avec son groupe et son organisateur créés au besoin."""
+def make_manifestation(client=None, contact=None, **overrides):
+    """Manifestation, avec son client créé au besoin.
+
+    Le contact reste optionnel : la colonne est nullable, et la plupart des
+    tests n'ont rien à en dire.
+    """
 
     debut = overrides.pop("date_debut", None) or _maintenant()
 
@@ -151,8 +163,8 @@ def make_manifestation(groupe=None, organisateur=None, **overrides):
     overrides.setdefault("date_fin", debut + timedelta(days=7))
 
     return Manifestation.objects.create(
-        groupe=groupe or make_groupe(),
-        organisateur=organisateur or make_user(),
+        client=client or make_client(),
+        contact=contact,
         **overrides,
     )
 
@@ -204,19 +216,19 @@ def creer_chaine(*, quantite=1, stock=None, **overrides):
     fixtures reconstruisaient à la main.
     """
 
-    groupe = overrides.pop("groupe", None) or make_groupe()
-    organisateur = overrides.pop("organisateur", None) or make_user()
+    client = overrides.pop("client", None) or make_client()
+    demandeur = overrides.pop("demandeur", None) or make_user()
     lieu = overrides.pop("lieu", None) or make_lieu()
     part = overrides.pop("part", None) or make_part(rentable=True, stock=stock)
 
-    manifestation = make_manifestation(groupe=groupe, organisateur=organisateur)
+    manifestation = make_manifestation(client=client)
     prestation = make_prestation(manifestation=manifestation, lieu=lieu)
-    reservation = make_reservation(prestation=prestation, demandeur=organisateur)
+    reservation = make_reservation(prestation=prestation, demandeur=demandeur)
     ligne = make_ligne(reservation=reservation, part=part, quantite_demandee=quantite)
 
     return {
-        "groupe": groupe,
-        "organisateur": organisateur,
+        "client": client,
+        "demandeur": demandeur,
         "lieu": lieu,
         "part": part,
         "manifestation": manifestation,

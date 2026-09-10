@@ -10,7 +10,8 @@ from django.core.management.base import CommandError
 
 from inventree_location import roles
 from inventree_location.models import (
-    Groupe,
+    Client,
+    Contact,
     Manifestation,
     Prestation,
     RentableItem,
@@ -24,7 +25,8 @@ class TestSeedDemo:
     def test_cree_un_jeu_complet(self, capsys):
         call_command("seed_demo")
 
-        assert Groupe.objects.count() == 3
+        assert Client.objects.count() == 3
+        assert Contact.objects.count() == 3
         assert get_user_model().objects.count() == len(roles.ALL_ROLES)
         assert Manifestation.objects.count() == 5
         assert Prestation.objects.count() == 10
@@ -64,31 +66,31 @@ class TestSeedDemo:
         call_command("seed_demo")
         call_command("seed_demo")
 
-        assert Groupe.objects.count() == 3
+        assert Client.objects.count() == 3
         assert Prestation.objects.count() == 10
         assert Reservation.objects.count() == 10
 
     def test_refuse_une_base_qui_porte_autre_chose(self):
-        Groupe.objects.create(nom="Vrai client", code="VRAI")
+        Client.objects.create(nom="Vrai client")
 
         with pytest.raises(CommandError, match="hors démonstration"):
             call_command("seed_demo")
 
     def test_force_passe_outre(self):
-        Groupe.objects.create(nom="Vrai client", code="VRAI")
+        Client.objects.create(nom="Vrai client")
 
         call_command("seed_demo", "--force")
 
-        assert Groupe.objects.count() == 4
+        assert Client.objects.count() == 4
 
     def test_reset_ne_supprime_que_la_demonstration(self):
-        vrai = Groupe.objects.create(nom="Vrai client", code="VRAI")
+        vrai = Client.objects.create(nom="Vrai client")
 
         call_command("seed_demo", "--force")
         call_command("seed_demo", "--reset", "--force")
 
-        assert Groupe.objects.filter(pk=vrai.pk).exists()
-        assert Groupe.objects.count() == 4
+        assert Client.objects.filter(pk=vrai.pk).exists()
+        assert Client.objects.count() == 4
 
     def test_date_pivot_invalide_est_refusee(self):
         with pytest.raises(CommandError, match="AAAA-MM-JJ"):

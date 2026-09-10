@@ -26,8 +26,8 @@ import { canWriteOrganisation } from '../roles';
 import { apiErrorMessage, type Manifestation, type Page } from './types';
 
 const MANIFESTATIONS_URL = '/plugin/inventree-location/manifestations/';
-const GROUPES_URL = '/plugin/inventree-location/groupes/';
-const USERS_URL = '/plugin/inventree-location/users/';
+const CLIENTS_URL = '/plugin/inventree-location/clients/';
+const CONTACTS_URL = '/plugin/inventree-location/backoffice/contacts/';
 
 // en_cours / terminée sont dérivés des dates côté serveur, pas posables ici.
 const STATUT_OPTIONS = [
@@ -48,8 +48,8 @@ interface FormValues {
   nom: string;
   description: string;
   statut: string;
-  organisateur: string | null;
-  groupe: string | null;
+  client: string | null;
+  contact: string | null;
   date_debut: Date | null;
   date_fin: Date | null;
 }
@@ -59,8 +59,8 @@ function emptyValues(): FormValues {
     nom: '',
     description: '',
     statut: 'brouillon',
-    organisateur: null,
-    groupe: null,
+    client: null,
+    contact: null,
     date_debut: null,
     date_fin: null
   };
@@ -93,31 +93,33 @@ export function ManifestationsTab({
     context.queryClient
   );
 
-  const groupesQuery = useQuery<{
+  const clientsQuery = useQuery<{
     results: Array<{ id: number; nom: string }>;
   }>(
     {
-      queryKey: ['groupes'],
+      queryKey: ['clients'],
       queryFn: async () => {
-        const response = await context.api.get(GROUPES_URL);
+        const response = await context.api.get(CLIENTS_URL);
         return response.data;
       }
     },
     context.queryClient
   );
 
-  const usersQuery = useQuery<{
-    results: Array<{
-      id: number;
-      username: string;
-      first_name: string;
-      last_name: string;
-    }>;
+  // Les contacts du client choisi seulement : la liste complète mélangerait
+  // les interlocuteurs de tous les clients.
+  const clientChoisi = form.values.client;
+
+  const contactsQuery = useQuery<{
+    results: Array<{ id: number; nom: string; prenom: string }>;
   }>(
     {
-      queryKey: ['users-organisateur'],
+      queryKey: ['contacts', clientChoisi],
+      enabled: Boolean(clientChoisi),
       queryFn: async () => {
-        const response = await context.api.get(USERS_URL);
+        const response = await context.api.get(CONTACTS_URL, {
+          params: { client: clientChoisi }
+        });
         return response.data;
       }
     },
@@ -128,18 +130,15 @@ export function ManifestationsTab({
     ? listQuery.data
     : (listQuery.data?.results ?? []);
 
-  const groupeOptions = (groupesQuery.data?.results ?? []).map((g) => ({
-    value: String(g.id),
-    label: g.nom
+  const clientOptions = (clientsQuery.data?.results ?? []).map((c) => ({
+    value: String(c.id),
+    label: c.nom
   }));
 
-  const userOptions = (usersQuery.data?.results ?? []).map((u) => {
-    const fullName = `${u.first_name} ${u.last_name}`.trim();
-    return {
-      value: String(u.id),
-      label: fullName ? `${fullName} (${u.username})` : u.username
-    };
-  });
+  const contactOptions = (contactsQuery.data?.results ?? []).map((c) => ({
+    value: String(c.id),
+    label: `${c.prenom} ${c.nom}`.trim()
+  }));
 
   const mutation = useMutation(
     {
@@ -148,10 +147,8 @@ export function ManifestationsTab({
           nom: values.nom,
           description: values.description,
           statut: values.statut,
-          organisateur: values.organisateur
-            ? Number(values.organisateur)
-            : null,
-          groupe: values.groupe ? Number(values.groupe) : null,
+          client: values.client ? Number(values.client) : null,
+          contact: values.contact ? Number(values.contact) : null,
           date_debut: values.date_debut?.toISOString(),
           date_fin: values.date_fin?.toISOString()
         };
@@ -201,8 +198,8 @@ export function ManifestationsTab({
       nom: manifestation.nom,
       description: manifestation.description,
       statut: manifestation.statut,
-      organisateur: String(manifestation.organisateur),
-      groupe: String(manifestation.groupe),
+      client: String(manifestation.client),
+      contact: manifestation.contact ? String(manifestation.contact) : null,
       date_debut: new Date(manifestation.date_debut),
       date_fin: new Date(manifestation.date_fin)
     });
@@ -323,17 +320,22 @@ export function ManifestationsTab({
             </Group>
             <Group grow>
               <Select
-                label='Organisateur'
+                label='Client'
                 required
-                data={userOptions}
+                data={clientOptions}
                 searchable
-                {...form.getInputProps('organisateur')}
+                {...form.getInputProps('client')}
               />
               <Select
-                label='Groupe'
-                required
-                data={groupeOptions}
-                {...form.getInputProps('groupe')}
+                label='Contact référent'
+                description={
+                  clientChoisi ? undefined : "Choisir d'abord un client"
+                }
+                data={contactOptions}
+                disabled={!clientChoisi}
+                clearable
+                searchable
+                {...form.getInputProps('contact')}
               />
             </Group>
             <Select

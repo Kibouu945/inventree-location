@@ -57,8 +57,10 @@ class InvenTreeLocation(
         from django.urls import path
 
         from .backoffice import (
-            BackOfficeGroupeDetailView,
-            BackOfficeGroupeListCreateView,
+            BackOfficeClientDetailView,
+            BackOfficeClientListCreateView,
+            BackOfficeContactDetailView,
+            BackOfficeContactListCreateView,
             BackOfficeRoleListView,
             BackOfficeUserDetailView,
             BackOfficeUserListCreateView,
@@ -87,7 +89,7 @@ class InvenTreeLocation(
             DeliveryListView,
             ExampleView,
             GeocodeAddressView,
-            GroupeListView,
+            ClientListView,
             LieuDetailView,
             LieuListCreateView,
             ManifestationDetailView,
@@ -255,14 +257,24 @@ class InvenTreeLocation(
                 name="backoffice-part-image",
             ),
             path(
-                "backoffice/groupes/",
-                BackOfficeGroupeListCreateView.as_view(),
-                name="backoffice-groupe-list-create",
+                "backoffice/clients/",
+                BackOfficeClientListCreateView.as_view(),
+                name="backoffice-client-list-create",
             ),
             path(
-                "backoffice/groupes/<int:pk>/",
-                BackOfficeGroupeDetailView.as_view(),
-                name="backoffice-groupe-detail",
+                "backoffice/clients/<int:pk>/",
+                BackOfficeClientDetailView.as_view(),
+                name="backoffice-client-detail",
+            ),
+            path(
+                "backoffice/contacts/",
+                BackOfficeContactListCreateView.as_view(),
+                name="backoffice-contact-list-create",
+            ),
+            path(
+                "backoffice/contacts/<int:pk>/",
+                BackOfficeContactDetailView.as_view(),
+                name="backoffice-contact-detail",
             ),
             path(
                 "backoffice/roles/",
@@ -306,9 +318,9 @@ class InvenTreeLocation(
                 name="prestation-stock",
             ),
             path(
-                "groupes/",
-                GroupeListView.as_view(),
-                name="groupe-list",
+                "clients/",
+                ClientListView.as_view(),
+                name="client-list",
             ),
             path(
                 "users/",

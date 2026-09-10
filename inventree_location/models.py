@@ -4,7 +4,7 @@ Le catalogue matériel (`Part`, `PartCategory`) et l'historique stock
 (`StockItemTracking`) sont fournis nativement par InvenTree — on ne les
 recrée pas ici. Le plugin se limite à 8 tables propres :
 
-1. Groupe — Organisation scoute propriétaire (mono-tenant MVP)
+1. Client — Personne morale ou particulier, et ses Contact
 2. Profile — Extension OneToOne du User Django
 3. RentableItem — Extension OneToOne de `part.Part` (drapeau louable + champs
    location) ; le stock physique reste celui d'InvenTree (`StockItem`)
@@ -37,6 +37,11 @@ class StatutManifestation(models.TextChoices):
     EN_COURS = "en_cours", _("En cours")
     TERMINEE = "terminee", _("Terminée")
     ANNULEE = "annulee", _("Annulée")
+
+
+class TypeClient(models.TextChoices):
+    ENTREPRISE = "entreprise", _("Entreprise ou association")
+    PARTICULIER = "particulier", _("Particulier")
 
 
 class StatutPrestation(models.TextChoices):
@@ -191,21 +196,97 @@ class TimestampedModel(models.Model):
 # ---------------------------------------------------------------------------
 
 
-class Groupe(TimestampedModel):
-    """Organisation scoute propriétaire (mono-tenant MVP)."""
+class Client(TimestampedModel):
+    """Personne morale ou particulier qui loue du matériel.
+
+    Anciennement `Groupe`, dont le docstring disait lui-même « organisation
+    propriétaire, mono-tenant » : c'était le tenant, pas le client. Le point du
+    09/09/2026 a tranché — un client est une personne morale, et chaque
+    interlocuteur est un `Contact`.
+
+    `email` est unique mais **nullable** : les clients repris n'en avaient pas,
+    et inventer une adresse mettrait de la fausse donnée en base. NULL ne
+    collisionne pas dans un index unique.
+    """
 
     nom = models.CharField(max_length=120, unique=True, verbose_name=_("nom"))
-    code = models.CharField(max_length=20, unique=True, verbose_name=_("code"))
     adresse = models.TextField(blank=True, default="", verbose_name=_("adresse"))
+    email = models.EmailField(
+        unique=True, null=True, blank=True, verbose_name=_("e-mail")
+    )
+    telephone = models.CharField(
+        max_length=30, blank=True, default="", verbose_name=_("téléphone")
+    )
+    type_client = models.CharField(
+        max_length=20,
+        choices=TypeClient.choices,
+        blank=True,
+        default="",
+        verbose_name=_("type de client"),
+    )
+    siret = models.CharField(
+        max_length=20, blank=True, default="", verbose_name=_("SIRET")
+    )
+    # Le portefeuille : « un gestionnaire client gère un ou plusieurs clients »
+    # (09/09). C'est ce champ qui alimente « la liste de mes clients ».
+    gestionnaire = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="clients_geres",
+        verbose_name=_("gestionnaire référent"),
+    )
+    # On désactive, on ne supprime pas : les manifestations passées doivent
+    # rester lisibles.
+    actif = models.BooleanField(default=True, verbose_name=_("actif"))
 
     class Meta:
         app_label = "inventree_location"
         ordering = ["nom"]
-        verbose_name = _("groupe")
-        verbose_name_plural = _("groupes")
+        verbose_name = _("client")
+        verbose_name_plural = _("clients")
 
     def __str__(self):
         return self.nom
+
+
+class Contact(TimestampedModel):
+    """Personne physique rattachée à un client.
+
+    Sans compte : le client externe n'accède pas à la plateforme, c'est le
+    gestionnaire commercial qui le représente (09/09). `email` est unique
+    globalement et nullable, pour la même raison que sur `Client`.
+    """
+
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.CASCADE,
+        related_name="contacts",
+        verbose_name=_("client"),
+    )
+    nom = models.CharField(max_length=120, verbose_name=_("nom"))
+    prenom = models.CharField(
+        max_length=120, blank=True, default="", verbose_name=_("prénom")
+    )
+    email = models.EmailField(
+        unique=True, null=True, blank=True, verbose_name=_("e-mail")
+    )
+    telephone = models.CharField(
+        max_length=30, blank=True, default="", verbose_name=_("téléphone")
+    )
+    # Un contact qui quitte l'entreprise sort des listes sans disparaître des
+    # devis qu'il a signés.
+    actif = models.BooleanField(default=True, verbose_name=_("actif"))
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["client", "nom", "prenom"]
+        verbose_name = _("contact")
+        verbose_name_plural = _("contacts")
+
+    def __str__(self):
+        return f"{self.prenom} {self.nom}".strip()
 
 
 class Profile(models.Model):
@@ -216,14 +297,6 @@ class Profile(models.Model):
         on_delete=models.CASCADE,
         related_name="location_profile",
         verbose_name=_("utilisateur"),
-    )
-    groupe = models.ForeignKey(
-        Groupe,
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="profiles",
-        verbose_name=_("groupe"),
     )
     telephone = models.CharField(
         max_length=20, blank=True, default="", verbose_name=_("téléphone")
@@ -373,17 +446,20 @@ class Manifestation(TimestampedModel):
         default=0,
         verbose_name=_("remise globale (%)"),
     )
-    organisateur = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
-        related_name="manifestations_organisees",
-        verbose_name=_("organisateur"),
-    )
-    groupe = models.ForeignKey(
-        Groupe,
+    client = models.ForeignKey(
+        Client,
         on_delete=models.PROTECT,
         related_name="manifestations",
-        verbose_name=_("groupe"),
+        verbose_name=_("client"),
+    )
+    # Le contact référent : celui qu'on appelle sur place, et celui qui signe.
+    contact = models.ForeignKey(
+        "Contact",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="manifestations",
+        verbose_name=_("contact référent"),
     )
 
     class Meta:

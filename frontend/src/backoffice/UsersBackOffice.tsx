@@ -2,7 +2,7 @@ import type { InvenTreePluginContext } from '@inventreedb/ui';
 import { Alert, Stack, Tabs, Title } from '@mantine/core';
 
 import { canManageBackOffice } from '../roles';
-import { GroupesTab } from './GroupesTab';
+import { ClientsTab } from './ClientsTab';
 import { UsersTab } from './UsersTab';
 
 export function UsersBackOffice({
@@ -27,15 +27,15 @@ export function UsersBackOffice({
       <Tabs defaultValue='utilisateurs'>
         <Tabs.List>
           <Tabs.Tab value='utilisateurs'>Utilisateurs</Tabs.Tab>
-          <Tabs.Tab value='groupes'>Groupes</Tabs.Tab>
+          <Tabs.Tab value='clients'>Clients</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value='utilisateurs' pt='md'>
           <UsersTab context={context} />
         </Tabs.Panel>
 
-        <Tabs.Panel value='groupes' pt='md'>
-          <GroupesTab context={context} />
+        <Tabs.Panel value='clients' pt='md'>
+          <ClientsTab context={context} />
         </Tabs.Panel>
       </Tabs>
     </Stack>

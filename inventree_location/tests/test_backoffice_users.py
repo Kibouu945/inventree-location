@@ -24,7 +24,7 @@ from inventree_location.backoffice import (
     BackOfficeUserDetailView,
     BackOfficeUserListCreateView,
 )
-from inventree_location.models import Groupe, Profile
+from inventree_location.models import Profile
 
 User = get_user_model()
 
@@ -305,17 +305,16 @@ class TestRoleList:
 
 
 class TestProfil:
-    """Téléphone et groupe, portés par le `Profile` et non par le `User`.
+    """Le téléphone, porté par le `Profile` et non par le `User`.
 
-    Le téléphone s'imprime sur le bon de livraison : sans ces champs, seul le
-    Django admin permettait de le renseigner.
+    Il s'imprime sur le bon de livraison : sans ce champ, seul le Django admin
+    permettait de le renseigner.
+
+    Le rattachement à un client a disparu avec `Profile.groupe` : un acteur
+    interne n'appartient à aucun client (09/09/2026).
     """
 
-    @pytest.fixture
-    def groupe(self, db):
-        return Groupe.objects.create(nom="Saint-Exupéry", code="SEX-01")
-
-    def test_creation_avec_telephone_et_groupe(self, factory, admin, groupe):
+    def test_creation_avec_telephone(self, factory, admin):
         response = _create(
             factory,
             admin,
@@ -323,18 +322,12 @@ class TestProfil:
                 "username": "livreuse",
                 "password": STRONG_PASSWORD,
                 "telephone": "0102030405",
-                "groupe": groupe.pk,
             },
         )
 
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["telephone"] == "0102030405"
-        assert response.data["groupe"] == groupe.pk
-        assert response.data["groupe_nom"] == "Saint-Exupéry"
-
-        profile = Profile.objects.get(user__username="livreuse")
-        assert profile.telephone == "0102030405"
-        assert profile.groupe == groupe
+        assert Profile.objects.get(user__username="livreuse").telephone == "0102030405"
 
     def test_creation_sans_profil_reste_vide(self, factory, admin):
         """Aucun `Profile` inutile : le champ absent ne déclenche pas d'écriture."""
@@ -345,22 +338,16 @@ class TestProfil:
 
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["telephone"] == ""
-        assert response.data["groupe"] is None
         assert not Profile.objects.filter(user__username="sobre").exists()
 
-    def test_edition_cree_le_profil_manquant(self, factory, admin, groupe):
+    def test_edition_cree_le_profil_manquant(self, factory, admin):
         cible = _make_user("magasinier")
 
-        response = _patch(
-            factory, admin, cible, {"telephone": "0605040302", "groupe": groupe.pk}
-        )
+        response = _patch(factory, admin, cible, {"telephone": "0605040302"})
 
         assert response.status_code == status.HTTP_200_OK
         assert response.data["telephone"] == "0605040302"
-
-        profile = Profile.objects.get(user=cible)
-        assert profile.telephone == "0605040302"
-        assert profile.groupe == groupe
+        assert Profile.objects.get(user=cible).telephone == "0605040302"
 
     def test_patch_partiel_ne_vide_pas_le_telephone(self, factory, admin):
         cible = _make_user("stable")
@@ -372,34 +359,24 @@ class TestProfil:
         assert response.data["telephone"] == "0700000000"
         assert Profile.objects.get(user=cible).telephone == "0700000000"
 
-    def test_groupe_detachable(self, factory, admin, groupe):
-        cible = _make_user("mobile")
-        Profile.objects.create(user=cible, groupe=groupe)
+    def test_aucun_rattachement_a_un_client(self, factory, admin):
+        """La fiche utilisateur n'expose plus de client : le champ a été retiré
+        du modèle, il ne doit pas revenir par le serializer."""
 
-        response = _patch(factory, admin, cible, {"groupe": None})
+        cible = _make_user("interne")
+        Profile.objects.create(user=cible, telephone="0899887766")
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data["groupe"] is None
-        assert Profile.objects.get(user=cible).groupe is None
+        response = _list(factory, admin, search="interne")
 
-    def test_groupe_inconnu_refuse(self, factory, admin):
-        response = _create(
-            factory,
-            admin,
-            {"username": "perdue", "password": STRONG_PASSWORD, "groupe": 9999},
-        )
+        ligne = response.data["results"][0]
+        assert "groupe" not in ligne
+        assert "groupe_nom" not in ligne
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "groupe" in response.data
-        assert not User.objects.filter(username="perdue").exists()
-
-    def test_liste_expose_le_profil(self, factory, admin, groupe):
+    def test_liste_expose_le_telephone(self, factory, admin):
         cible = _make_user("listee")
-        Profile.objects.create(user=cible, telephone="0899887766", groupe=groupe)
+        Profile.objects.create(user=cible, telephone="0899887766")
 
         response = _list(factory, admin, search="listee")
 
         assert response.status_code == status.HTTP_200_OK
-        ligne = response.data["results"][0]
-        assert ligne["telephone"] == "0899887766"
-        assert ligne["groupe_nom"] == "Saint-Exupéry"
+        assert response.data["results"][0]["telephone"] == "0899887766"

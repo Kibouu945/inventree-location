@@ -10,7 +10,6 @@ import {
   MultiSelect,
   Pagination,
   PasswordInput,
-  Select,
   Stack,
   Table,
   Text,
@@ -20,16 +19,9 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import {
-  GROUPES_URL,
-  listParams,
-  pageCount,
-  ROLES_URL,
-  USERS_URL
-} from './api';
+import { listParams, pageCount, ROLES_URL, USERS_URL } from './api';
 import { apiErrorMessage } from './apiError';
 import type {
-  BackOfficeGroupe,
   BackOfficeRole,
   BackOfficeUser,
   BackOfficeUserFormValues,
@@ -51,8 +43,7 @@ function emptyForm(): BackOfficeUserFormValues {
     password: '',
     is_active: true,
     roles: [],
-    telephone: '',
-    groupe: null
+    telephone: ''
   };
 }
 
@@ -65,8 +56,7 @@ function formFromUser(user: BackOfficeUser): BackOfficeUserFormValues {
     password: '',
     is_active: user.is_active,
     roles: user.roles ?? [],
-    telephone: user.telephone ?? '',
-    groupe: user.groupe === null ? null : String(user.groupe)
+    telephone: user.telephone ?? ''
   };
 }
 
@@ -116,30 +106,9 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
     context.queryClient
   );
 
-  // Liste complète, non paginée à l'usage : le sélecteur doit proposer tous
-  // les groupes, pas seulement les vingt premiers.
-  const groupesQuery = useQuery<Page<BackOfficeGroupe>>(
-    {
-      queryKey: ['backoffice-groupes-options'],
-      queryFn: async () => {
-        const response = await context.api.get(GROUPES_URL, {
-          params: { page_size: '100' }
-        });
-
-        return response.data;
-      }
-    },
-    context.queryClient
-  );
-
   const roleOptions = (rolesQuery.data ?? []).map((role) => ({
     value: role.name,
     label: role.label
-  }));
-
-  const groupeOptions = (groupesQuery.data?.results ?? []).map((groupe) => ({
-    value: String(groupe.id),
-    label: `${groupe.nom} (${groupe.code})`
   }));
 
   const rows = usersQuery.data?.results ?? [];
@@ -190,8 +159,7 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
         email: formValues.email.trim(),
         is_active: formValues.is_active,
         roles: formValues.roles,
-        telephone: formValues.telephone.trim(),
-        groupe: formValues.groupe ? Number(formValues.groupe) : null
+        telephone: formValues.telephone.trim()
       };
 
       if (formValues.password.trim()) {
@@ -204,11 +172,6 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
         await context.api.post(USERS_URL, payload);
       }
 
-      // Le rattachement à un groupe change son nombre de membres, affiché
-      // dans l'autre onglet.
-      await context.queryClient.invalidateQueries({
-        queryKey: ['backoffice-groupes']
-      });
       await usersQuery.refetch();
       closeModal();
     } catch (error: unknown) {
@@ -280,7 +243,6 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
             <Table.Tr>
               <Table.Th>Utilisateur</Table.Th>
               <Table.Th>Contact</Table.Th>
-              <Table.Th>Groupe</Table.Th>
               <Table.Th>Rôles</Table.Th>
               <Table.Th>État</Table.Th>
               <Table.Th>Actions</Table.Th>
@@ -307,8 +269,6 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
                     </Text>
                   </Stack>
                 </Table.Td>
-
-                <Table.Td>{user.groupe_nom || '—'}</Table.Td>
 
                 <Table.Td>
                   <Group gap='xs'>
@@ -433,16 +393,6 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
               }
             />
           </Group>
-
-          <Select
-            label='Groupe'
-            placeholder='Aucun groupe'
-            data={groupeOptions}
-            value={formValues.groupe}
-            onChange={(value) => updateField('groupe', value)}
-            clearable
-            searchable
-          />
 
           <PasswordInput
             label={modalState.user ? 'Nouveau mot de passe' : 'Mot de passe'}

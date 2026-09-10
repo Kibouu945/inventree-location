@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import profiles, roles
-from .models import Groupe, Profile
+from .models import Client, Contact
 
 
 class BackOfficePermission(permissions.BasePermission):
@@ -68,11 +68,6 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
         required=False,
         allow_blank=True,
     )
-    groupe = serializers.PrimaryKeyRelatedField(
-        queryset=Groupe.objects.all(),
-        required=False,
-        allow_null=True,
-    )
 
     class Meta:
         model = get_user_model()
@@ -88,7 +83,6 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
             "roles",
             "password",
             "telephone",
-            "groupe",
         ]
         read_only_fields = [
             "id",
@@ -103,11 +97,7 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
         data["roles"] = sorted(roles.user_roles(instance))
 
         profile = profiles.user_profile(instance)
-        groupe = profile.groupe if profile else None
-
         data["telephone"] = profile.telephone if profile else ""
-        data["groupe"] = groupe.pk if groupe else None
-        data["groupe_nom"] = groupe.nom if groupe else ""
 
         return data
 
@@ -200,12 +190,12 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
         """Sort les champs portés par le `Profile`, pas par le `User`.
 
         Seules les clés effectivement envoyées sont retenues : un PATCH partiel
-        ne doit pas réinitialiser le téléphone ou le groupe.
+        ne doit pas réinitialiser le téléphone.
         """
 
         return {
             name: validated_data.pop(name)
-            for name in ("telephone", "groupe")
+            for name in ("telephone",)
             if name in validated_data
         }
 
@@ -261,7 +251,7 @@ class BackOfficeUserListCreateView(generics.ListCreateAPIView):
 
         queryset = (
             get_user_model()
-            .objects.select_related("location_profile__groupe")
+            .objects.select_related("location_profile")
             .prefetch_related("groups")
             .all()
             .order_by("username")
@@ -287,73 +277,137 @@ class BackOfficeUserDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = BackOfficeUserSerializer
     queryset = (
         get_user_model()
-        .objects.select_related("location_profile__groupe")
+        .objects.select_related("location_profile")
         .prefetch_related("groups")
         .all()
     )
 
 
-class BackOfficeGroupeSerializer(serializers.ModelSerializer):
-    """Sérialiseur CRUD d'un groupe scout, réservé au back-office.
+class BackOfficeClientSerializer(serializers.ModelSerializer):
+    """CRUD d'un client, réservé au back-office.
 
-    Distinct de `GroupeSerializer`, qui reste en lecture seule pour le
+    Distinct de `ClientSerializer`, qui reste en lecture seule pour le
     sélecteur de manifestation.
     """
 
-    membres = serializers.SerializerMethodField()
+    contacts = serializers.SerializerMethodField()
 
     class Meta:
-        model = Groupe
-        fields = ["id", "nom", "code", "adresse", "membres"]
+        model = Client
+        fields = [
+            "id",
+            "nom",
+            "adresse",
+            "email",
+            "telephone",
+            "type_client",
+            "siret",
+            "gestionnaire",
+            "actif",
+            "contacts",
+        ]
 
-    def get_membres(self, obj) -> int:
-        """Nombre d'utilisateurs rattachés au groupe.
+    def get_contacts(self, obj) -> int:
+        """Nombre de contacts.
 
-        Compté depuis `Profile`, jamais via la relation inverse `Groupe.profiles`
-        : le chargeur de plugins importe `models` deux fois et le nom inverse
-        n'est pas rattaché au `Groupe` vu d'ici. Une requête par ligne, sur une
-        liste de groupes qui tient en une page.
+        Compté depuis `Contact`, jamais via la relation inverse
+        `Client.contacts` : le chargeur de plugins importe `models` deux fois et
+        le nom inverse n'est pas rattaché au `Client` vu d'ici.
         """
 
-        return Profile.objects.filter(groupe=obj.pk).count()
+        return Contact.objects.filter(client=obj.pk).count()
 
 
-class BackOfficeGroupeListCreateView(generics.ListCreateAPIView):
-    """Liste et création des groupes depuis le back-office."""
+class BackOfficeClientListCreateView(generics.ListCreateAPIView):
+    """Liste et création des clients."""
 
     permission_classes = [BackOfficePermission]
-    serializer_class = BackOfficeGroupeSerializer
+    serializer_class = BackOfficeClientSerializer
     pagination_class = BackOfficePagination
 
     def get_queryset(self):
-        """Retourne les groupes filtrables par recherche."""
-
-        queryset = Groupe.objects.all().order_by("nom")
+        queryset = Client.objects.all().order_by("nom")
 
         search = self.request.query_params.get("search", "").strip()
 
         if search:
             queryset = queryset.filter(
-                Q(nom__icontains=search) | Q(code__icontains=search)
+                Q(nom__icontains=search) | Q(email__icontains=search)
             )
 
         return queryset
 
 
-class BackOfficeGroupeDetailView(generics.RetrieveUpdateAPIView):
-    """Lecture / modification d'un groupe depuis le back-office.
+class BackOfficeClientDetailView(generics.RetrieveUpdateAPIView):
+    """Lecture / modification d'un client.
 
-    Pas de suppression : `Profile.groupe` et `Manifestation.groupe` sont en
-    `PROTECT`, un groupe déjà utilisé ne peut pas disparaître.
+    Pas de suppression : `Manifestation.client` est en `PROTECT`, et un client
+    se désactive (`actif`) — question d'historique.
     """
 
     permission_classes = [BackOfficePermission]
-    serializer_class = BackOfficeGroupeSerializer
+    serializer_class = BackOfficeClientSerializer
 
     def get_queryset(self):
         """Évalué par requête : un queryset de classe casserait l'import."""
 
-        return Groupe.objects.all()
+        return Client.objects.all()
+
+
+class BackOfficeContactSerializer(serializers.ModelSerializer):
+    """CRUD d'un contact."""
+
+    class Meta:
+        model = Contact
+        fields = [
+            "id",
+            "client",
+            "nom",
+            "prenom",
+            "email",
+            "telephone",
+            "actif",
+        ]
+
+
+class BackOfficeContactListCreateView(generics.ListCreateAPIView):
+    """Liste et création des contacts, filtrables par client."""
+
+    permission_classes = [BackOfficePermission]
+    serializer_class = BackOfficeContactSerializer
+    pagination_class = BackOfficePagination
+
+    def get_queryset(self):
+        queryset = Contact.objects.all().order_by("client", "nom", "prenom")
+
+        client = self.request.query_params.get("client")
+
+        if client:
+            queryset = queryset.filter(client_id=client)
+
+        search = self.request.query_params.get("search", "").strip()
+
+        if search:
+            queryset = queryset.filter(
+                Q(nom__icontains=search)
+                | Q(prenom__icontains=search)
+                | Q(email__icontains=search)
+            )
+
+        return queryset
+
+
+class BackOfficeContactDetailView(generics.RetrieveUpdateAPIView):
+    """Lecture / modification d'un contact.
+
+    Pas de suppression : un contact qui a signé un devis se désactive.
+    """
+
+    permission_classes = [BackOfficePermission]
+    serializer_class = BackOfficeContactSerializer
+
+    def get_queryset(self):
+        return Contact.objects.all()
 
 
 class BackOfficeRoleListView(APIView):

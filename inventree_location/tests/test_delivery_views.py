@@ -11,12 +11,14 @@ from inventree_location import roles
 from inventree_location.models import (
     Lieu,
     Prestation,
-    Profile,
     RentableItem,
     Reservation,
 )
 from inventree_location.views import DeliveryListView, DeliveryMarquerLivreeView
-from inventree_location.tests.factories import make_manifestation
+from inventree_location.tests.factories import (
+    make_contact,
+    make_manifestation,
+)
 
 from part.models import Part, PartCategory
 
@@ -45,10 +47,10 @@ def livreur(db):
 
 
 @pytest.fixture
-def organisateur(db):
-    return User.objects.create_user(
-        username="org", password="pwd12345", first_name="Ora", last_name="Nisatrice"
-    )
+def contact(db):
+    """Le contact référent : c'est lui que le bon de livraison imprime."""
+
+    return make_contact(nom="Nisatrice", prenom="Ora", telephone="0102030405")
 
 
 @pytest.fixture
@@ -65,13 +67,14 @@ def part(db):
 
 
 @pytest.fixture
-def manifestation(db, organisateur):
+def manifestation(db, contact):
     return make_manifestation(
         nom="Camp",
         date_debut="2026-06-01T00:00:00Z",
         date_fin="2026-06-05T00:00:00Z",
         statut="planifiee",
-        organisateur=organisateur,
+        client=contact.client,
+        contact=contact,
     )
 
 
@@ -295,10 +298,12 @@ class TestDeliveryListView:
         assert ids == [wanted.pk]
 
     @pytest.mark.django_db
-    def test_organisateur_contact_populated_when_profile_exists(
-        self, factory, gestionnaire, prestation, part, organisateur
+    def test_le_contact_referent_alimente_les_cles_organisateur(
+        self, factory, gestionnaire, prestation, part
     ):
-        Profile.objects.create(user=organisateur, telephone="0102030405")
+        """Les clés `organisateur_*` sont conservées, leur source change : le
+        contact référent de la manifestation."""
+
         reservation = _make_reservation(
             prestation,
             part,
@@ -316,10 +321,13 @@ class TestDeliveryListView:
         assert "Nisatrice" in row["organisateur_nom"]
 
     @pytest.mark.django_db
-    def test_organisateur_telephone_empty_without_profile(
+    def test_sans_contact_on_retombe_sur_le_client(
         self, factory, gestionnaire, prestation, part
     ):
-        # Aucun Profile pour l'organisateur : ne doit pas lever de 500.
+        # `contact` est nullable : on affiche alors le client, sans lever de 500.
+        prestation.manifestation.contact = None
+        prestation.manifestation.save(update_fields=["contact"])
+
         reservation = _make_reservation(
             prestation,
             part,
@@ -334,6 +342,7 @@ class TestDeliveryListView:
 
         assert response.status_code == status.HTTP_200_OK
         row = next(r for r in response.data if r["id"] == reservation.pk)
+        assert row["organisateur_nom"] == prestation.manifestation.client.nom
         assert row["organisateur_telephone"] == ""
 
     @pytest.mark.django_db
