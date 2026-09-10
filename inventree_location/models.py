@@ -904,6 +904,18 @@ class ReturnIncident(TimestampedModel):
         ordering = ["-reported_at"]
         verbose_name = _("incident de retour")
         verbose_name_plural = _("incidents de retour")
+        constraints = [
+            # Le registre porte un total par nature, pas une suite de
+            # signalements : `projeter_incidents` suppose cette unicité depuis
+            # toujours (`filter(...).first()` puis écriture), et tous les
+            # agrégats du stock réel la supposent aussi. Un POST direct sur
+            # l'endpoint pouvait créer un second enregistrement que la
+            # projection ne voyait jamais — invisible, et double compté.
+            models.UniqueConstraint(
+                fields=["line", "type"],
+                name="incident_unique_par_ligne_et_type",
+            )
+        ]
 
     def __str__(self):
         return f"Incident #{self.pk} ({self.type}) — Ligne#{self.line_id}"

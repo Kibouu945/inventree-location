@@ -25,6 +25,7 @@ from .retours import (
     CHAMPS_RAMASSAGE,
     appliquer_etat_retour,
     projeter_incidents,
+    quantite_attendue_au_retour,
     quantites_depuis_payload,
     quantites_du_retour,
 )
@@ -230,7 +231,7 @@ class RetourRamassageLigneSerializer(serializers.Serializer):
                 "ligne": "Ligne de réservation introuvable."
             })
 
-        expected = ligne.quantite_livree or ligne.quantite_demandee
+        expected = quantite_attendue_au_retour(ligne)
 
         total = (
             attrs.get("quantite_ramassee", 0)

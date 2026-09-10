@@ -1036,3 +1036,82 @@ class TestVocabulaireUnifieEtatRetour:
         ligne.refresh_from_db()
 
         assert ligne.etat_retour == "casse"
+
+
+class TestQuantiteAttendueAuRetour:
+    """La règle « ce qui doit revenir », et l'angle mort qu'elle recouvre.
+
+    Les sept fixtures de retour du dépôt posent toutes `quantite_livree ==
+    quantite_demandee` : l'expression `quantite_livree or quantite_demandee`
+    n'y est donc jamais discriminante, et l'alimenter changerait le
+    comportement en production sans un seul test rouge. Ces trois cas la
+    distinguent.
+    """
+
+    @pytest.fixture
+    def ligne_partiellement_livree(self, db, reservation, part):
+        return LigneReservation.objects.create(
+            reservation=reservation,
+            part=part,
+            quantite_demandee=6,
+            quantite_livree=4,
+        )
+
+    @pytest.mark.django_db
+    def test_la_quantite_livree_prime_sur_la_demandee(
+        self, ligne_partiellement_livree
+    ):
+        from inventree_location.retours import quantite_attendue_au_retour
+
+        assert quantite_attendue_au_retour(ligne_partiellement_livree) == 4
+
+    @pytest.mark.django_db
+    def test_sans_livraison_renseignee_la_demandee_fait_foi(self, ligne):
+        from inventree_location.retours import quantite_attendue_au_retour
+
+        ligne.quantite_livree = 0
+        ligne.save(update_fields=["quantite_livree"])
+
+        assert quantite_attendue_au_retour(ligne) == 6
+
+    @pytest.mark.django_db
+    def test_ramasser_plus_que_livre_est_refuse(
+        self, factory, magasinier, reservation, ligne_partiellement_livree
+    ):
+        """Six demandées, quatre livrées : un ramassage de cinq est refusé."""
+
+        response = _patch_retour(
+            factory,
+            magasinier,
+            reservation,
+            {
+                "lignes": [
+                    {
+                        "ligne": ligne_partiellement_livree.pk,
+                        "quantite_ramassee": 5,
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.django_db
+    def test_ramasser_ce_qui_a_ete_livre_passe(
+        self, factory, magasinier, reservation, ligne_partiellement_livree
+    ):
+        response = _patch_retour(
+            factory,
+            magasinier,
+            reservation,
+            {
+                "lignes": [
+                    {
+                        "ligne": ligne_partiellement_livree.pk,
+                        "quantite_ramassee": 4,
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == status.HTTP_200_OK

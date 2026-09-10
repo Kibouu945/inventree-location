@@ -93,6 +93,26 @@ def ligne(db, reservation):
     )
 
 
+@pytest.fixture
+def ligne_jumelle(db, ligne, magasinier):
+    """Même article, autre bon : `incident_unique_par_ligne_et_type` interdit
+    désormais deux incidents de même nature sur une seule ligne."""
+
+    autre_bon = Reservation.objects.create(
+        prestation=ligne.reservation.prestation,
+        demandeur=magasinier,
+        date_demande=timezone.now(),
+        statut="livree",
+    )
+
+    return LigneReservation.objects.create(
+        reservation=autre_bon,
+        part=ligne.part,
+        quantite_demandee=3,
+        quantite_livree=3,
+    )
+
+
 class TestReturnIncidentModel:
     @pytest.mark.django_db
     def test_creation(self, ligne, magasinier):
@@ -147,6 +167,72 @@ class TestReturnIncidentModel:
         )
         ligne.delete()
         assert ReturnIncident.objects.filter(pk=incident.pk).count() == 0
+
+
+class TestUniciteDuRegistre:
+    """Un seul enregistrement par ligne et par nature.
+
+    Le registre porte un **total par nature** : `projeter_incidents` lit
+    `filter(line=..., type=...).first()` puis écrit dessus, et les agrégats du
+    stock réel somment par type. Rien ne l'imposait en base, donc un POST
+    direct créait un second enregistrement que la projection ne voyait jamais
+    et que les sommes comptaient deux fois.
+    """
+
+    def _poster(self, factory, magasinier, ligne, qty):
+        payload = {
+            "line": ligne.pk,
+            "type": ReturnIncidentType.MISSING,
+            "qty": qty,
+            "comment": "",
+        }
+        request = factory.post(INCIDENTS_URL, payload, format="json")
+        force_authenticate(request, user=magasinier)
+
+        return ReturnIncidentListCreateView.as_view()(request)
+
+    @pytest.mark.django_db
+    def test_le_second_signalement_est_refuse(self, factory, magasinier, ligne):
+        premier = self._poster(factory, magasinier, ligne, 1)
+        second = self._poster(factory, magasinier, ligne, 1)
+
+        assert premier.status_code == status.HTTP_201_CREATED
+        assert second.status_code == status.HTTP_400_BAD_REQUEST
+        # Le message nomme l'enregistrement à modifier : c'est un total, donc
+        # le bon geste est de l'ajuster.
+        assert "existe déjà" in str(second.data["type"][0])
+        assert ReturnIncident.objects.filter(line=ligne).count() == 1
+
+    @pytest.mark.django_db
+    def test_une_autre_nature_reste_acceptee(self, factory, magasinier, ligne):
+        self._poster(factory, magasinier, ligne, 1)
+
+        payload = {
+            "line": ligne.pk,
+            "type": ReturnIncidentType.BROKEN,
+            "qty": 1,
+            "comment": "",
+        }
+        request = factory.post(INCIDENTS_URL, payload, format="json")
+        force_authenticate(request, user=magasinier)
+
+        assert (
+            ReturnIncidentListCreateView.as_view()(request).status_code
+            == status.HTTP_201_CREATED
+        )
+
+    @pytest.mark.django_db
+    def test_la_contrainte_tient_aussi_hors_de_l_api(self, magasinier, ligne):
+        from django.db.utils import IntegrityError
+
+        ReturnIncident.objects.create(
+            line=ligne, type=ReturnIncidentType.MISSING, qty=1
+        )
+
+        with pytest.raises(IntegrityError):
+            ReturnIncident.objects.create(
+                line=ligne, type=ReturnIncidentType.MISSING, qty=1
+            )
 
 
 class TestReturnIncidentListCreate:
@@ -534,9 +620,13 @@ class TestHistoriqueFiltres:
         return ReturnIncidentHistoryView.as_view()(request)
 
     @pytest.mark.django_db
-    def test_borne_des_90_jours(self, factory, magasinier, ligne):
+    def test_borne_des_90_jours(
+        self, factory, magasinier, ligne, ligne_jumelle
+    ):
         dedans = self._incident(ligne, magasinier, 89, ReturnIncidentType.MISSING)
-        dehors = self._incident(ligne, magasinier, 91, ReturnIncidentType.MISSING)
+        dehors = self._incident(
+            ligne_jumelle, magasinier, 91, ReturnIncidentType.MISSING
+        )
 
         response = self._get(factory, magasinier)
 
@@ -667,15 +757,17 @@ class TestReturnLossReport:
     """
 
     @pytest.mark.django_db
-    def test_rapport_agrege(self, factory, magasinier, ligne):
-        for incident_type, qty, facture in [
-            (ReturnIncidentType.MISSING, 1, True),
-            (ReturnIncidentType.MISSING, 1, False),
-            (ReturnIncidentType.BROKEN, 1, False),
-            (ReturnIncidentType.DESTROYED, 1, True),
+    def test_rapport_agrege(self, factory, magasinier, ligne, ligne_jumelle):
+        # Les deux manquants portent sur deux bons du même article : le rapport
+        # agrège par article, la contrainte d'unicité porte sur la ligne.
+        for cible, incident_type, qty, facture in [
+            (ligne, ReturnIncidentType.MISSING, 1, True),
+            (ligne_jumelle, ReturnIncidentType.MISSING, 1, False),
+            (ligne, ReturnIncidentType.BROKEN, 1, False),
+            (ligne, ReturnIncidentType.DESTROYED, 1, True),
         ]:
             ReturnIncident.objects.create(
-                line=ligne,
+                line=cible,
                 type=incident_type,
                 qty=qty,
                 bill_client=facture,
@@ -702,10 +794,15 @@ class TestReturnLossReport:
         assert par_article["destroyed"] == 1
         assert par_article["billed"] == 2
 
-        par_reservation = response.data["by_reservation"][0]
+        # Un manquant par bon, agrégés en un seul article : le regroupement
+        # par bon distingue ce que le regroupement par article additionne.
+        par_bon = {
+            ligne_rapport["reservation_numero"]: ligne_rapport["missing"]
+            for ligne_rapport in response.data["by_reservation"]
+        }
 
-        assert par_reservation["reservation_numero"] == ligne.reservation.numero
-        assert par_reservation["missing"] == 2
+        assert par_bon[ligne.reservation.numero] == 1
+        assert par_bon[ligne_jumelle.reservation.numero] == 1
 
     @pytest.mark.django_db
     def test_rapport_vide(self, factory, magasinier):

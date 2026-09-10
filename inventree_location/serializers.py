@@ -34,6 +34,7 @@ from .models import (
     RentableItem,
     ReturnIncident,
     ReturnIncidentType,
+    SavTicket,
     StatutManifestation,
     StatutReservation,
     StatutPrestation,
@@ -44,6 +45,7 @@ from .ramassage import lignes_a_ramasser
 from .retours import (
     appliquer_etat_retour,
     facturer_le_client,
+    quantite_attendue_au_retour,
     quantites_du_retour,
 )
 from .sav import get_real_available_stock
@@ -314,6 +316,11 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+        # Le validateur d'unicité déduit de `incident_unique_par_ligne_et_type`
+        # est écarté au profit de `_refuser_le_doublon` : il passe avant
+        # `validate()` et son message anglais ne nomme pas l'enregistrement
+        # fautif. La contrainte reste le filet en base.
+        validators = []
 
     def validate(self, attrs):
         """Le cumul des incidents d'une ligne ne peut pas dépasser sa quantité.
@@ -327,9 +334,7 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
 
         if line is not None:
             qty = attrs.get("qty", getattr(self.instance, "qty", 0))
-            # `quantite_livree` n'est renseignée par aucun endpoint à ce jour :
-            # le plafond retombe alors sur la quantité demandée.
-            max_qty = line.quantite_livree or line.quantite_demandee
+            max_qty = quantite_attendue_au_retour(line)
 
             autres = line.incidents.all()
 
@@ -346,7 +351,37 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
                     )
                 })
 
+            self._refuser_le_doublon(line, attrs)
+
         return attrs
+
+    def _refuser_le_doublon(self, line, attrs):
+        """Un seul incident par ligne et par nature.
+
+        Le registre porte un total par nature : le geste correct est d'ajuster
+        l'enregistrement existant, pas d'en créer un second. Le message le
+        nomme, là où le validateur automatique de DRF sort un
+        « must make a unique set » en anglais qui ne dit pas lequel.
+        """
+
+        type_incident = attrs.get("type") or getattr(self.instance, "type", None)
+        autres = line.incidents.filter(type=type_incident)
+
+        if self.instance is not None:
+            autres = autres.exclude(pk=self.instance.pk)
+
+        existant = autres.first()
+
+        if existant is None:
+            return
+
+        raise serializers.ValidationError({
+            "type": (
+                f"Un incident « {existant.get_type_display()} » existe déjà sur "
+                f"cette ligne (#{existant.pk}, {existant.qty} unité(s)) : "
+                "modifiez-le au lieu d'en créer un second."
+            )
+        })
 
     def create(self, validated_data):
         """Crée l'incident et met à jour l'état de retour de la ligne."""
@@ -713,7 +748,17 @@ class ReservationSerializer(serializers.ModelSerializer):
         return reservation
 
     def _replace_lignes(self, reservation, lignes_data):
-        """Remplace l'intégralité des lignes de la réservation."""
+        """Remplace l'intégralité des lignes de la réservation.
+
+        La suppression **cascade** sur le registre d'incidents et sur les
+        tickets SAV, y compris les tickets ouverts que le stock réel lit
+        encore. La vue refuse déjà l'édition au-delà de « soumise », mais
+        l'endpoint des incidents accepte n'importe quelle ligne quel que soit
+        le statut du bon : un brouillon peut donc porter un constat, et le
+        perdait sans un mot. D'où le refus explicite.
+        """
+
+        self._refuser_si_le_retour_est_constate(reservation)
 
         reservation.lignes.all().delete()
 
@@ -721,6 +766,34 @@ class ReservationSerializer(serializers.ModelSerializer):
             LigneReservation(reservation=reservation, **ligne_data)
             for ligne_data in lignes_data
         ])
+
+    @staticmethod
+    def _refuser_si_le_retour_est_constate(reservation):
+        """Refuse le remplacement des lignes quand un retour a été constaté."""
+
+        incidents = ReturnIncident.objects.filter(line__reservation=reservation).count()
+        tickets = SavTicket.objects.filter(
+            ligne_reservation__reservation=reservation
+        ).count()
+
+        if not incidents and not tickets:
+            return
+
+        constats = []
+
+        if incidents:
+            constats.append(f"{incidents} incident(s) de retour")
+
+        if tickets:
+            constats.append(f"{tickets} ticket(s) SAV")
+
+        raise serializers.ValidationError({
+            "lignes": (
+                f"Ce bon porte {' et '.join(constats)} : remplacer ses lignes "
+                "les supprimerait. Modifiez la quantité de la ligne concernée, "
+                "ou traitez le retour avant de rouvrir le bon."
+            )
+        })
 
     def _register_conflict_history(self, reservation):
         """Journalise les conflits détectés, qu'ils bloquent ou non (SCRUM-110).
@@ -835,7 +908,7 @@ class RamassageSerializer(serializers.ModelSerializer):
         total = 0
 
         for ligne in lignes_a_ramasser(obj):
-            total += ligne.quantite_livree or ligne.quantite_demandee or 0
+            total += quantite_attendue_au_retour(ligne)
 
         return total
 
@@ -883,7 +956,7 @@ class BonRamassageSerializer(RamassageSerializer):
                 "part_nom": ligne.part.name,
                 "quantite_demandee": ligne.quantite_demandee,
                 "quantite_livree": ligne.quantite_livree,
-                "quantite_a_ramasser": ligne.quantite_livree or ligne.quantite_demandee,
+                "quantite_a_ramasser": quantite_attendue_au_retour(ligne),
                 "quantite_retournee": quantites["revenue"],
                 "quantite_ramassee": quantites["ok"],
                 "quantite_sav": quantites["casse"],
