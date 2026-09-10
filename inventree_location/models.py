@@ -18,6 +18,8 @@ recrée pas ici. Le plugin se limite à 8 tables propres :
 S'y ajoutent, avec le SAV et les ramassages, les tables du domaine retour.
 """
 
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
@@ -108,6 +110,39 @@ class ConflictType(models.TextChoices):
 class ConflictState(models.TextChoices):
     OPEN = "open", _("Ouvert")
     RESOLVED = "resolved", _("Résolu")
+
+
+#: Taux de TVA en vigueur en France (CDC §46). En choix et non en table : ils
+#: changent par la loi, pas par la saisie.
+TAUX_TVA_CHOICES = [
+    (Decimal("20.00"), _("20 % — taux normal")),
+    (Decimal("10.00"), _("10 % — taux intermédiaire")),
+    (Decimal("5.50"), _("5,5 % — taux réduit")),
+    (Decimal("2.10"), _("2,1 % — taux particulier")),
+]
+
+
+class EtatLigne(models.TextChoices):
+    """État d'une ligne de bon vis-à-vis du devis accepté (CDC §45).
+
+    Un devis signé ne verrouille pas le bon : une ligne ajoutée après coup est
+    « hors devis », une retirée est « annulée ». Ce couple rend la facture
+    calculable, et `ANNULEE` est la seule dispense à « livrer le bon en
+    entier ».
+    """
+
+    NORMALE = "normale", _("Au devis")
+    HORS_DEVIS = "hors_devis", _("Hors devis")
+    ANNULEE = "annulee", _("Annulée")
+
+
+class CanalModification(models.TextChoices):
+    """Canal de la demande de modification (CDC §45 : « tél., mail, verbal »)."""
+
+    TELEPHONE = "telephone", _("Téléphone")
+    MAIL = "mail", _("E-mail")
+    VERBAL = "verbal", _("Verbal")
+    COURRIER = "courrier", _("Courrier")
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +265,31 @@ class RentableItem(TimestampedModel):
     #: eux-mêmes (CDC V06 : « seuil haut + seuil bas + booléen pour désactiver
     #: les alertes »). Un article dont on connaît les seuils mais qu'on ne veut
     #: pas voir remonter — surplus assumé, article en fin de vie.
+    # Tarification (CDC §46). Deux voies exclusives : grille propre
+    # (`PalierTarif`) ou table partagée (`TableRemise`). `prix_location_ht` est
+    # le prix de base, quand aucun palier ne mord.
+    prix_location_ht = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name=_("prix de location HT"),
+    )
+    taux_tva = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        choices=TAUX_TVA_CHOICES,
+        default=Decimal("20.00"),
+        verbose_name=_("taux de TVA"),
+    )
+    table_remise = models.ForeignKey(
+        "inventree_location.TableRemise",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="articles",
+        verbose_name=_("table de remise"),
+    )
     alertes_desactivees = models.BooleanField(
         default=False,
         verbose_name=_("alertes désactivées"),
@@ -624,6 +684,13 @@ class LigneReservation(TimestampedModel):
         choices=EtatRetour.choices,
         verbose_name=_("état du retour"),
     )
+    # Voir `EtatLigne`.
+    etat = models.CharField(
+        max_length=20,
+        choices=EtatLigne.choices,
+        default=EtatLigne.NORMALE,
+        verbose_name=_("état vis-à-vis du devis"),
+    )
     commentaire = models.TextField(
         blank=True, default="", verbose_name=_("commentaire")
     )
@@ -1014,3 +1081,390 @@ class ConflictHistory(TimestampedModel):
 
     def __str__(self):
         return f"{self.conflict_type}:{self.reservation_id}:{self.state}"
+
+
+# ---------------------------------------------------------------------------
+# Tarification (CDC V06 § « Le devis est établi […] sur la base d'un tarif
+# unitaire € HT pour chaque objet »)
+# ---------------------------------------------------------------------------
+
+
+class TableRemise(TimestampedModel):
+    """Grille de remises par quantité, partagée par plusieurs objets.
+
+    Seconde des deux voies de tarification du CDC §46 ; `PalierTarif` est la
+    première. Exclusives par objet — règle applicative, elle porte sur
+    l'existence de lignes liées.
+    """
+
+    nom = models.CharField(max_length=120, unique=True, verbose_name=_("nom"))
+    description = models.TextField(
+        blank=True, default="", verbose_name=_("description")
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["nom"]
+        verbose_name = _("table de remise")
+        verbose_name_plural = _("tables de remise")
+
+    def __str__(self):
+        return self.nom
+
+
+class PalierRemise(models.Model):
+    """Un des cinq niveaux d'une `TableRemise` : à partir de N, X % de remise."""
+
+    table = models.ForeignKey(
+        TableRemise,
+        on_delete=models.CASCADE,
+        related_name="paliers",
+        verbose_name=_("table de remise"),
+    )
+    quantite_min = models.PositiveIntegerField(verbose_name=_("quantité minimale"))
+    pourcentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        verbose_name=_("pourcentage de remise"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["table", "quantite_min"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["table", "quantite_min"],
+                name="unique_palier_remise_par_quantite",
+            ),
+        ]
+        verbose_name = _("palier de remise")
+        verbose_name_plural = _("paliers de remise")
+
+    def __str__(self):
+        return f"≥{self.quantite_min} → −{self.pourcentage} %"
+
+
+class PalierTarif(models.Model):
+    """Grille de prix propre à un objet : à partir de N, tel prix unitaire HT.
+
+    Le prix est **absolu**, pas une remise (exemple du CDC §46).
+    """
+
+    rentable_item = models.ForeignKey(
+        RentableItem,
+        on_delete=models.CASCADE,
+        related_name="paliers_tarif",
+        verbose_name=_("article louable"),
+    )
+    quantite_min = models.PositiveIntegerField(verbose_name=_("quantité minimale"))
+    prix_ht = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name=_("prix unitaire HT"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["rentable_item", "quantite_min"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["rentable_item", "quantite_min"],
+                name="unique_palier_tarif_par_quantite",
+            ),
+        ]
+        verbose_name = _("palier de tarif")
+        verbose_name_plural = _("paliers de tarif")
+
+    def __str__(self):
+        return f"≥{self.quantite_min} → {self.prix_ht} € HT"
+
+
+# ---------------------------------------------------------------------------
+# Devis et facturation
+# ---------------------------------------------------------------------------
+
+
+class StatutDevis(models.TextChoices):
+    """Cycle de vie d'un devis.
+
+    Un devis accepté n'a **aucune transition sortante** : c'est une pièce
+    signée. La suite se joue sur les lignes des bons (`EtatLigne`).
+    """
+
+    BROUILLON = "brouillon", _("Brouillon")
+    EMIS = "emis", _("Émis")
+    ACCEPTE = "accepte", _("Accepté")
+    REFUSE = "refuse", _("Refusé")
+    ANNULE = "annule", _("Annulé")
+
+
+class SupportAcceptation(models.TextChoices):
+    """Par quel canal le client a accepté le devis (CDC § acceptation)."""
+
+    EMAIL = "email", _("E-mail")
+    COURRIER = "courrier", _("Courrier")
+    TELEPHONE = "telephone", _("Téléphone")
+    VERBAL = "verbal", _("Verbal")
+    SUR_PLACE = "sur_place", _("Signature sur place")
+
+
+class Devis(TimestampedModel):
+    """Devis rattaché à une **manifestation**, pas à une réservation.
+
+    N↔M vers les bons (CDC §45, §82), d'où le `ManyToMany`. Montants et
+    libellé du signataire **figés à l'émission** : un devis signé ne change pas
+    de total quand le tarif catalogue bouge.
+    """
+
+    manifestation = models.ForeignKey(
+        Manifestation,
+        on_delete=models.PROTECT,
+        related_name="devis",
+        verbose_name=_("manifestation"),
+    )
+    bons = models.ManyToManyField(
+        Reservation,
+        related_name="devis",
+        blank=True,
+        verbose_name=_("bons de réservation"),
+    )
+    numero = models.CharField(
+        max_length=30,
+        unique=True,
+        verbose_name=_("numéro"),
+    )
+    statut = models.CharField(
+        max_length=20,
+        choices=StatutDevis.choices,
+        default=StatutDevis.BROUILLON,
+        verbose_name=_("statut"),
+    )
+    date_emission = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("date d'émission"),
+    )
+    date_acceptation = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("date d'acceptation"),
+    )
+    support_acceptation = models.CharField(
+        max_length=20,
+        choices=SupportAcceptation.choices,
+        blank=True,
+        default="",
+        verbose_name=_("support d'acceptation"),
+    )
+    motif_refus = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("motif du refus"),
+    )
+    # Contact du client **ou** client lui-même. Instantané : si le contact part,
+    # le devis doit toujours dire qui a signé. La FK `signataire_contact`
+    # arrivera avec le modèle `Contact`.
+    signataire_libelle = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        verbose_name=_("signataire"),
+    )
+    montant_ht = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("montant HT"),
+    )
+    montant_tva = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("montant TVA"),
+    )
+    montant_ttc = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("montant TTC"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["statut"], name="devis_statut_idx"),
+            models.Index(fields=["manifestation"], name="devis_manifestation_idx"),
+        ]
+        verbose_name = _("devis")
+        verbose_name_plural = _("devis")
+
+    def __str__(self):
+        return self.numero
+
+
+class LigneDevis(TimestampedModel):
+    """Ligne d'un devis — **instantané figé**, pas une vue sur le catalogue.
+
+    Prix, TVA et remise recopiés à l'émission : un devis se réédite à
+    l'identique six mois plus tard.
+    """
+
+    devis = models.ForeignKey(
+        Devis,
+        on_delete=models.CASCADE,
+        related_name="lignes",
+        verbose_name=_("devis"),
+    )
+    part = models.ForeignKey(
+        "part.Part",
+        on_delete=models.PROTECT,
+        related_name="lignes_devis",
+        verbose_name=_("article"),
+    )
+    quantite = models.PositiveIntegerField(verbose_name=_("quantité"))
+    prix_unitaire_ht = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name=_("prix unitaire HT"),
+    )
+    taux_tva = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        choices=TAUX_TVA_CHOICES,
+        default=Decimal("20.00"),
+        verbose_name=_("taux de TVA"),
+    )
+    remise_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("remise (%)"),
+    )
+    montant_ht = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("montant HT"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["devis", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["devis", "part"],
+                name="unique_ligne_devis_par_article",
+            ),
+        ]
+        verbose_name = _("ligne de devis")
+        verbose_name_plural = _("lignes de devis")
+
+    def __str__(self):
+        return f"{self.devis_id} — part#{self.part_id} ×{self.quantite}"
+
+
+class FactureReservation(TimestampedModel):
+    """Facture, rattachée à **un ou plusieurs** devis (CDC §88).
+
+    Tables et clés étrangères seulement : aucun écran, aucun calcul de montant.
+    """
+
+    numero = models.CharField(
+        max_length=30,
+        unique=True,
+        verbose_name=_("numéro"),
+    )
+    devis = models.ManyToManyField(
+        Devis,
+        related_name="factures",
+        verbose_name=_("devis"),
+    )
+    date_emission = models.DateField(verbose_name=_("date d'émission"))
+    montant_total_ht = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("montant total HT"),
+    )
+    remise_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("remise (%)"),
+    )
+    entierement_regle = models.BooleanField(
+        default=False,
+        verbose_name=_("entièrement réglé"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-date_emission"]
+        verbose_name = _("facture")
+        verbose_name_plural = _("factures")
+
+    def __str__(self):
+        return self.numero
+
+
+# ---------------------------------------------------------------------------
+# Traçabilité des modifications après acceptation d'un devis
+# ---------------------------------------------------------------------------
+
+
+class ModificationBon(TimestampedModel):
+    """Journal des modifications d'objets d'un bon après acceptation d'un devis.
+
+    Le CDC §45 exige quatre informations : personne, message, canal,
+    horodatage. Rattaché au **bon** et non à la ligne : `_replace_lignes`
+    recrée les lignes à chaque édition et effacerait le journal.
+    """
+
+    reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.CASCADE,
+        related_name="modifications",
+        verbose_name=_("bon de réservation"),
+    )
+    part = models.ForeignKey(
+        "part.Part",
+        on_delete=models.PROTECT,
+        related_name="modifications_bon",
+        verbose_name=_("article"),
+    )
+    auteur = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="modifications_bon",
+        verbose_name=_("auteur"),
+    )
+    canal = models.CharField(
+        max_length=20,
+        choices=CanalModification.choices,
+        verbose_name=_("canal de la demande"),
+    )
+    message = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("message à l'origine"),
+    )
+    etat_resultant = models.CharField(
+        max_length=20,
+        choices=EtatLigne.choices,
+        verbose_name=_("état résultant de la ligne"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["reservation"], name="modif_bon_resa_idx"),
+        ]
+        verbose_name = _("modification de bon")
+        verbose_name_plural = _("modifications de bon")
+
+    def __str__(self):
+        return f"{self.reservation_id} — part#{self.part_id} → {self.etat_resultant}"
