@@ -9,14 +9,15 @@ from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from inventree_location.models import (
-    Groupe,
     Lieu,
-    Manifestation,
     Prestation,
     RentableItem,
     Reservation,
 )
-from inventree_location.tests.factories import mettre_en_stock
+from inventree_location.tests.factories import (
+    make_manifestation,
+    mettre_en_stock,
+)
 from inventree_location.views import StockAlertListView
 
 from part.models import Part, PartCategory
@@ -44,17 +45,13 @@ def manager(db):
 def alert_setup(db):
     now = timezone.now().replace(minute=0, second=0, microsecond=0)
 
-    group = Groupe.objects.create(nom="G-ALERT", code="GA")
-    organizer = User.objects.create_user(username="org-alert", password="pwd")
     requester = User.objects.create_user(username="requester-alert", password="pwd")
 
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp alertes",
         date_debut=now,
         date_fin=now + timedelta(days=5),
         statut="planifiee",
-        organisateur=organizer,
-        groupe=group,
     )
     # ORG-01/ORG-02 : le lieu est autonome et c'est la prestation qui le
     # référence (Prestation.lieu), plus l'inverse.

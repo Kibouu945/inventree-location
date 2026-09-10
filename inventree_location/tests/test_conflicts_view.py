@@ -7,7 +7,10 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from django.contrib.auth import get_user_model
 
 from inventree_location.models import Reservation
-from inventree_location.tests.factories import fixer_stock, mettre_en_stock
+from inventree_location.tests.factories import (
+    fixer_stock,
+    make_manifestation,
+)
 from inventree_location.views import ConflictsListView
 
 from part.models import Part, PartCategory
@@ -38,19 +41,14 @@ def setup_conflicts(db):
 
     from inventree_location.models import (
         Prestation,
-        Manifestation,
-        Groupe,
         RentableItem,
     )
 
-    groupe = Groupe.objects.create(nom="Groupe A", code="GA")
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp",
         date_debut="2026-06-01T00:00:00Z",
         date_fin="2026-06-05T00:00:00Z",
         statut="planifiee",
-        organisateur=User.objects.create_user(username="org", password="pwd"),
-        groupe=groupe,
     )
     prestation = Prestation.objects.create(
         manifestation=manifestation,
@@ -115,7 +113,6 @@ class TestConflictsListView:
         stock elles cohabitent sans se gêner.
         """
 
-        from inventree_location.models import RentableItem
 
         part_id = setup_conflicts["first"].lignes.first().part_id
         fixer_stock(Part.objects.get(pk=part_id), 10)
@@ -134,7 +131,6 @@ class TestConflictsListView:
     ):
         """Le groupe dit quel article manque et de combien."""
 
-        from inventree_location.models import RentableItem
 
         part_id = setup_conflicts["first"].lignes.first().part_id
         fixer_stock(Part.objects.get(pk=part_id), 1)
@@ -158,7 +154,6 @@ class TestConflictsListView:
 
         from inventree_location.models import (
             LignePrestation,
-            RentableItem,
             Reservation as Resa,
         )
 

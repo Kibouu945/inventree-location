@@ -9,17 +9,18 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from inventree_location.models import (
-    Groupe,
     LignePrestation,
     LigneReservation,
     Lieu,
-    Manifestation,
     Prestation,
     RentableItem,
     Reservation,
     StatutReservation,
 )
-from inventree_location.tests.factories import mettre_en_stock
+from inventree_location.tests.factories import (
+    make_manifestation,
+    mettre_en_stock,
+)
 from inventree_location.stock import (
     compute_engaged_quantities,
     compute_engagement_details,
@@ -38,13 +39,10 @@ def base(db):
     # fuseau métier, et une fixture en UTC désignait la veille en soirée.
     now = timezone.localtime().replace(hour=8, minute=0, second=0, microsecond=0)
     user = User.objects.create_user(username="bob", password="pwd12345")
-    groupe = Groupe.objects.create(nom="Jambville", code="JAM")
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp",
         date_debut=now,
         date_fin=now + timedelta(days=10),
-        organisateur=user,
-        groupe=groupe,
     )
     lieu = Lieu.objects.create(nom="Terrain")
     return {

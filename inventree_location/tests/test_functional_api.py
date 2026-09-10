@@ -21,11 +21,10 @@ from rest_framework.test import APIClient
 
 from inventree_location import roles
 from inventree_location.models import (
-    Groupe,
-    Manifestation,
     Prestation,
     Reservation,
 )
+from inventree_location.tests.factories import make_manifestation
 from part.models import Part, PartCategory
 
 User = get_user_model()
@@ -53,15 +52,11 @@ def client_for(role=None, *, superuser=False, username="u"):
 
 @pytest.fixture
 def prestation():
-    owner = User.objects.create_user(username="owner", password="pwd12345")
-    groupe = Groupe.objects.create(nom="Jambville", code="JAM")
     now = timezone.now()
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp",
         date_debut=now,
         date_fin=now + timedelta(days=7),
-        organisateur=owner,
-        groupe=groupe,
     )
     return Prestation.objects.create(
         manifestation=manifestation,

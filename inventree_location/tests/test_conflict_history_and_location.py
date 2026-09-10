@@ -5,7 +5,7 @@ from datetime import timedelta
 import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-from rest_framework import serializers, status
+from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from inventree_location.conflicts import detect_location_reservation_conflicts
@@ -13,9 +13,7 @@ from inventree_location.models import (
     ConflictHistory,
     ConflictState,
     ConflictType,
-    Groupe,
     Lieu,
-    Manifestation,
     Prestation,
     RentableItem,
     Reservation,
@@ -23,6 +21,7 @@ from inventree_location.models import (
 )
 from inventree_location.serializers import ReservationSerializer
 from inventree_location.views import ConflictHistoryListView, ConflictHistoryResolveView
+from inventree_location.tests.factories import make_manifestation
 
 from part.models import Part, PartCategory
 
@@ -44,16 +43,12 @@ def manager(db):
 @pytest.fixture
 def location_setup(db):
     now = timezone.now().replace(minute=0, second=0, microsecond=0)
-    group = Groupe.objects.create(nom="G1", code="G1")
-    organizer = User.objects.create_user(username="org2", password="pwd")
 
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp été",
         date_debut=now,
         date_fin=now + timedelta(days=5),
         statut="planifiee",
-        organisateur=organizer,
-        groupe=group,
     )
 
     prestation_a = Prestation.objects.create(

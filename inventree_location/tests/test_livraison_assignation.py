@@ -19,14 +19,13 @@ from rest_framework.test import APIClient
 from inventree_location import roles
 from inventree_location.models import (
     EtatLivraison,
-    Groupe,
     Lieu,
     LivraisonStatusLog,
-    Manifestation,
     Prestation,
     Reservation,
     StatutReservation,
 )
+from inventree_location.tests.factories import make_manifestation
 from part.models import Part, PartCategory
 
 User = get_user_model()
@@ -57,14 +56,11 @@ def livraison(db):
     """Une réservation validée, prête à être prise par un livreur."""
 
     organisateur = User.objects.create_user(username="org", password="pwd12345")
-    groupe = Groupe.objects.create(nom="Groupe A", code="GA")
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp",
         date_debut="2026-06-01T00:00:00Z",
         date_fin="2026-06-05T00:00:00Z",
         statut="planifiee",
-        organisateur=organisateur,
-        groupe=groupe,
     )
     lieu = Lieu.objects.create(
         nom="Chalet", adresse="1 rue du Camp", latitude="45.1", longitude="5.7"

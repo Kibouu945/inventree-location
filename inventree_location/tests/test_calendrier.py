@@ -16,13 +16,12 @@ from rest_framework.test import APIClient
 from inventree_location import roles
 from inventree_location.calendrier import STATUT_COULEURS, couleur_statut
 from inventree_location.models import (
-    Groupe,
     Lieu,
-    Manifestation,
     Prestation,
     Reservation,
     StatutReservation,
 )
+from inventree_location.tests.factories import make_manifestation
 
 User = get_user_model()
 
@@ -52,17 +51,11 @@ def client_for(role, username="u"):
 
 @pytest.fixture
 def prestation(db):
-    organisateur = User.objects.create_user(
-        username="org", password="pwd12345", first_name="Ora", last_name="Nisatrice"
-    )
-    groupe = Groupe.objects.create(nom="Groupe A", code="GA")
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp d'été",
         date_debut="2026-06-01T00:00:00Z",
         date_fin="2026-06-30T00:00:00Z",
         statut="planifiee",
-        organisateur=organisateur,
-        groupe=groupe,
     )
     lieu = Lieu.objects.create(nom="Chalet", adresse="1 rue du Camp")
 

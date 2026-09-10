@@ -21,14 +21,13 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from inventree_location import roles
 from inventree_location.retours import quantites_du_retour
 from inventree_location.models import (
-    Groupe,
     LigneReservation,
-    Manifestation,
     Prestation,
     Reservation,
     StatutReservation,
 )
 from inventree_location.views import ReservationCheckinView
+from inventree_location.tests.factories import make_manifestation
 
 User = get_user_model()
 
@@ -51,13 +50,10 @@ def magasinier(db):
 @pytest.fixture
 def prestation(db, magasinier):
     now = timezone.now().replace(microsecond=0)
-    groupe = Groupe.objects.create(nom="Jambville", code="JAM")
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp été 2026",
         date_debut=now,
         date_fin=now + timedelta(days=7),
-        organisateur=magasinier,
-        groupe=groupe,
     )
     return Prestation.objects.create(
         manifestation=manifestation,

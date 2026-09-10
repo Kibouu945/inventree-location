@@ -15,12 +15,13 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from inventree_location.tests.factories import mettre_en_stock
+from inventree_location.tests.factories import (
+    make_manifestation,
+    mettre_en_stock,
+)
 from inventree_location.models import (
-    Groupe,
     LignePrestation,
     Lieu,
-    Manifestation,
     Prestation,
     RentableItem,
     StatutManifestation,
@@ -54,13 +55,10 @@ def user(db):
 @pytest.fixture
 def manifestation(db, user):
     now = timezone.now().replace(microsecond=0)
-    groupe = Groupe.objects.create(nom="Jambville", code="JAM")
-    return Manifestation.objects.create(
+    return make_manifestation(
         nom="Camp été 2026",
         date_debut=now,
         date_fin=now + timedelta(days=7),
-        organisateur=user,
-        groupe=groupe,
     )
 
 

@@ -9,15 +9,14 @@ from django.contrib.auth.models import Group
 
 from inventree_location import roles
 from inventree_location.models import (
-    Groupe,
     Lieu,
-    Manifestation,
     Prestation,
     Profile,
     RentableItem,
     Reservation,
 )
 from inventree_location.views import DeliveryListView, DeliveryMarquerLivreeView
+from inventree_location.tests.factories import make_manifestation
 
 from part.models import Part, PartCategory
 
@@ -67,14 +66,12 @@ def part(db):
 
 @pytest.fixture
 def manifestation(db, organisateur):
-    groupe = Groupe.objects.create(nom="Groupe A", code="GA")
-    return Manifestation.objects.create(
+    return make_manifestation(
         nom="Camp",
         date_debut="2026-06-01T00:00:00Z",
         date_fin="2026-06-05T00:00:00Z",
         statut="planifiee",
         organisateur=organisateur,
-        groupe=groupe,
     )
 
 

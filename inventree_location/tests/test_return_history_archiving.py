@@ -9,13 +9,12 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from inventree_location.archiving import ARCHIVE_AFTER_DAYS, archive_old_reservations
 from inventree_location.models import (
-    Groupe,
-    Manifestation,
     Prestation,
     Reservation,
     StatutReservation,
 )
 from inventree_location.views import ReservationListCreateView
+from inventree_location.tests.factories import make_manifestation
 
 User = get_user_model()
 
@@ -41,13 +40,10 @@ def user(db):
 @pytest.fixture
 def prestation(db, user):
     now = timezone.now().replace(microsecond=0)
-    groupe = Groupe.objects.create(nom="Jambville", code="JAM")
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp indexation",
         date_debut=now,
         date_fin=now + timedelta(days=7),
-        organisateur=user,
-        groupe=groupe,
     )
     return Prestation.objects.create(
         manifestation=manifestation,

@@ -20,12 +20,14 @@ from inventree_location.conflicts import (
     detect_reservation_conflicts,
     reservation_has_conflicts,
 )
-from inventree_location.tests.factories import fixer_stock, mettre_en_stock
+from inventree_location.tests.factories import (
+    fixer_stock,
+    make_manifestation,
+    mettre_en_stock,
+)
 from inventree_location.models import (
-    Groupe,
     LignePrestation,
     LigneReservation,
-    Manifestation,
     Prestation,
     RentableItem,
     Reservation,
@@ -59,14 +61,11 @@ def stock_setup(db):
     """Un part avec 1 exemplaire en stock et une réservation validée."""
 
     user = User.objects.create_user(username="bob", password="pwd12345")
-    groupe = Groupe.objects.create(nom="Jambville", code="JAM")
     now = timezone.now().replace(microsecond=0)
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp",
         date_debut=now,
         date_fin=now + timedelta(days=5),
-        organisateur=user,
-        groupe=groupe,
     )
     prestation = Prestation.objects.create(
         manifestation=manifestation,

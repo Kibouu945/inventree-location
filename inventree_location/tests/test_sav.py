@@ -29,9 +29,7 @@ from stock.models import StockItem
 
 from inventree_location import roles
 from inventree_location.models import (
-    Groupe,
     LigneReservation,
-    Manifestation,
     Prestation,
     RentableItem,
     Reservation,
@@ -51,6 +49,7 @@ from inventree_location.sav import (
     get_real_available_stock,
     get_unavailable_stock_quantity,
 )
+from inventree_location.tests.factories import make_manifestation
 
 User = get_user_model()
 
@@ -95,14 +94,11 @@ def part(db):
 
 @pytest.fixture
 def reservation(db, magasinier):
-    groupe = Groupe.objects.create(nom="Jambville", code="JAM")
     now = timezone.now()
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp été 2026",
         date_debut=now,
         date_fin=now + timedelta(days=7),
-        organisateur=magasinier,
-        groupe=groupe,
     )
     prestation = Prestation.objects.create(
         manifestation=manifestation,

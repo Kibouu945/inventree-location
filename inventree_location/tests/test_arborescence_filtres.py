@@ -15,8 +15,6 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from inventree_location import roles
 from inventree_location.models import (
-    Groupe,
-    Manifestation,
     Prestation,
     Reservation,
     StatutManifestation,
@@ -25,6 +23,7 @@ from inventree_location.views import (
     ManifestationListCreateView,
     ReservationListCreateView,
 )
+from inventree_location.tests.factories import make_manifestation
 
 User = get_user_model()
 
@@ -55,33 +54,26 @@ def appel(gestionnaire):
     return appeler
 
 
-@pytest.fixture
-def groupe(db):
-    return Groupe.objects.create(nom="Jambville", code="JAM")
-
-
-def _manifestation(nom, groupe, user, jours_depuis_aujourdhui):
+def _manifestation(nom, user, jours_depuis_aujourdhui):
     """Manifestation dont la fin tombe à `jours` de la date du jour (locale)."""
 
     fin = timezone.localtime() + timedelta(days=jours_depuis_aujourdhui)
 
-    return Manifestation.objects.create(
+    return make_manifestation(
         nom=nom,
         date_debut=fin - timedelta(days=1),
         date_fin=fin,
         statut=StatutManifestation.PLANIFIEE,
-        organisateur=user,
-        groupe=groupe,
     )
 
 
 @pytest.mark.django_db
 class TestFiltrePeriodeManifestation:
     def test_futur_garde_celles_qui_ne_sont_pas_terminees(
-        self, appel, groupe, gestionnaire
+        self, appel, gestionnaire
     ):
-        _manifestation("Ancienne", groupe, gestionnaire, -10)
-        _manifestation("Prochaine", groupe, gestionnaire, 10)
+        _manifestation("Ancienne", gestionnaire, -10)
+        _manifestation("Prochaine", gestionnaire, 10)
 
         reponse = appel(
             ManifestationListCreateView, MANIFESTATIONS_URL, {"periode": "futur"}
@@ -90,10 +82,10 @@ class TestFiltrePeriodeManifestation:
         assert [m["nom"] for m in reponse.data["results"]] == ["Prochaine"]
 
     def test_passe_garde_celles_qui_sont_terminees(
-        self, appel, groupe, gestionnaire
+        self, appel, gestionnaire
     ):
-        _manifestation("Ancienne", groupe, gestionnaire, -10)
-        _manifestation("Prochaine", groupe, gestionnaire, 10)
+        _manifestation("Ancienne", gestionnaire, -10)
+        _manifestation("Prochaine", gestionnaire, 10)
 
         reponse = appel(
             ManifestationListCreateView, MANIFESTATIONS_URL, {"periode": "passe"}
@@ -102,10 +94,10 @@ class TestFiltrePeriodeManifestation:
         assert [m["nom"] for m in reponse.data["results"]] == ["Ancienne"]
 
     def test_celle_qui_finit_aujourdhui_est_a_venir(
-        self, appel, groupe, gestionnaire
+        self, appel, gestionnaire
     ):
         # Découpage sur la date de fin : elle a encore ses ramassages devant.
-        _manifestation("Aujourd'hui", groupe, gestionnaire, 0)
+        _manifestation("Aujourd'hui", gestionnaire, 0)
 
         reponse = appel(
             ManifestationListCreateView, MANIFESTATIONS_URL, {"periode": "futur"}
@@ -115,12 +107,12 @@ class TestFiltrePeriodeManifestation:
 
     @pytest.mark.parametrize("valeur", ["tout", "", "n_importe_quoi"])
     def test_toute_autre_valeur_ne_filtre_rien(
-        self, appel, groupe, gestionnaire, valeur
+        self, appel, gestionnaire, valeur
     ):
         """« Tout » = pas de filtre ; une valeur inconnue est du bruit."""
 
-        _manifestation("Ancienne", groupe, gestionnaire, -10)
-        _manifestation("Prochaine", groupe, gestionnaire, 10)
+        _manifestation("Ancienne", gestionnaire, -10)
+        _manifestation("Prochaine", gestionnaire, 10)
 
         reponse = appel(
             ManifestationListCreateView, MANIFESTATIONS_URL, {"periode": valeur}
@@ -132,9 +124,9 @@ class TestFiltrePeriodeManifestation:
 @pytest.mark.django_db
 class TestFiltrePrestationReservation:
     def test_ne_renvoie_que_les_bons_de_la_prestation_demandee(
-        self, appel, groupe, gestionnaire
+        self, appel, gestionnaire
     ):
-        manifestation = _manifestation("Camp", groupe, gestionnaire, 10)
+        manifestation = _manifestation("Camp", gestionnaire, 10)
         debut = manifestation.date_debut
         fin = manifestation.date_fin
 
@@ -159,9 +151,9 @@ class TestFiltrePrestationReservation:
         assert [r["id"] for r in reponse.data["results"]] == [attendue.pk]
 
     def test_sans_le_filtre_tous_les_bons_remontent(
-        self, appel, groupe, gestionnaire
+        self, appel, gestionnaire
     ):
-        manifestation = _manifestation("Camp", groupe, gestionnaire, 10)
+        manifestation = _manifestation("Camp", gestionnaire, 10)
         prestation = Prestation.objects.create(
             manifestation=manifestation,
             nom="Zone A",
