@@ -11,6 +11,7 @@ annexes graphiques — les quatre maquettes et le schéma simplifié), code
 existant.
 """
 
+import re
 from pathlib import Path
 
 ICI = Path(__file__).parent
@@ -332,15 +333,9 @@ M = [
 
 LIVRE = [
     (
-        "L0",
-        "Factory de tests partagée",
-        "Vingt-neuf fichiers reconstruisaient la même chaîne d'objets. `Groupe` n'apparaît plus que dans 5 fichiers et `organisateur=` dans 4 : les 24 autres sont insensibles à la bascule client. Zéro ligne de production touchée, zéro assertion modifiée.",
-        "824a09c",
-    ),
-    (
         "D0",
-        "Tables du devis, tarification et traçabilité",
-        "`TableRemise`, `PalierRemise`, `PalierTarif`, prix et TVA sur le catalogue, `Devis`, `LigneDevis`, `FactureReservation`, `LigneReservation.etat`, `ModificationBon`. Tables seulement.",
+        "Tables du devis et de la tarification",
+        "Grille de prix, table de remises, TVA, `Devis`, `LigneDevis`, `FactureReservation`, état de ligne et journal des modifications. Tables seulement.",
         "95d89e1",
     ),
     (
@@ -361,78 +356,124 @@ LIVRE = [
         "Un widget par rôle avec sa navigation verticale, et la barre horizontale d'InvenTree filtrée par les droits de lecture des rulesets.",
         "5e96c70",
     ),
-]
-
-RESTE = [
+    (
+        "L0",
+        "Factory de tests partagée",
+        "Vingt-neuf fichiers reconstruisaient la même chaîne d'objets. Investissement remboursé au lot suivant : `Groupe` n'apparaissait plus que dans 5 fichiers, la bascule en a donc touché 5 au lieu de 29.",
+        "824a09c",
+    ),
     (
         "L1",
-        "Champs additifs",
-        "`RentableItem.poids`, `Prestation.statut` et `modifie_apres_devis`, `Manifestation.couleur` et `pourcent_remise_globale`, `Lieu.description`. Plus une commande `seed_demo`, qui est le seul moyen d'éprouver la migration de données sur une base non vide.",
-        "aucune",
-        "non",
+        "Champs manquants et jeu de démonstration",
+        "Poids, statut de prestation, couleur, remise globale, description de lieu. Plus `seed_demo`, qui sert autant à rejouer une démonstration qu'à éprouver les migrations sur une base non vide.",
+        "2448882",
     ),
     (
         "L2",
-        "Client et Contact",
-        "`RenameModel(Groupe→Client)`, `Contact`, `Client.gestionnaire`, `Manifestation.client` et `.contact`, suppression de `Profile.groupe`, `organisateur`, `code`. Trois migrations : schéma, reprise des contacts, verrouillage.",
-        "L0, L1",
-        "chemin critique",
-    ),
-    (
-        "L3",
-        "Devis : implémentation",
-        "Génération automatique du bon, résolution du prix (paliers, table de remise, remise globale), signature, états de ligne. Les tables existent déjà.",
-        "L2",
-        "non",
+        "Client et contacts",
+        "`Groupe` devient `Client` (e-mail, téléphone, type, SIRET, gestionnaire référent, actif), `Contact` apparaît, `Manifestation.organisateur` devient `Manifestation.contact`. Trois migrations, vérifiées sur les données réelles du conteneur.",
+        "b7fd916",
     ),
     (
         "L4",
-        "Rôle unique et retrait d'`organisateur`",
-        "Champ `role` au lieu d'une liste, retrait de `sees_only_deliverable_reservations` et de ses cinq appels.",
-        "L2",
-        "oui",
+        "Rôle unique et retrait de l'organisateur",
+        "Un acteur interne porte un seul rôle. Le rôle `organisateur` est supprimé — le client externe n'a pas de compte.",
+        "cd2abc3",
+    ),
+]
+
+#: Tâches front. Colonnes : ce que la tâche fait, où, de quoi elle dépend.
+FRONT = [
+    (
+        "F1",
+        "Onglet Contacts du back-office",
+        "Créer et éditer les contacts d'un client. <b>L'API est prête et complète</b> (`/backoffice/contacts/`, filtrable par client, avec désactivation) ; il n'existe simplement aucun écran, donc un contact ne peut aujourd'hui être créé que par la migration ou le shell. Seul détail back : ajouter `client_nom` au sérialiseur si l'écran liste tous les contacts d'un coup.",
+        "Nouveau `backoffice/ContactsTab.tsx`, branché dans `UsersBackOffice.tsx`. Copier la structure de `ClientsTab.tsx`, qui fait exactement le même travail pour les clients.",
+        "rien — prêt à prendre",
+    ),
+    (
+        "F2",
+        "Accueil du gestionnaire : ses clients",
+        "« Le gestionnaire doit voir en priorité la liste de ses clients dès la connexion, et pouvoir les retrouver rapidement lors d'un appel téléphonique » (réunion du 09/09). Le champ `Client.gestionnaire` existe en base et est exposé par l'API, mais <b>rien ne l'affiche ni ne l'édite</b>.",
+        "Nouvel écran dans `postes/definitions.tsx`, en <b>première</b> entrée du poste gestionnaire. Ajouter aussi le champ au formulaire de `ClientsTab.tsx`.",
+        "rien — prêt à prendre",
+    ),
+    (
+        "F3",
+        "Niveau client dans l'arborescence",
+        "L'arbre démarre à la manifestation ; la maquette et la réunion demandent client → manifestation → prestation → articles. Le niveau manquait parce que `Client` n'existait pas — <b>il existe maintenant</b>.",
+        "`arborescence/Arborescence.tsx` : un niveau au-dessus, alimenté par `/clients/`. Le composant est déjà écrit par niveaux, chacun chargeant ses enfants au dépliage.",
+        "rien — prêt à prendre",
+    ),
+    (
+        "F4",
+        "Boutons d'ajout de l'arborescence",
+        "Les trois `+` de la maquette sont visibles mais <b>désactivés</b>, avec l'explication au survol. La création passe par l'écran « Fiches ».",
+        "Extraire les formulaires de `ManifestationsTab.tsx` et `PrestationsTab.tsx` (dossier `organisation/`) en composants réutilisables, puis les ouvrir depuis l'arbre. C'est l'extraction qui fait le travail, pas le bouton.",
+        "rien, mais chevauche F3",
+    ),
+    (
+        "F5",
+        "Maquette Planning",
+        "Gantt des manifestations sur les jours, pastilles de statut, bascule calendrier / liste, fiche détaillée au survol avec contact, volumes et état de livraison. L'existant est un calendrier mensuel des réservations : ni Gantt, ni volumes, ni fiche.",
+        "`ReservationCalendar.tsx` (dossier `reservation/`) à remplacer ou doubler. `Manifestation.couleur` est en base depuis L1 et n'est pas encore utilisée.",
+        "rien — prêt à prendre",
+    ),
+    (
+        "F6",
+        "Maquette Livraison",
+        "Table hiérarchique aux quatre niveaux, compteurs −/+ et photo par ligne, cases de validation par ligne et par prestation, filtres Tous / À faire / Partiel / Complet, envoi groupé.",
+        "`delivery/DeliveriesList.tsx` (liste plate aujourd'hui). La hiérarchie et le chargement au dépliage sont déjà résolus dans `arborescence/Arborescence.tsx` : s'en inspirer.",
+        "L6 pour la saisie ; lecture faisable avant",
+    ),
+    (
+        "F7",
+        "Maquette Ramassage",
+        "Même table, avec <b>quatre compteurs par ligne</b> — récupéré, cassé, détruit, manquant —, la photo, la bascule de facturation et la case de ramassage complet. Le manquant est pré-rempli par l'autocomparaison et corrigeable (R34).",
+        "`ramassage/RamassagesList.tsx` et son formulaire, qui portent déjà les quatre quantités mais pas la table hiérarchique.",
+        "L6, et F6 pour la structure",
+    ),
+    (
+        "F8",
+        "Écran stock du magasinier",
+        "« Le magasinier gère le stock physique ; le catalogue et les clients ne le concernent pas » (09/09). Son poste affiche pourtant le catalogue, faute d'écran stock : c'est aujourd'hui le seul qui donne l'état article par article.",
+        "Nouvel écran, puis remplacer l'entrée Catalogue du poste magasinier dans `postes/definitions.tsx`.",
+        "rien — prêt à prendre",
+    ),
+    (
+        "F9",
+        "Écrans du devis",
+        "Génération, envoi, signature, états de ligne « hors devis » et « annulée », et la provenance de chaque modification (personne, canal, horodatage).",
+        "Écrans neufs, plus une entrée Devis et une entrée Factures au poste gestionnaire — les deux manquent au CDC §95-101.",
+        "L3",
+    ),
+]
+
+#: Tâches back.
+BACK = [
+    (
+        "L3",
+        "Devis : implémentation",
+        "Génération automatique du bon, résolution du prix (paliers de quantité, table de remises, remise globale), signature, états de ligne. Les tables existent depuis D0.",
+        "L2 — débloqué",
     ),
     (
         "L5",
         "Couture d'exécution et deux bugs",
-        "`quantite_attendue_au_retour` en une fonction nommée ; `UniqueConstraint(line, type)` sur le registre d'incidents ; garde sur `_replace_lignes`, qui efface aujourd'hui le registre par cascade à chaque édition.",
-        "aucune",
-        "oui",
+        "Une seule fonction nommée pour la quantité attendue au retour ; contrainte d'unicité sur le registre d'incidents ; et surtout la garde sur `_replace_lignes`, qui efface aujourd'hui le registre de retour par cascade à chaque édition d'une réservation.",
+        "rien — prêt à prendre",
     ),
     (
         "L6",
         "Tables d'exécution, en lecture",
         "`Livraison` et `Ramassage` rattachées à la ligne de réservation, avec leurs quantités, plus les commandes de projection et de vérification.",
         "L5",
-        "non",
     ),
     (
         "L7",
         "Écriture des tables d'exécution",
-        "Greffe sur les trois points d'écriture déjà transactionnels : le journal de livraison, le passage de statut, la saisie de ramassage.",
+        "Greffe sur les trois points d'écriture déjà transactionnels : le journal de livraison, le passage de statut, la saisie de ramassage. Se découpe en trois lots indépendants.",
         "L6",
-        "oui, en trois lots",
-    ),
-    (
-        "M1",
-        "Maquette Planning",
-        "Gantt des manifestations avec pastilles de statut, bascule calendrier/liste, fiche détaillée. Le calendrier actuel liste les réservations au mois.",
-        "L1",
-        "oui",
-    ),
-    (
-        "M2",
-        "Maquette Livraison",
-        "Table hiérarchique aux quatre niveaux, compteurs et photo par ligne, validation par ligne et par prestation, envoi groupé.",
-        "L6",
-        "oui",
-    ),
-    (
-        "M3",
-        "Maquette Ramassage",
-        "Même table, avec les quatre compteurs par ligne, la bascule de facturation et le ramassage complet.",
-        "L6, M2",
-        "oui",
     ),
 ]
 
@@ -451,7 +492,7 @@ GELE = [
     ),
     (
         "Fork du frontend d'InvenTree",
-        "Le patch mesuré fait 6 lignes plus un fichier de 66, mais il impose une étape de compilation de leur application : Node 22, 628 Mo de dépendances, 8 à 10 minutes par image.",
+        "Inutile : la barre de navigation se filtre par les droits de lecture des rulesets, ce que le lot P1 a fait sans toucher à leur code.",
     ),
 ]
 
@@ -468,15 +509,28 @@ sections = "".join(
     for titre, items in R.items()
 )
 
+
+def mono(texte):
+    """`x` devient du monospace : les tableaux de plan sont écrits en dos d'accent."""
+
+    return re.sub(r"`([^`]+)`", r"<code>\1</code>", texte)
+
+
 livre = "".join(
     f'<tr><td class="id">{i}</td><td><b>{t}</b><br><span class="det">{d}</span></td><td class="src">{c}</td></tr>'
-    for i, t, d, c in LIVRE
+    for i, t, d, c in ((i, t, mono(d), c) for i, t, d, c in LIVRE)
 )
-reste = "".join(
-    f'<tr><td class="id">{i}</td><td><b>{t}</b><br><span class="det">{d}</span></td><td class="src">{dep}</td><td class="src">{par}</td></tr>'
-    for i, t, d, dep, par in RESTE
+front = "".join(
+    f'<tr><td class="id">{i}</td><td><b>{t}</b><br><span class="det">{d}</span></td><td class="det">{ou}</td><td class="src">{dep}</td></tr>'
+    for i, t, d, ou, dep in (
+        (i, t, mono(d), mono(ou), dep) for i, t, d, ou, dep in FRONT
+    )
 )
-gele = "".join(f"<tr><td><b>{t}</b></td><td>{d}</td></tr>" for t, d in GELE)
+back = "".join(
+    f'<tr><td class="id">{i}</td><td><b>{t}</b><br><span class="det">{d}</span></td><td class="src">{dep}</td></tr>'
+    for i, t, d, dep in ((i, t, mono(d), dep) for i, t, d, dep in BACK)
+)
+gele = "".join(f"<tr><td><b>{mono(t)}</b></td><td>{mono(d)}</td></tr>" for t, d in GELE)
 corr = "".join(
     f'<tr><td class="id">{i}</td><td>{t}</td><td>{d}</td></tr>' for i, t, d in C
 )
@@ -501,6 +555,14 @@ td {{ padding:5px 6px; border-bottom:1px solid #eef2f7; vertical-align:top; font
 tr {{ break-inside:avoid; page-break-inside:avoid; }}
 td.id {{ font-weight:700; color:#1d4ed8; white-space:nowrap; width:38px; }}
 td.src {{ color:#6b7280; font-size:8.6pt; white-space:nowrap; width:118px; }}
+table.front {{ table-layout:fixed; }}
+table.front th:nth-child(1) {{ width:34px; }}
+table.front th:nth-child(2) {{ width:40%; }}
+table.front th:nth-child(3) {{ width:34%; }}
+table.front th:nth-child(4) {{ width:auto; }}
+table.front td.src {{ white-space:normal; width:auto; }}
+table.front td {{ overflow-wrap:break-word; }}
+table.front code {{ font-size:8.7pt; overflow-wrap:break-word; }}
 td.mq {{ font-weight:700; color:#1d4ed8; width:92px; }}
 td.ec {{ color:#6b7280; font-size:9pt; width:34%; }}
 .det {{ color:#4b5563; font-size:8.8pt; }}
@@ -515,7 +577,7 @@ footer {{ margin-top:22px; padding-top:8px; border-top:1px solid #e5e7eb; color:
 
 <h1>Modèle de données &amp; règles métier</h1>
 <div class="sub">InvenTree Location — gestion de location de matériel événementiel<br>
-Révision 3 · 10/09/2026 · Sources : point de revue du 09/09/2026, cahier des charges V06
+Révision 4 · 10/09/2026 · Sources : point de revue du 09/09/2026, cahier des charges V06
 (texte <b>et</b> annexes graphiques), code existant</div>
 
 <h2>Schéma du modèle cible</h2>
@@ -540,11 +602,15 @@ Révision 3 · 10/09/2026 · Sources : point de revue du 09/09/2026, cahier des 
 <h2>Plan de mise en œuvre — livré</h2>
 <table><thead><tr><th>#</th><th>Lot</th><th>Commit</th></tr></thead><tbody>{livre}</tbody></table>
 
-<h2>Plan de mise en œuvre — à faire</h2>
-<table><thead><tr><th>#</th><th>Lot</th><th>Dépend de</th><th>Dispatchable</th></tr></thead><tbody>{reste}</tbody></table>
-<div class="note">Le <b>chemin critique</b> est L1 → L2. Tout le reste est parallélisable :
-L5 et L4 ne dépendent d'aucun lot de modèle, les trois lots de maquettes portent sur des
-répertoires front disjoints, et L7 se découpe en trois greffes indépendantes.</div>
+<h2>À faire — front</h2>
+<table class="front"><thead><tr><th>#</th><th>Tâche</th><th>Où</th><th>Dépend de</th></tr></thead><tbody>{front}</tbody></table>
+<div class="note"><b>Cinq des neuf tâches front ne dépendent de rien</b> — F1, F2, F3, F5, F8 —
+et F4 ne chevauche que F3. Elles portent sur des fichiers distincts, donc
+sans conflit de fusion. F1 est la plus courte et la plus isolée : l'API est complète, il n'y a
+qu'un écran à écrire en copiant celui des clients.</div>
+
+<h2>À faire — back</h2>
+<table><thead><tr><th>#</th><th>Lot</th><th>Dépend de</th></tr></thead><tbody>{back}</tbody></table>
 
 <h2>Gelé jusqu'après la soutenance</h2>
 <table><thead><tr><th>Sujet</th><th>Raison</th></tr></thead><tbody>{gele}</tbody></table>
