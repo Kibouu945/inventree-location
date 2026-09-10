@@ -31,12 +31,17 @@ def dom(key: str) -> str:
 
 
 def test_every_widget_of_the_rbac_mapping_has_a_size():
-    """Un widget ajouté aux rôles sans gabarit ici sortirait en boîte minuscule.
+    """Un widget attribué à un rôle sans gabarit ici sortirait en boîte minuscule.
 
-    Le mapping des rôles fait foi : c'est lui qui décide des widgets existants.
+    Inclusion et non égalité : depuis le passage aux postes en pages,
+    `WIDGET_SIZES` conserve les gabarits des widgets métier retirés du mapping
+    des rôles. Ils ne sont plus attribués à personne, mais leurs entrées restent
+    le temps de la recette — les supprimer interdirait tout retour en arrière.
+    Ce qui doit rester vrai, c'est qu'aucun widget attribué ne soit sans
+    gabarit.
     """
 
-    assert set(roles.DASHBOARD_WIDGET_ROLES) == set(dashboards.WIDGET_SIZES)
+    assert set(roles.DASHBOARD_WIDGET_ROLES) <= set(dashboards.WIDGET_SIZES)
 
 
 def test_dom_id_round_trip():

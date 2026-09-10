@@ -52,6 +52,7 @@ export default defineConfig({
         "./src/BackOfficeParts.tsx",
         "./src/Conflicts.tsx",
         "./src/Deliveries.tsx",
+        "./src/PosteDashboard.tsx",
         "./src/Organisation.tsx",
         "./src/PartDetail.tsx",
       ],

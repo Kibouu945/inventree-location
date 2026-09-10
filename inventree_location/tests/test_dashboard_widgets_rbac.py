@@ -17,28 +17,27 @@ from inventree_location import roles
 
 User = get_user_model()
 
-CATALOG = "inventree-location-catalog"
-RESERVATIONS = "inventree-location-reservations"
-RAMASSAGES = "inventree-location-ramassages"
-CONFLICTS = "inventree-location-conflicts"
-ORGANISATION = "inventree-location-organisation"
-STOCK_ALERTS = "inventree-location-stock-alerts"
-DELIVERIES = "inventree-location-deliveries"
-BACKOFFICE_USERS = "inventree-location-backoffice-users"
-BACKOFFICE_PARTS = "inventree-location-backoffice-parts"
+POSTE = "inventree-location-poste"
 
 #: Dérivé du mapping et non figé en dur : un widget ajouté à
 #: ``DASHBOARD_WIDGET_ROLES`` sans toucher ce test faisait échouer cinq cas d'un
 #: coup, sans que la régression concerne les rôles.
 ALL_WIDGETS = set(roles.DASHBOARD_WIDGET_ROLES)
 
-#: Les back-offices sont réservés à l'admin : tous les autres rôles voient
-#: l'ensemble des widgets *sauf* ceux-là.
-BACKOFFICE_WIDGETS = {BACKOFFICE_USERS, BACKOFFICE_PARTS}
+#: Rôles disposant d'un poste de travail. Les écrans métier ne sont plus des
+#: widgets : ils vivent dans la navigation du poste.
+ROLES_AVEC_POSTE = (
+    roles.ADMIN,
+    roles.GESTIONNAIRE,
+    roles.MAGASINIER,
+    roles.LIVREUR,
+    roles.ACHETEUR,
+    roles.LECTEUR,
+)
 
-#: Widgets vus par un lecteur : ni back-offices, ni les écrans d'exploitation
-#: (ramassages, tournées livreur) réservés aux rôles qui les exécutent.
-LECTEUR_WIDGETS = ALL_WIDGETS - BACKOFFICE_WIDGETS - {RAMASSAGES, DELIVERIES}
+#: Rôles sans poste : ``sav`` attend la refonte du bloc retours,
+#: ``organisateur`` n'en aura pas — il est supprimé.
+ROLES_SANS_POSTE = (roles.SAV, roles.ORGANISATEUR)
 
 
 def _make_user(username, role=None, *, is_staff=False, is_superuser=False):
@@ -75,32 +74,19 @@ class TestVisibleDashboardWidgetKeys:
 
         assert roles.visible_dashboard_widget_keys(user) == ALL_WIDGETS
 
-    @pytest.mark.parametrize(
-        "role, expected",
-        [
-            (roles.ADMIN, ALL_WIDGETS),
-            (roles.GESTIONNAIRE, ALL_WIDGETS - BACKOFFICE_WIDGETS),
-            (roles.LECTEUR, LECTEUR_WIDGETS),
-            # Le magasinier suit la disponibilité future et l'inventaire :
-            # les alertes de seuil le concernent (US-09).
-            (roles.MAGASINIER, {CATALOG, RESERVATIONS, RAMASSAGES, STOCK_ALERTS}),
-            (roles.ORGANISATEUR, {RESERVATIONS, ORGANISATION}),
-            (roles.LIVREUR, {RESERVATIONS, RAMASSAGES, DELIVERIES}),
-            (roles.ACHETEUR, {CATALOG}),
-            (roles.SAV, set()),
-        ],
-    )
-    def test_widgets_per_role(self, role, expected):
+    @pytest.mark.parametrize("role", ROLES_AVEC_POSTE)
+    def test_un_role_metier_voit_le_widget_de_poste(self, role):
         user = _make_user(f"user_{role}", role=role)
 
-        assert roles.visible_dashboard_widget_keys(user) == expected
+        assert roles.visible_dashboard_widget_keys(user) == {POSTE}
 
-    def test_livreur_sees_reservations_and_deliveries_but_not_conflicts(self):
-        user = _make_user("livreur1", role=roles.LIVREUR)
+    @pytest.mark.parametrize("role", ROLES_SANS_POSTE)
+    def test_un_role_sans_poste_ne_voit_rien(self, role):
+        user = _make_user(f"user_{role}", role=role)
 
-        keys = roles.visible_dashboard_widget_keys(user)
+        assert roles.visible_dashboard_widget_keys(user) == set()
 
-        assert RESERVATIONS in keys
-        assert DELIVERIES in keys
-        assert CONFLICTS not in keys
-        assert CATALOG not in keys
+    def test_plus_aucun_ecran_metier_n_est_un_widget(self):
+        # Échoue si quelqu'un réattribue un ancien widget à un rôle au lieu
+        # d'en faire une entrée de poste.
+        assert set(roles.DASHBOARD_WIDGET_ROLES) == {POSTE}

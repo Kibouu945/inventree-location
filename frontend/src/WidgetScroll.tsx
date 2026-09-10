@@ -1,4 +1,5 @@
-// Cadre commun à tous les widgets de dashboard du plugin.
+// Cadre commun aux widgets de dashboard du plugin, et la mesure de hauteur
+// qu'il utilise — réutilisée par la coque des postes.
 //
 // InvenTree enferme chaque widget dans une boîte de hauteur fixe — 560 px de
 // contenu pour un widget `height: 8` — posée en `overflow-y: hidden`. Tout ce
@@ -11,19 +12,22 @@
 // pourcentage posé sur un parent en hauteur automatique retombe sur la hauteur
 // du contenu. On mesure donc la place réellement disponible dans la boîte, et
 // on la suit au redimensionnement du widget.
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState
+} from 'react';
 import { LocaleFrame } from './LocaleFrame';
 
-export function WidgetScroll({
-  children,
-  locale
-}: {
-  children: ReactNode;
-  /** `context.locale` : voir `LocaleFrame`, qui s'en sert pour déclarer la
-   *  langue de la page et celle des calendriers. */
-  locale?: string;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
+/**
+ * Hauteur disponible pour `element` dans la boîte du widget. `null` hors
+ * dashboard : aucune boîte ne coupe, rien à borner.
+ */
+export function useHauteurDisponible(
+  ref: RefObject<HTMLElement | null>
+): number | null {
   const [hauteur, setHauteur] = useState<number | null>(null);
 
   useEffect(() => {
@@ -33,9 +37,7 @@ export function WidgetScroll({
       return;
     }
 
-    // La boîte du widget : le premier ancêtre qui coupe ce qui dépasse. Hors
-    // dashboard (panneau de fiche article), il n'y en a pas — on ne touche
-    // alors à rien.
+    // Le premier ancêtre qui coupe ce qui dépasse.
     let boite = element.parentElement;
 
     while (boite && getComputedStyle(boite).overflowY !== 'hidden') {
@@ -61,9 +63,28 @@ export function WidgetScroll({
 
     const observateur = new ResizeObserver(mesurer);
     observateur.observe(cadre);
+    window.addEventListener('resize', mesurer);
 
-    return () => observateur.disconnect();
-  }, []);
+    return () => {
+      observateur.disconnect();
+      window.removeEventListener('resize', mesurer);
+    };
+  }, [ref]);
+
+  return hauteur;
+}
+
+export function WidgetScroll({
+  children,
+  locale
+}: {
+  children: ReactNode;
+  /** `context.locale` : voir `LocaleFrame`, qui s'en sert pour déclarer la
+   *  langue de la page et celle des calendriers. */
+  locale?: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const hauteur = useHauteurDisponible(ref);
 
   return (
     <div

@@ -69,17 +69,89 @@ ROLE_WRITE_RULESETS: dict[str, frozenset[str]] = {
 }
 
 
+#: Rulesets InvenTree **visibles** par rôle — et donc entrées de la barre de
+#: navigation native : ses onglets sont conditionnés à `hasViewRole(...)`
+#: (`getNavTabs`, InvenTree `src/defaults/links.tsx`). Aucun patch nécessaire.
+#:
+#:     Composants ← part | part_category      Achats ← purchase_order
+#:     Stock      ← stock | stock_location    Ventes ← sales_order | return_order
+#:     Fabrication ← build                    Dashboard : jamais conditionné
+#:
+#: Un ruleset absent d'un rôle est **invisible** — renversement du défaut
+#: précédent, où tout le monde voyait tout. `bom` accompagne `part` (sinon
+#: l'onglet BOM d'une fiche répond 403), et `part_category` est requis par le
+#: filtre catégories du catalogue (`/api/part/category/`).
+ROLE_VIEW_RULESETS: dict[str, frozenset[str]] = {
+    ADMIN: frozenset({
+        "admin",
+        "bom",
+        "build",
+        "part",
+        "part_category",
+        "purchase_order",
+        "return_order",
+        "sales_order",
+        "stock",
+        "stock_location",
+        "transfer_order",
+    }),
+    GESTIONNAIRE: frozenset({
+        "bom",
+        "part",
+        "part_category",
+        "stock",
+        "stock_location",
+    }),
+    MAGASINIER: frozenset({
+        "bom",
+        "part",
+        "part_category",
+        "stock",
+        "stock_location",
+        "transfer_order",
+    }),
+    ACHETEUR: frozenset({
+        "bom",
+        "part",
+        "part_category",
+        "purchase_order",
+        "stock",
+        "stock_location",
+    }),
+    SAV: frozenset({
+        "bom",
+        "part",
+        "part_category",
+        "stock",
+        "stock_location",
+    }),
+    LECTEUR: frozenset({
+        "bom",
+        "part",
+        "part_category",
+        "stock",
+        "stock_location",
+    }),
+    # Livreur : tout vient des endpoints du plugin, sa barre se réduit au
+    # Dashboard. Organisateur : rôle supprimé.
+    LIVREUR: frozenset(),
+    ORGANISATEUR: frozenset(),
+}
+
+
 def ruleset_permissions(role: str, ruleset: str) -> dict[str, bool]:
     """Droits attendus pour ce rôle sur ce ruleset InvenTree.
 
-    Les clés correspondent aux champs booléens de `users.models.RuleSet`. Un
-    rôle inconnu est traité comme un lecteur : jamais d'écriture par défaut.
+    Rôle inconnu : ni lecture ni écriture. La lecture est accordée
+    explicitement ; écrire implique lire, sinon `RuleSet.save()` — qui complète
+    les droits impliqués — remettrait la lecture dans notre dos.
     """
 
     writable = ruleset in ROLE_WRITE_RULESETS.get(role, frozenset())
+    viewable = ruleset in ROLE_VIEW_RULESETS.get(role, frozenset())
 
     return {
-        "can_view": True,
+        "can_view": viewable or writable,
         "can_add": writable,
         "can_change": writable,
         "can_delete": False,
@@ -144,41 +216,20 @@ def can_arbitrate_reservations(user) -> bool:
 #: certains rôles restants (retours magasinier, tickets SAV) arriveront aux
 #: sprints suivants ; on ne mappe ici que les widgets existants.
 DASHBOARD_WIDGET_ROLES: dict[str, set[str]] = {
-    "inventree-location-organisation": {ADMIN, GESTIONNAIRE, ORGANISATEUR, LECTEUR},
-    "inventree-location-catalog": {
+    # Un seul widget : le poste de travail du rôle, qui porte les écrans métier
+    # dans sa propre navigation. Le client a refusé l'empilement de vignettes
+    # (revue du 09/09/2026). `sav` attend ses écrans, `organisateur` est
+    # supprimé.
+    "inventree-location-poste": {
         ADMIN,
         GESTIONNAIRE,
         MAGASINIER,
-        LECTEUR,
+        LIVREUR,
         ACHETEUR,
-    },
-    "inventree-location-reservations": {
-        ADMIN,
-        GESTIONNAIRE,
-        MAGASINIER,
-        LIVREUR,
-        ORGANISATEUR,
         LECTEUR,
     },
-    # DIS-01 le destine au pilotage de l'activité : gestionnaire et lecteur,
-    # plus l'admin. Le magasinier et le livreur ont leurs propres écrans
-    # d'exploitation, l'organisateur ne suit que ses manifestations.
-    "inventree-location-calendrier": {ADMIN, GESTIONNAIRE, LECTEUR},
-    "inventree-location-ramassages": {
-        ADMIN,
-        GESTIONNAIRE,
-        MAGASINIER,
-        LIVREUR,
-    },
-    "inventree-location-conflicts": {ADMIN, GESTIONNAIRE, LECTEUR},
-    "inventree-location-stock-alerts": {ADMIN, GESTIONNAIRE, MAGASINIER, LECTEUR},
-    "inventree-location-deliveries": {ADMIN, GESTIONNAIRE, LIVREUR},
-    "inventree-location-backoffice-users": {
-        ADMIN,
-    },
-    "inventree-location-backoffice-parts": {
-        ADMIN,
-    },
+    # Les widgets historiques restent déclarés mais ne sont plus attribués :
+    # leur contenu vit dans les postes. À supprimer après la recette.
 }
 
 

@@ -34,17 +34,77 @@ RULESETS = (
 
 
 def test_tous_les_roles_ont_une_entree():
-    """La matrice couvre les 8 personas, sans rôle oublié ni rôle en trop."""
+    """Les deux matrices couvrent les 8 personas, sans oubli ni rôle en trop."""
 
     assert set(roles.ROLE_WRITE_RULESETS) == set(roles.ALL_ROLES)
+    assert set(roles.ROLE_VIEW_RULESETS) == set(roles.ALL_ROLES)
 
 
 @pytest.mark.parametrize("role", roles.ALL_ROLES)
 @pytest.mark.parametrize("ruleset", RULESETS)
-def test_lecture_toujours_accordee(role, ruleset):
-    """Aucun rôle métier n'est aveugle : la lecture est acquise partout."""
+def test_la_lecture_suit_la_matrice_de_visibilite(role, ruleset):
+    """Lecture accordée explicitement, jamais par défaut.
 
-    assert roles.ruleset_permissions(role, ruleset)["can_view"] is True
+    Inverse de la règle précédente, et volontaire : la barre de navigation
+    conditionne chaque onglet au `can_view` du ruleset.
+    """
+
+    attendu = ruleset in roles.ROLE_VIEW_RULESETS[role]
+
+    assert roles.ruleset_permissions(role, ruleset)["can_view"] is attendu
+
+
+@pytest.mark.parametrize("role", roles.ALL_ROLES)
+@pytest.mark.parametrize("ruleset", RULESETS)
+def test_ecrire_implique_lire(role, ruleset):
+    """Sinon `RuleSet.save()` rétablirait la lecture dans notre dos."""
+
+    droits = roles.ruleset_permissions(role, ruleset)
+
+    if droits["can_add"] or droits["can_change"]:
+        assert droits["can_view"] is True
+
+
+def test_la_barre_de_navigation_par_role():
+    """Fige la barre horizontale par rôle : Dashboard partout, Fabrication et
+    Ventes chez l'admin seul."""
+
+    def onglets(role):
+        vus = roles.ROLE_VIEW_RULESETS[role]
+        return {
+            "composantes": bool(vus & {"part", "part_category"}),
+            "stock": bool(vus & {"stock", "stock_location", "transfer_order"}),
+            "fabrication": "build" in vus,
+            "achats": "purchase_order" in vus,
+            "ventes": bool(vus & {"sales_order", "return_order"}),
+        }
+
+    assert onglets(roles.ADMIN) == {
+        "composantes": True,
+        "stock": True,
+        "fabrication": True,
+        "achats": True,
+        "ventes": True,
+    }
+    # Le livreur ne garde que le Dashboard, donc son poste.
+    assert onglets(roles.LIVREUR) == {
+        "composantes": False,
+        "stock": False,
+        "fabrication": False,
+        "achats": False,
+        "ventes": False,
+    }
+    assert onglets(roles.ACHETEUR)["achats"] is True
+
+    for role in (
+        roles.GESTIONNAIRE,
+        roles.MAGASINIER,
+        roles.ACHETEUR,
+        roles.SAV,
+        roles.LECTEUR,
+    ):
+        assert onglets(role)["fabrication"] is False, role
+        assert onglets(role)["ventes"] is False, role
 
 
 @pytest.mark.parametrize("role", roles.ALL_ROLES)
@@ -118,7 +178,7 @@ def test_catalogue_et_stock_ouverts_aux_roles_d_exploitation(role, ruleset):
     assert droits["can_change"] is True
 
 
-def test_administration_invented_reste_en_lecture():
+def test_administration_inventree_reste_en_lecture():
     """Le ruleset `admin` couvre les tables d'authentification.
 
     Le back-office du plugin gère les comptes via son API ; ouvrir ces tables
@@ -131,13 +191,14 @@ def test_administration_invented_reste_en_lecture():
     assert droits["can_change"] is False
 
 
-def test_ruleset_inconnu_retombe_en_lecture_seule():
-    """Un ruleset ajouté par une version future d'InvenTree n'ouvre rien."""
+def test_ruleset_inconnu_n_ouvre_rien():
+    """Un ruleset ajouté par une version future n'ouvre rien, pas même la
+    lecture : un module neuf n'apparaît pas dans la barre sans décision."""
 
     droits = roles.ruleset_permissions(roles.ADMIN, "ruleset_qui_n_existe_pas")
 
     assert droits == {
-        "can_view": True,
+        "can_view": False,
         "can_add": False,
         "can_change": False,
         "can_delete": False,

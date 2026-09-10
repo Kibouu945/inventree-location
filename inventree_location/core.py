@@ -495,6 +495,25 @@ class InvenTreeLocation(
                 },
             })
 
+        if visible("inventree-location-poste"):
+            items.append({
+                "key": "inventree-location-poste",
+                "title": "Mon poste de travail",
+                "description": ("Accès aux écrans métier, servis en pages plein écran"),
+                "icon": "ti:layout-dashboard:outline",
+                "source": self.plugin_static_file(
+                    "PosteDashboard.js:renderInvenTreeLocationPoste"
+                ),
+                # À garder aligné sur `dashboards.WIDGET_SIZES`.
+                "options": {
+                    "width": 12,
+                    "height": 10,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
         if visible("inventree-location-deliveries"):
             items.append({
                 "key": "inventree-location-deliveries",
