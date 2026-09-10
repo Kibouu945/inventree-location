@@ -108,6 +108,9 @@ export interface Reservation {
   lignes: Array<{
     id: number;
     part: number;
+    // Pour l'arborescence : « Sono YAMAHA / Réf. 1516 ».
+    part_name?: string;
+    part_noi?: string;
     quantite_demandee: number;
     quantite_livree: number;
     quantite_retournee: number;
