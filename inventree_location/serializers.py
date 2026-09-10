@@ -178,6 +178,12 @@ class LigneReservationSerializer(serializers.ModelSerializer):
     quantite_retour_manquant = serializers.SerializerMethodField()
     quantite_retour_casse = serializers.SerializerMethodField()
 
+    # Pour l'arborescence, qui affiche « Sono YAMAHA / Réf. 1516 ». Suppose la
+    # Part préchargée (`prefetch_related("lignes__part")`), sinon une requête
+    # par ligne.
+    part_name = serializers.CharField(source="part.name", read_only=True)
+    part_noi = serializers.CharField(source="part.IPN", read_only=True)
+
     def _quantites(self, obj):
         """Une seule reconstitution par ligne, mémorisée sur l'instance."""
 
@@ -220,6 +226,8 @@ class LigneReservationSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "part",
+            "part_name",
+            "part_noi",
             "quantite_demandee",
             "quantite_livree",
             "quantite_retournee",

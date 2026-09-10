@@ -300,6 +300,13 @@ class ReservationListCreateView(generics.ListCreateAPIView):
         if roles.sees_only_deliverable_reservations(self.request.user):
             queryset = queryset.filter(statut=StatutReservation.VALIDEE)
 
+        # Symétrique du filtre `manifestation` des prestations : l'arborescence
+        # charge les bons au dépliage.
+        prestation_id = self.request.query_params.get("prestation")
+
+        if prestation_id:
+            queryset = queryset.filter(prestation_id=prestation_id)
+
         statuts = self.request.query_params.getlist("statut")
 
         if statuts:
@@ -2469,7 +2476,7 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
     pagination_class = LieuPagination
 
     def get_queryset(self):
-        """Retourne les manifestations, filtrées par statut et recherche."""
+        """Manifestations, filtrées par statut, recherche et période."""
 
         queryset = (
             Manifestation.objects.select_related("organisateur", "groupe")
@@ -2486,6 +2493,19 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
 
         if search:
             queryset = queryset.filter(nom__icontains=search)
+
+        # Filtre Futur / Passé / Tout de la maquette. Découpage sur la date de
+        # **fin** : une manifestation en cours a encore ses ramassages devant
+        # elle. `localdate()` et non `today()` — serveur en UTC, métier à Paris.
+        periode = self.request.query_params.get("periode")
+
+        if periode in {"futur", "passe"}:
+            aujourdhui = timezone.localdate()
+
+            if periode == "futur":
+                queryset = queryset.filter(date_fin__date__gte=aujourdhui)
+            else:
+                queryset = queryset.filter(date_fin__date__lt=aujourdhui)
 
         return queryset
 
