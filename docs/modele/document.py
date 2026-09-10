@@ -380,6 +380,18 @@ LIVRE = [
         "Un acteur interne porte un seul rôle. Le rôle `organisateur` est supprimé — le client externe n'a pas de compte.",
         "cd2abc3",
     ),
+    (
+        "L5",
+        "Couture d'exécution et deux trous fermés",
+        "`quantite_attendue_au_retour` remplace les quatre écritures de la même règle. Unicité `(ligne, nature)` sur le registre d'incidents, déduplication par somme. Et le remplacement des lignes d'un bon qui porte un constat est refusé au lieu d'effacer le registre par cascade.",
+        "df27503",
+    ),
+    (
+        "L6",
+        "Tables d'exécution et tournée du jour",
+        "`Livraison` et `Ramassage` rattachées au bon, leurs quantités à la maille de la ligne. Projection recalculée depuis la vérité (`projeter_execution`), divergences affichées sans rien écrire (`verifier_projection`), et `GET /tournees/?date=` qui rend les arrêts par lieu **et** le récapitulatif tous lieux confondus.",
+        "2e74fca",
+    ),
 ]
 
 #: Tâches front. Colonnes : ce que la tâche fait, où, de quoi elle dépend.
@@ -429,7 +441,7 @@ FRONT = [
         "Maquette Livraison",
         "Table hiérarchique aux quatre niveaux, compteurs −/+ et photo par ligne, cases de validation par ligne et par prestation, filtres Tous / À faire / Partiel / Complet, envoi groupé.",
         "`delivery/DeliveriesList.tsx` (liste plate aujourd'hui). La hiérarchie et le chargement au dépliage sont déjà résolus dans `arborescence/Arborescence.tsx` : le lire avant d'écrire.",
-        "L6 pour la saisie ; lecture faisable avant",
+        "L6 est livré ; la saisie attend L7",
         "la tournée du jour s'affiche en quatre niveaux avec les quantités demandée / livrée / restante, les filtres opèrent, et le tout se vérifie avec `demo_livreur`.",
     ),
     (
@@ -437,7 +449,7 @@ FRONT = [
         "Maquette Ramassage",
         "Même table, avec <b>quatre compteurs par ligne</b> — récupéré, cassé, détruit, manquant —, la photo, la bascule de facturation et la case de ramassage complet. Deux règles contre-intuitives : le manquant se <b>déduit</b> (R31) et n'est calculé qu'une fois le lieu déclaré entièrement ramassé (R32) ; et il n'y a <b>aucun plafond</b> (R33), un surplus est légitime.",
         "`ramassage/RamassagesList.tsx` et son formulaire, qui portent déjà les quatre quantités mais pas la table hiérarchique.",
-        "L6, et F6 pour la structure",
+        "L7 pour la saisie, F6 pour la structure",
         "les quatre compteurs se saisissent par ligne, le manquant se déduit, et rien n'est déclaré perdu tant que le lieu n'est pas terminé.",
     ),
     (
@@ -467,22 +479,10 @@ BACK = [
         "L2 — débloqué",
     ),
     (
-        "L5",
-        "Couture d'exécution et deux bugs",
-        "Une seule fonction nommée pour la quantité attendue au retour ; contrainte d'unicité sur le registre d'incidents ; et surtout la garde sur `_replace_lignes`, qui efface aujourd'hui le registre de retour par cascade à chaque édition d'une réservation.",
-        "rien — prêt à prendre",
-    ),
-    (
-        "L6",
-        "Tables d'exécution, en lecture",
-        "`Livraison` et `Ramassage` rattachées à la ligne de réservation, avec leurs quantités, plus les commandes de projection et de vérification.",
-        "L5",
-    ),
-    (
         "L7",
         "Écriture des tables d'exécution",
-        "Greffe sur les trois points d'écriture déjà transactionnels : le journal de livraison, le passage de statut, la saisie de ramassage. Se découpe en trois lots indépendants.",
-        "L6",
+        "Greffe sur les trois points d'écriture déjà transactionnels : le journal de livraison, le passage de statut, la saisie de ramassage. Se découpe en trois lots indépendants. La projection et sa commande de vérification sont en place : chaque greffe se prouve par « aucune divergence ».",
+        "L6 — débloqué",
     ),
 ]
 
@@ -507,6 +507,11 @@ DEMARRAGE = [
         "Déployer un changement",
         "cd frontend &amp;&amp; npm run build — puis docker compose restart inventree",
         "InvenTree sert le static <b>collecté au boot</b> du conteneur. Sans le redémarrage, on regarde l'ancien bundle et on cherche un bug déjà corrigé. `collectstatic` ne recopie pas le static du plugin.",
+    ),
+    (
+        "Vérifier la projection",
+        "python manage.py verifier_projection",
+        "Recalcule les tables d'exécution depuis les bons et **affiche** les écarts sans rien écrire ; `projeter_execution` les rattrape. C'est le garde-fou de la stratégie additive : tant que les colonnes du bon font foi, une projection qui dérive ne se verrait nulle part.",
     ),
     (
         "Vérifier avant de pousser",
@@ -683,7 +688,7 @@ footer {{ margin-top:22px; padding-top:8px; border-top:1px solid #e5e7eb; color:
 
 <h1>Modèle de données &amp; règles métier</h1>
 <div class="sub">InvenTree Location — gestion de location de matériel événementiel<br>
-Révision 5 · 10/09/2026 · Sources : point de revue du 09/09/2026, cahier des charges V06
+Révision 6 · 10/09/2026 · Sources : point de revue du 09/09/2026, cahier des charges V06
 (texte <b>et</b> annexes graphiques), code existant</div>
 
 <h2>Schéma du modèle cible</h2>
