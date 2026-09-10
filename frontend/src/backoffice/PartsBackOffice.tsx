@@ -48,6 +48,7 @@ function emptyForm(): BackOfficePartFormValues {
     virtual: false,
     is_rentable: true,
     consommable: false,
+    poids: null,
     seuil_alerte_bas: null,
     seuil_alerte_haut: null,
     alertes_desactivees: false,
@@ -66,6 +67,7 @@ function formFromPart(part: BackOfficePart): BackOfficePartFormValues {
     virtual: part.virtual,
     is_rentable: part.is_rentable,
     consommable: part.consommable,
+    poids: part.poids,
     seuil_alerte_bas: part.seuil_alerte_bas,
     seuil_alerte_haut: part.seuil_alerte_haut,
     alertes_desactivees: part.alertes_desactivees,
@@ -205,6 +207,7 @@ export function PartsBackOffice({
         virtual: formValues.virtual,
         is_rentable: formValues.is_rentable,
         consommable: formValues.consommable,
+        poids: formValues.poids,
         seuil_alerte_bas: formValues.seuil_alerte_bas,
         seuil_alerte_haut: formValues.seuil_alerte_haut,
         alertes_desactivees: formValues.alertes_desactivees,
@@ -572,6 +575,18 @@ export function PartsBackOffice({
           {/* Les deux seuils n'alimentent une alerte que pour un consommable
               (US-09, CDC V06). Le dire ici évite de saisir une valeur inerte. */}
           <Group grow>
+            <NumberInput
+              label='Poids unitaire (kg)'
+              description='Laisser vide si le poids est inconnu.'
+              min={0}
+              step={0.1}
+              decimalScale={3}
+              value={formValues.poids ?? ''}
+              onChange={(value) =>
+                updateField('poids', value === '' ? null : String(value))
+              }
+            />
+
             <NumberInput
               label='Seuil bas'
               description={

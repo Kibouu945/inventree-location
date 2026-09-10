@@ -35,6 +35,7 @@ from .models import (
     ReturnIncidentType,
     StatutManifestation,
     StatutReservation,
+    StatutPrestation,
 )
 from .profiles import user_phone
 from .services.workflow_service import transition_reservation_status
@@ -915,6 +916,7 @@ class RentableItemSerializer(serializers.ModelSerializer):
             "is_virtual",
             "caution",
             "valeur_remplacement",
+            "poids",
             "seuil_alerte_bas",
             "seuil_alerte_haut",
         ]
@@ -1003,6 +1005,7 @@ class LieuSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "nom",
+            "description",
             "adresse",
             "latitude",
             "longitude",
@@ -1243,6 +1246,7 @@ class CatalogPartSerializer(serializers.Serializer):
     consommable = serializers.SerializerMethodField()
     is_virtual = serializers.SerializerMethodField()
     stock_total = serializers.SerializerMethodField()
+    poids = serializers.SerializerMethodField()
     seuil_alerte_bas = serializers.SerializerMethodField()
     seuil_alerte_haut = serializers.SerializerMethodField()
 
@@ -1355,6 +1359,13 @@ class CatalogPartSerializer(serializers.Serializer):
 
         return get_part_total_stock(obj)
 
+    def get_poids(self, obj):
+        """Poids unitaire, ou `None` s'il n'est pas renseigné."""
+
+        rentable_info = getattr(obj, "rentable_info", None)
+
+        return None if rentable_info is None else rentable_info.poids
+
     def get_seuil_alerte_bas(self, obj):
         """Seuil bas configurable du part (null par défaut)."""
 
@@ -1444,6 +1455,8 @@ class PrestationSerializer(serializers.ModelSerializer):
             "date_debut",
             "date_fin",
             "description",
+            "statut",
+            "modifie_apres_devis",
             "manifestation",
             "manifestation_nom",
             "lieu",
@@ -1513,6 +1526,16 @@ class PrestationSerializer(serializers.ModelSerializer):
             errors["date_fin"] = (
                 "La prestation doit se dérouler pendant la manifestation "
                 f"(jusqu'au {timezone.localdate(manifestation.date_fin):%d/%m/%Y})."
+            )
+
+        # Le lieu reste nullable en base pour autoriser les brouillons, mais une
+        # prestation sans lieu est invisible des tournées : on ne la laisse pas
+        # quitter le brouillon. Avant, un POST sans lieu passait en silence.
+        statut = effective("statut")
+
+        if statut and statut != StatutPrestation.BROUILLON and not effective("lieu"):
+            errors["lieu"] = (
+                "Le lieu est obligatoire dès que la prestation quitte le brouillon."
             )
 
         if errors:
@@ -1637,6 +1660,8 @@ class ManifestationSerializer(serializers.ModelSerializer):
             "date_fin",
             "statut",
             "statut_effectif",
+            "couleur",
+            "pourcent_remise_globale",
             "organisateur",
             "organisateur_nom",
             "groupe",

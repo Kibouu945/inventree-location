@@ -8,6 +8,14 @@ export interface Page<T> {
   results: T[];
 }
 
+export type StatutPrestation =
+  | 'brouillon'
+  | 'planifiee'
+  | 'confirmee'
+  | 'livree'
+  | 'cloturee'
+  | 'annulee';
+
 export type StatutManifestation =
   | 'brouillon'
   | 'planifiee'
@@ -25,6 +33,8 @@ export interface Manifestation {
   statut: StatutManifestation | string;
   // Statut réel : en_cours / terminée sont dérivés des dates côté serveur.
   statut_effectif: StatutManifestation | string;
+  couleur: string;
+  pourcent_remise_globale: string;
   organisateur: number;
   organisateur_nom: string;
   groupe: number;
@@ -37,6 +47,7 @@ export interface Manifestation {
 export interface Lieu {
   id: number;
   nom: string;
+  description: string;
   adresse: string;
   latitude: string | null;
   longitude: string | null;
@@ -68,6 +79,8 @@ export interface Prestation {
   date_debut: string;
   date_fin: string;
   description: string;
+  statut: StatutPrestation | string;
+  modifie_apres_devis: boolean;
   manifestation: number;
   manifestation_nom: string;
   lieu: number | null;

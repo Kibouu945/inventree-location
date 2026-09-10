@@ -39,6 +39,28 @@ class StatutManifestation(models.TextChoices):
     ANNULEE = "annulee", _("Annulée")
 
 
+class StatutPrestation(models.TextChoices):
+    """Avancement d'une prestation.
+
+    Les articles ne sont modifiables qu'en `brouillon` et `planifiee` : un devis
+    accepté fait passer la prestation en `confirmee` et toute modification
+    ultérieure devient une ligne « hors devis » (cf. `EtatLigne`).
+    """
+
+    BROUILLON = "brouillon", _("Brouillon")
+    PLANIFIEE = "planifiee", _("Planifiée")
+    CONFIRMEE = "confirmee", _("Confirmée")
+    LIVREE = "livree", _("Livrée")
+    CLOTUREE = "cloturee", _("Clôturée")
+    ANNULEE = "annulee", _("Annulée")
+
+    @classmethod
+    def modifiables(cls):
+        """Statuts où l'on peut encore ajouter ou retirer des articles."""
+
+        return (cls.BROUILLON, cls.PLANIFIEE)
+
+
 class StatutReservation(models.TextChoices):
     BROUILLON = "brouillon", _("Brouillon")
     SOUMISE = "soumise", _("Soumise")
@@ -255,6 +277,15 @@ class RentableItem(TimestampedModel):
         blank=True,
         verbose_name=_("valeur de remplacement"),
     )
+    # Nul et non zéro : « inconnu » n'est pas « 0 kg », qui fausserait toute
+    # somme de chargement de camion. Même doctrine que `caution`.
+    poids = models.DecimalField(
+        max_digits=8,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        verbose_name=_("poids unitaire (kg)"),
+    )
     seuil_alerte_bas = models.PositiveIntegerField(
         null=True, blank=True, verbose_name=_("seuil d'alerte bas")
     )
@@ -325,6 +356,22 @@ class Manifestation(TimestampedModel):
         choices=StatutManifestation.choices,
         default=StatutManifestation.BROUILLON,
         verbose_name=_("statut"),
+    )
+    # Couleur d'affichage choisie par le gestionnaire. Le calendrier des
+    # réservations garde ses couleurs par statut (`calendrier.STATUT_COULEURS`) :
+    # celle-ci est destinée au planning au niveau manifestation.
+    couleur = models.CharField(
+        max_length=7,
+        blank=True,
+        default="",
+        verbose_name=_("couleur"),
+    )
+    # Remise appliquée au total HT, après les paliers de quantité.
+    pourcent_remise_globale = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("remise globale (%)"),
     )
     organisateur = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -407,6 +454,18 @@ class Prestation(TimestampedModel):
     description = models.TextField(
         blank=True, default="", verbose_name=_("description")
     )
+    statut = models.CharField(
+        max_length=20,
+        choices=StatutPrestation.choices,
+        default=StatutPrestation.BROUILLON,
+        verbose_name=_("statut"),
+    )
+    # Levé dès qu'un article change après acceptation d'un devis. Le détail —
+    # qui, par quel canal, quand — vit dans `ModificationBon`.
+    modifie_apres_devis = models.BooleanField(
+        default=False,
+        verbose_name=_("modifiée après le devis"),
+    )
 
     class Meta:
         app_label = "inventree_location"
@@ -428,6 +487,9 @@ class Lieu(TimestampedModel):
     """
 
     nom = models.CharField(max_length=200, verbose_name=_("nom"))
+    description = models.TextField(
+        blank=True, default="", verbose_name=_("description")
+    )
     adresse = models.TextField(blank=True, default="", verbose_name=_("adresse"))
     latitude = models.DecimalField(
         max_digits=9,
@@ -718,6 +780,11 @@ class ReturnIncidentType(models.TextChoices):
 
 
 class ReturnIncident(TimestampedModel):
+    # Déclaré explicitement : cette table a été créée en `BigAutoField`
+    # (migration d'origine). Sans cette ligne, `makemigrations` propose de la
+    # rétrograder en `AutoField` à chaque passage.
+    id = models.BigAutoField(primary_key=True)
+
     line = models.ForeignKey(
         LigneReservation,
         on_delete=models.CASCADE,
@@ -825,6 +892,11 @@ class LivraisonStatusLog(TimestampedModel):
     est partie, et la photo du problème éventuel.
     """
 
+    # Déclaré explicitement : cette table a été créée en `BigAutoField`
+    # (migration d'origine). Sans cette ligne, `makemigrations` propose de la
+    # rétrograder en `AutoField` à chaque passage.
+    id = models.BigAutoField(primary_key=True)
+
     reservation = models.ForeignKey(
         Reservation,
         on_delete=models.CASCADE,
@@ -899,6 +971,11 @@ class SavTicket(TimestampedModel):
     - il peut être réintégré après réparation ;
     - les destructions restent consultables par période.
     """
+
+    # Déclaré explicitement : cette table a été créée en `BigAutoField`
+    # (migration d'origine). Sans cette ligne, `makemigrations` propose de la
+    # rétrograder en `AutoField` à chaque passage.
+    id = models.BigAutoField(primary_key=True)
 
     ligne_reservation = models.ForeignKey(
         LigneReservation,
@@ -994,6 +1071,11 @@ class SavTicket(TimestampedModel):
 
 class ConflictHistory(TimestampedModel):
     """Historique des conflits détectés (ouverts et résolus)."""
+
+    # Déclaré explicitement : cette table a été créée en `BigAutoField`
+    # (migration d'origine). Sans cette ligne, `makemigrations` propose de la
+    # rétrograder en `AutoField` à chaque passage.
+    id = models.BigAutoField(primary_key=True)
 
     conflict_type = models.CharField(
         max_length=20,
