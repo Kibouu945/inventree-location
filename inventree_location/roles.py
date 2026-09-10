@@ -9,7 +9,6 @@ Personas du CDC :
 - magasinier    : check-in retours + stock
 - livreur       : tournées + statuts livraison / ramassage + Maps
 - sav           : tickets réparation + historique
-- organisateur  : ses manifestations / réservations
 - lecteur       : lecture seule événement / stock
 - acheteur      : achats / besoins matériel
 """
@@ -21,7 +20,6 @@ GESTIONNAIRE = "gestionnaire"
 MAGASINIER = "magasinier"
 LIVREUR = "livreur"
 SAV = "sav"
-ORGANISATEUR = "organisateur"
 LECTEUR = "lecteur"
 ACHETEUR = "acheteur"
 
@@ -31,7 +29,6 @@ ALL_ROLES: tuple[str, ...] = (
     MAGASINIER,
     LIVREUR,
     SAV,
-    ORGANISATEUR,
     LECTEUR,
     ACHETEUR,
 )
@@ -64,7 +61,6 @@ ROLE_WRITE_RULESETS: dict[str, frozenset[str]] = {
     ACHETEUR: frozenset({"purchase_order"}),
     LIVREUR: frozenset(),
     SAV: frozenset(),
-    ORGANISATEUR: frozenset(),
     LECTEUR: frozenset(),
 }
 
@@ -132,10 +128,9 @@ ROLE_VIEW_RULESETS: dict[str, frozenset[str]] = {
         "stock",
         "stock_location",
     }),
-    # Livreur : tout vient des endpoints du plugin, sa barre se réduit au
-    # Dashboard. Organisateur : rôle supprimé.
+    # Le livreur : tout vient des endpoints du plugin, sa barre se réduit au
+    # Dashboard.
     LIVREUR: frozenset(),
-    ORGANISATEUR: frozenset(),
 }
 
 
@@ -159,7 +154,12 @@ def ruleset_permissions(role: str, ruleset: str) -> dict[str, bool]:
 
 
 def user_roles(user) -> set[str]:
-    """Retourne l'ensemble des rôles plugin de l'utilisateur."""
+    """Rôles plugin de l'utilisateur.
+
+    Un ensemble, et non une valeur : un compte porte **un** rôle métier
+    (décision du 09/09/2026), mais rien n'empêche un groupe Django hors plugin
+    de traîner sur son compte, et l'ensemble peut être vide.
+    """
 
     if not user or not user.is_authenticated:
         return set()
@@ -179,26 +179,18 @@ def user_has_any_role(user, roles) -> bool:
     return bool(user_roles(user) & set(roles))
 
 
-#: Rôles voyant les réservations tous statuts confondus.
-FULL_RESERVATION_VIEW_ROLES: tuple[str, ...] = (
-    ADMIN,
-    GESTIONNAIRE,
-    ORGANISATEUR,
-    MAGASINIER,
-    SAV,
-    LECTEUR,
-)
-
-
 def sees_only_deliverable_reservations(user) -> bool:
-    """Vrai pour un livreur pur : il ne voit que les réservations validées."""
+    """Vrai pour un livreur : il ne voit que les réservations validées.
+
+    Avec le rôle unique, c'est une simple appartenance. La fonction portait
+    auparavant la liste des rôles qui voient tout, pour traiter le cas « livreur
+    qui cumule gestionnaire » — un cas qui ne peut plus se produire.
+    """
 
     if getattr(user, "is_superuser", False):
         return False
 
-    owned = user_roles(user)
-
-    return LIVREUR in owned and not (owned & set(FULL_RESERVATION_VIEW_ROLES))
+    return LIVREUR in user_roles(user)
 
 
 #: Rôles habilités à arbitrer une réservation (valider / refuser).
@@ -218,8 +210,7 @@ def can_arbitrate_reservations(user) -> bool:
 DASHBOARD_WIDGET_ROLES: dict[str, set[str]] = {
     # Un seul widget : le poste de travail du rôle, qui porte les écrans métier
     # dans sa propre navigation. Le client a refusé l'empilement de vignettes
-    # (revue du 09/09/2026). `sav` attend ses écrans, `organisateur` est
-    # supprimé.
+    # (revue du 09/09/2026). `sav` attend ses écrans.
     "inventree-location-poste": {
         ADMIN,
         GESTIONNAIRE,

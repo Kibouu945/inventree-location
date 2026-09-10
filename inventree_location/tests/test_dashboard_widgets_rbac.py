@@ -35,9 +35,8 @@ ROLES_AVEC_POSTE = (
     roles.LECTEUR,
 )
 
-#: Rôles sans poste : ``sav`` attend la refonte du bloc retours,
-#: ``organisateur`` n'en aura pas — il est supprimé.
-ROLES_SANS_POSTE = (roles.SAV, roles.ORGANISATEUR)
+#: ``sav`` attend la refonte du bloc retours pour avoir son poste.
+ROLES_SANS_POSTE = (roles.SAV,)
 
 
 def _make_user(username, role=None, *, is_staff=False, is_superuser=False):

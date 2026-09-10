@@ -278,24 +278,24 @@ class TestTransitionEndpoint:
 class TestArbitrageRbac:
     """Seuls gestionnaire / admin peuvent valider ou refuser (arbitrage)."""
 
-    def _organisateur(self):
+    def _lecteur(self):
         from django.contrib.auth.models import Group
 
         from inventree_location import roles
 
-        account = User.objects.create_user(username="orga", password="pwd12345")
-        account.groups.add(Group.objects.get(name=roles.ORGANISATEUR))
+        account = User.objects.create_user(username="lecteur", password="pwd12345")
+        account.groups.add(Group.objects.get(name=roles.LECTEUR))
         return account
 
     @pytest.mark.parametrize("cible", ["validee", "refusee"])
-    def test_organisateur_ne_peut_pas_arbitrer(self, factory, make_reservation, cible):
+    def test_un_role_sans_arbitrage_est_refuse(self, factory, make_reservation, cible):
         reservation = make_reservation(StatutReservation.SOUMISE)
         request = factory.patch(
             TRANSITION_URL.format(pk=reservation.pk),
             {"statut": cible},
             format="json",
         )
-        force_authenticate(request, user=self._organisateur())
+        force_authenticate(request, user=self._lecteur())
 
         response = ReservationTransitionView.as_view()(request, pk=reservation.pk)
 

@@ -34,7 +34,7 @@ RULESETS = (
 
 
 def test_tous_les_roles_ont_une_entree():
-    """Les deux matrices couvrent les 8 personas, sans oubli ni rôle en trop."""
+
 
     assert set(roles.ROLE_WRITE_RULESETS) == set(roles.ALL_ROLES)
     assert set(roles.ROLE_VIEW_RULESETS) == set(roles.ALL_ROLES)
@@ -136,7 +136,6 @@ def test_achats_ouverts_a_l_admin_et_a_l_acheteur(role):
         roles.MAGASINIER,
         roles.LIVREUR,
         roles.SAV,
-        roles.ORGANISATEUR,
         roles.LECTEUR,
     ],
 )

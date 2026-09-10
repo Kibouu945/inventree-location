@@ -79,10 +79,10 @@ class TestUserListRoleFilters:
     """Filtres de rôle du sélecteur d'utilisateurs.
 
     Revue interne du 07/09/2026 : « dans le champ gérant interne, ne pas
-    afficher le client (l'organisateur) ». Le sélecteur servait la même liste
+    afficher le client ». Le sélecteur servait la même liste
     à tout le monde, on pouvait donc désigner un client comme responsable
     interne de sa propre réservation. Le CDC V06 sépare pourtant les deux
-    rôles — l'organisateur commande et signe les devis (persona 1), le
+    rôles — le client n'a plus de compte du tout, le
     gestionnaire traite (persona 2) — et sa matrice RACI n'a même pas de
     colonne « organisateur ».
     """
@@ -96,14 +96,14 @@ class TestUserListRoleFilters:
 
         return {row["username"] for row in response.data["results"]}
 
-    def test_exclude_roles_ecarte_les_organisateurs(self, factory, user):
+    def test_exclude_roles_ecarte_le_role_demande(self, factory, user):
         from inventree_location import roles
 
-        _avec_role("client-dupont", roles.ORGANISATEUR)
+        _avec_role("lecteur-dupont", roles.LECTEUR)
         _avec_role("magasin", roles.MAGASINIER)
 
         noms = self._usernames(
-            factory, user, {"exclude_roles": roles.ORGANISATEUR}
+            factory, user, {"exclude_roles": roles.LECTEUR}
         )
 
         assert "client-dupont" not in noms
@@ -112,7 +112,7 @@ class TestUserListRoleFilters:
     def test_roles_ne_garde_que_les_roles_demandes(self, factory, user):
         from inventree_location import roles
 
-        _avec_role("client-dupont", roles.ORGANISATEUR)
+        _avec_role("lecteur-dupont", roles.LECTEUR)
         _avec_role("magasin", roles.MAGASINIER)
 
         noms = self._usernames(
@@ -149,8 +149,8 @@ class TestUserListRoleFilters:
     def test_sans_parametre_la_liste_est_inchangee(self, factory, user):
         from inventree_location import roles
 
-        _avec_role("client-dupont", roles.ORGANISATEUR)
+        _avec_role("lecteur-dupont", roles.LECTEUR)
 
         noms = self._usernames(factory, user, {})
 
-        assert {"alice", "client-dupont"} <= noms
+        assert {"alice", "lecteur-dupont"} <= noms

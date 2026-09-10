@@ -11,7 +11,7 @@ SAV arriveront avec leurs endpoints aux sprints suivants) :
 |---------------|--------------------|-----------------------------------|
 | Catalogue     | tous les rôles     | admin, gestionnaire               |
 | Lieux         | tous les rôles     | admin, gestionnaire               |
-| Réservations  | tous les rôles     | admin, gestionnaire, organisateur |
+| Réservations  | tous les rôles     | admin, gestionnaire               |
 | Livraisons    | tous les rôles     | admin, gestionnaire               |
 """
 
@@ -56,21 +56,21 @@ class LieuPermission(RoleBasedPermission):
 
 
 class ReservationPermission(RoleBasedPermission):
-    """Lecture pour tous ; écriture pour admin / gestionnaire / organisateur."""
+    """Lecture pour tous ; écriture pour admin / gestionnaire."""
 
-    write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR)
+    write_roles = (roles.ADMIN, roles.GESTIONNAIRE)
 
 
 class ManifestationPermission(RoleBasedPermission):
-    """Lecture pour tous ; gestion pour admin / gestionnaire / organisateur."""
+    """Lecture pour tous ; gestion pour admin / gestionnaire."""
 
-    write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR)
+    write_roles = (roles.ADMIN, roles.GESTIONNAIRE)
 
 
 class PrestationPermission(RoleBasedPermission):
-    """Lecture pour tous ; gestion pour admin / gestionnaire / organisateur."""
+    """Lecture pour tous ; gestion pour admin / gestionnaire."""
 
-    write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR)
+    write_roles = (roles.ADMIN, roles.GESTIONNAIRE)
 
 
 class DeliveryPermission(RoleBasedPermission):

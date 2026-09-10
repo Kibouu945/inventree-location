@@ -7,9 +7,9 @@ import {
   Group,
   Loader,
   Modal,
-  MultiSelect,
   Pagination,
   PasswordInput,
+  Select,
   Stack,
   Table,
   Text,
@@ -42,7 +42,7 @@ function emptyForm(): BackOfficeUserFormValues {
     email: '',
     password: '',
     is_active: true,
-    roles: [],
+    role: null,
     telephone: ''
   };
 }
@@ -55,7 +55,7 @@ function formFromUser(user: BackOfficeUser): BackOfficeUserFormValues {
     email: user.email ?? '',
     password: '',
     is_active: user.is_active,
-    roles: user.roles ?? [],
+    role: user.role,
     telephone: user.telephone ?? ''
   };
 }
@@ -158,7 +158,7 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
         last_name: formValues.last_name.trim(),
         email: formValues.email.trim(),
         is_active: formValues.is_active,
-        roles: formValues.roles,
+        role: formValues.role,
         telephone: formValues.telephone.trim()
       };
 
@@ -243,7 +243,7 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
             <Table.Tr>
               <Table.Th>Utilisateur</Table.Th>
               <Table.Th>Contact</Table.Th>
-              <Table.Th>Rôles</Table.Th>
+              <Table.Th>Rôle</Table.Th>
               <Table.Th>État</Table.Th>
               <Table.Th>Actions</Table.Th>
             </Table.Tr>
@@ -271,19 +271,15 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
                 </Table.Td>
 
                 <Table.Td>
-                  <Group gap='xs'>
-                    {user.roles.length === 0 ? (
-                      <Text size='sm' c='dimmed'>
-                        Aucun rôle
-                      </Text>
-                    ) : (
-                      user.roles.map((role) => (
-                        <Badge key={role} variant='light'>
-                          {roleLabel(role, rolesQuery.data ?? [])}
-                        </Badge>
-                      ))
-                    )}
-                  </Group>
+                  {user.role ? (
+                    <Badge variant='light'>
+                      {roleLabel(user.role, rolesQuery.data ?? [])}
+                    </Badge>
+                  ) : (
+                    <Text size='sm' c='dimmed'>
+                      Aucun rôle
+                    </Text>
+                  )}
                 </Table.Td>
 
                 <Table.Td>
@@ -408,13 +404,15 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
             }
           />
 
-          <MultiSelect
-            label='Rôles'
-            placeholder='Sélectionner un ou plusieurs rôles'
+          <Select
+            label='Rôle'
+            placeholder='Sélectionner un rôle'
+            description='Un acteur interne porte un seul rôle.'
             data={roleOptions}
-            value={formValues.roles}
-            onChange={(value) => updateField('roles', value)}
+            value={formValues.role}
+            onChange={(value) => updateField('role', value)}
             clearable
+            searchable
           />
 
           <Checkbox

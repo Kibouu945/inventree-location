@@ -470,10 +470,10 @@ class TestMarquerLivree:
 
     @pytest.mark.django_db
     def test_un_role_sans_droit_est_refuse(self, factory, db, reservation_validee):
-        organisateur = User.objects.create_user(username="orga-x", password="pwd")
-        organisateur.groups.add(Group.objects.get_or_create(name=roles.ORGANISATEUR)[0])
+        lecteur = User.objects.create_user(username="lecteur-x", password="pwd")
+        lecteur.groups.add(Group.objects.get_or_create(name=roles.LECTEUR)[0])
 
-        response = self._post(factory, organisateur, reservation_validee)
+        response = self._post(factory, lecteur, reservation_validee)
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         reservation_validee.refresh_from_db()

@@ -213,11 +213,8 @@ export function ReservationForm({
         const response = await context.api.get(USERS_URL, {
           params: {
             search: debouncedUserSearch || undefined,
-            // « Gérant interne » : un client n'a rien à y faire. Le sélecteur
-            // servait la liste complète, on pouvait donc désigner
-            // l'organisateur comme responsable interne de sa propre
-            // réservation (revue interne du 07/09/2026).
-            exclude_roles: 'organisateur',
+            // « Gérant interne » : un client n'a rien à y faire. Il n'a plus
+            // de compte du tout depuis la bascule vers les contacts.
             page_size: 20
           }
         });

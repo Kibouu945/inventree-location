@@ -10,14 +10,13 @@ export const GESTIONNAIRE = 'gestionnaire';
 export const MAGASINIER = 'magasinier';
 export const LIVREUR = 'livreur';
 export const SAV = 'sav';
-export const ORGANISATEUR = 'organisateur';
 export const LECTEUR = 'lecteur';
 export const ACHETEUR = 'acheteur';
 
 // Rôles autorisés en écriture, alignés sur permissions.py.
-export const RESERVATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE, ORGANISATEUR];
+export const RESERVATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE];
 export const CATALOG_WRITE_ROLES = [ADMIN, GESTIONNAIRE];
-export const ORGANISATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE, ORGANISATEUR];
+export const ORGANISATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE];
 // Arbitrage (valider / refuser) : gestionnaire + admin seulement.
 export const RESERVATION_ARBITRAGE_ROLES = [ADMIN, GESTIONNAIRE];
 /** Marquer livrée : celui qui livre, plus l'encadrement. */

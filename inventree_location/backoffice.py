@@ -50,12 +50,12 @@ class BackOfficeRoleSerializer(serializers.Serializer):
 class BackOfficeUserSerializer(serializers.ModelSerializer):
     """Sérialiseur back-office d'un utilisateur Django + rôles plugin."""
 
-    roles = serializers.ListField(
-        child=serializers.ChoiceField(
-            choices=[(role, role) for role in roles.ALL_ROLES]
-        ),
+    # Un acteur interne porte **un** rôle (décision du 09/09/2026), d'où un
+    # champ simple et non une liste.
+    role = serializers.ChoiceField(
+        choices=[(role, role) for role in roles.ALL_ROLES],
         required=False,
-        allow_empty=True,
+        allow_null=True,
     )
     password = serializers.CharField(
         write_only=True,
@@ -80,7 +80,7 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
             "is_active",
             "is_staff",
             "is_superuser",
-            "roles",
+            "role",
             "password",
             "telephone",
         ]
@@ -94,7 +94,11 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
         """Expose les rôles plugin et les champs portés par le `Profile`."""
 
         data = super().to_representation(instance)
-        data["roles"] = sorted(roles.user_roles(instance))
+
+        # Un seul rôle, mais `user_roles` renvoie un ensemble : un groupe Django
+        # hors plugin peut traîner, et un compte neuf n'en a aucun.
+        proprietes = sorted(roles.user_roles(instance))
+        data["role"] = proprietes[0] if proprietes else None
 
         profile = profiles.user_profile(instance)
         data["telephone"] = profile.telephone if profile else ""
@@ -155,15 +159,13 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
                 "is_active": "Vous ne pouvez pas désactiver votre propre compte."
             })
 
-        new_roles = attrs.get("roles")
-
         if (
-            new_roles is not None
-            and roles.ADMIN not in set(new_roles)
+            "role" in self.initial_data
+            and attrs.get("role") != roles.ADMIN
             and roles.ADMIN in roles.user_roles(self.instance)
         ):
             raise serializers.ValidationError({
-                "roles": "Vous ne pouvez pas retirer votre propre rôle admin."
+                "role": "Vous ne pouvez pas retirer votre propre rôle admin."
             })
 
     def _ensure_role_groups(self):
@@ -172,19 +174,20 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
         for role in roles.ALL_ROLES:
             Group.objects.get_or_create(name=role)
 
-    def _apply_roles(self, user, role_names):
-        """Remplace uniquement les groupes métier du plugin.
+    def _apply_role(self, user, role_name):
+        """Pose **le** rôle métier, en conservant les groupes hors plugin.
 
-        Les groupes Django hors plugin sont conservés.
+        L'unicité ne peut pas s'exprimer en base — `auth_user_groups` est un
+        M2M — elle est donc tenue ici : les autres groupes du plugin sont
+        retirés, ceux d'InvenTree ne sont pas touchés.
         """
 
         self._ensure_role_groups()
 
-        role_names = set(role_names or [])
-        existing_non_plugin_groups = user.groups.exclude(name__in=roles.ALL_ROLES)
-        plugin_groups = Group.objects.filter(name__in=role_names)
+        hors_plugin = list(user.groups.exclude(name__in=roles.ALL_ROLES))
+        metier = list(Group.objects.filter(name=role_name)) if role_name else []
 
-        user.groups.set(list(existing_non_plugin_groups) + list(plugin_groups))
+        user.groups.set(hors_plugin + metier)
 
     def _pop_profile_fields(self, validated_data):
         """Sort les champs portés par le `Profile`, pas par le `User`.
@@ -202,7 +205,7 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Crée un utilisateur, son profil et lui affecte ses rôles."""
 
-        role_names = validated_data.pop("roles", [])
+        role_name = validated_data.pop("role", None)
         password = validated_data.pop("password", "")
         profile_fields = self._pop_profile_fields(validated_data)
 
@@ -211,7 +214,7 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
             **validated_data,
         )
 
-        self._apply_roles(user, role_names)
+        self._apply_role(user, role_name)
         profiles.update_user_profile(user, profile_fields)
 
         return user
@@ -219,7 +222,7 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         """Met à jour l'utilisateur, son profil, son état actif et ses rôles."""
 
-        role_names = validated_data.pop("roles", None)
+        role_name = validated_data.pop("role", None)
         password = validated_data.pop("password", None)
         profile_fields = self._pop_profile_fields(validated_data)
 
@@ -231,8 +234,8 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
 
         instance.save()
 
-        if role_names is not None:
-            self._apply_roles(instance, role_names)
+        if "role" in self.initial_data:
+            self._apply_role(instance, role_name)
 
         profiles.update_user_profile(instance, profile_fields)
 
@@ -421,7 +424,6 @@ class BackOfficeRoleListView(APIView):
         roles.MAGASINIER: "Magasinier",
         roles.LIVREUR: "Livreur",
         roles.SAV: "SAV",
-        roles.ORGANISATEUR: "Organisateur",
         roles.LECTEUR: "Lecteur",
         roles.ACHETEUR: "Acheteur",
     }

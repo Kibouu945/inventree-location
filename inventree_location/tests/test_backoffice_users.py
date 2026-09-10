@@ -94,12 +94,12 @@ class TestAcces:
 
 
 class TestListe:
-    def test_liste_paginee_expose_les_roles(self, factory, admin):
+    def test_liste_paginee_expose_le_role(self, factory, admin):
         response = _list(factory, admin)
 
         assert response.data["count"] == 1
         assert response.data["results"][0]["username"] == "patronne"
-        assert response.data["results"][0]["roles"] == [roles.ADMIN]
+        assert response.data["results"][0]["role"] == roles.ADMIN
 
     @pytest.mark.parametrize(
         "terme, attendu",
@@ -135,14 +135,14 @@ class TestListe:
 
 
 class TestCreation:
-    def test_creation_avec_roles(self, factory, admin):
+    def test_creation_avec_un_role(self, factory, admin):
         response = _create(
             factory,
             admin,
             {
                 "username": "nouveau",
                 "password": STRONG_PASSWORD,
-                "roles": [roles.MAGASINIER, roles.LIVREUR],
+                "role": roles.MAGASINIER,
             },
         )
 
@@ -150,7 +150,7 @@ class TestCreation:
 
         created = User.objects.get(username="nouveau")
 
-        assert sorted(roles.user_roles(created)) == [roles.LIVREUR, roles.MAGASINIER]
+        assert roles.user_roles(created) == {roles.MAGASINIER}
         # Le mot de passe est haché, jamais stocké en clair.
         assert created.password != STRONG_PASSWORD
         assert created.check_password(STRONG_PASSWORD)
@@ -178,7 +178,7 @@ class TestCreation:
             {
                 "username": "inventif",
                 "password": STRONG_PASSWORD,
-                "roles": ["sorcier"],
+                "role": "sorcier",
             },
         )
 
@@ -205,20 +205,31 @@ class TestCreation:
 
 
 class TestEdition:
-    def test_changement_de_roles(self, factory, admin):
+    def test_changement_de_role(self, factory, admin):
+        """Le nouveau rôle remplace l'ancien : un acteur interne n'en porte
+        qu'un (décision du 09/09/2026)."""
+
         cible = _make_user("mutant", role=roles.LECTEUR)
 
-        response = _patch(factory, admin, cible, {"roles": [roles.SAV]})
+        response = _patch(factory, admin, cible, {"role": roles.SAV})
 
         assert response.status_code == status.HTTP_200_OK
         assert roles.user_roles(cible) == {roles.SAV}
+
+    def test_le_role_peut_etre_retire(self, factory, admin):
+        cible = _make_user("sans-poste", role=roles.LECTEUR)
+
+        response = _patch(factory, admin, cible, {"role": None})
+
+        assert response.status_code == status.HTTP_200_OK
+        assert roles.user_roles(cible) == set()
 
     def test_les_groupes_hors_plugin_sont_conserves(self, factory, admin):
         cible = _make_user("mutant", role=roles.LECTEUR)
         externe = Group.objects.create(name="groupe-inventree-natif")
         cible.groups.add(externe)
 
-        _patch(factory, admin, cible, {"roles": [roles.SAV]})
+        _patch(factory, admin, cible, {"role": roles.SAV})
 
         assert set(cible.groups.values_list("name", flat=True)) == {
             roles.SAV,
@@ -266,7 +277,7 @@ class TestAntiVerrouillage:
         assert admin.is_active is True
 
     def test_ne_peut_pas_retirer_son_propre_role_admin(self, factory, admin):
-        response = _patch(factory, admin, admin, {"roles": [roles.LECTEUR]})
+        response = _patch(factory, admin, admin, {"role": roles.LECTEUR})
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert roles.user_roles(admin) == {roles.ADMIN}
@@ -278,11 +289,13 @@ class TestAntiVerrouillage:
 
         assert response.status_code == status.HTTP_200_OK
 
-    def test_peut_sajouter_un_role_supplementaire(self, factory, admin):
-        response = _patch(factory, admin, admin, {"roles": [roles.ADMIN, roles.SAV]})
+    def test_peut_se_reaffirmer_admin(self, factory, admin):
+        """Renvoyer son propre rôle admin n'est pas un verrouillage."""
+
+        response = _patch(factory, admin, admin, {"role": roles.ADMIN})
 
         assert response.status_code == status.HTTP_200_OK
-        assert roles.user_roles(admin) == {roles.ADMIN, roles.SAV}
+        assert roles.user_roles(admin) == {roles.ADMIN}
 
 
 class TestRoleList:

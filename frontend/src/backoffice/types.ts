@@ -22,7 +22,7 @@ export interface BackOfficeUser {
   is_active: boolean;
   is_staff: boolean;
   is_superuser: boolean;
-  roles: string[];
+  role: string | null;
   /** Porté par le `Profile`, imprimé sur le bon de livraison. */
   telephone: string;
 }
@@ -34,7 +34,7 @@ export interface BackOfficeUserFormValues {
   email: string;
   password: string;
   is_active: boolean;
-  roles: string[];
+  role: string | null;
   telephone: string;
 }
 
