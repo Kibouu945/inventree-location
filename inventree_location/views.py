@@ -46,6 +46,7 @@ from .models import (
     StatutReservation,
 )
 from .calendrier import FenetreInvalide, bornes_fenetre, evenements_calendrier
+from .execution import tournee_du_jour
 from .livraison import (
     LivraisonRefusee,
     accepter_livraison,
@@ -501,6 +502,67 @@ class DeliveryEtatView(APIView):
             return _refus_livraison(refus)
 
         return Response(DeliverySerializer(reservation).data, status=status.HTTP_200_OK)
+
+
+class TourneeView(APIView):
+    """Tournée d'une journée : les arrêts par lieu, plus le récapitulatif global.
+
+    `?date=AAAA-MM-JJ`, la journée du jour par défaut. La journée est celle du
+    fuseau de l'application, jamais `dt.date()` sur de l'UTC.
+
+    Deux maille différentes dans une seule réponse, et c'est le point : le
+    livreur organise ses arrêts lieu par lieu, mais charge son véhicule sur le
+    total tous lieux confondus (R25). Les quantités d'un arrêt somment la
+    journée sur ce lieu, parce que des objets circulent d'un lieu à l'autre
+    (R30) — règle d'affichage, la maille de stockage reste le bon.
+
+    Lecture seule : rien n'écrit ici, ni dans les tables d'exécution ni sur les
+    bons.
+    """
+
+    permission_classes = [DeliveryPermission]
+
+    def get(self, request):
+        parametre = request.query_params.get("date")
+
+        if parametre:
+            jour = parse_date(parametre)
+
+            if jour is None:
+                raise ValidationError({"date": "Date illisible : AAAA-MM-JJ attendu."})
+        else:
+            jour = timezone.localdate()
+
+        bons = Reservation.objects.select_related(
+            "prestation__lieu",
+            "prestation__manifestation__client",
+        ).prefetch_related("lignes__part", "lignes__livraisons")
+
+        # Un livreur pur ne voit que ce qui est à livrer, comme sur sa liste.
+        if roles.sees_only_deliverable_reservations(request.user):
+            bons = bons.filter(statut=StatutReservation.VALIDEE)
+
+        tournee = tournee_du_jour(jour, bons)
+
+        return Response(
+            {
+                "date": tournee["date"],
+                "arrets": [
+                    {
+                        **arret,
+                        "lieu": (
+                            LieuSerializer(arret["lieu"]).data
+                            if arret["lieu"] is not None
+                            else None
+                        ),
+                    }
+                    for arret in tournee["arrets"]
+                ],
+                "recap_total": tournee["recap_total"],
+                "quantite_totale": tournee["quantite_totale"],
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class DeliveryListView(generics.ListAPIView):

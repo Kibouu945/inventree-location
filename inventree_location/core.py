@@ -116,6 +116,7 @@ class InvenTreeLocation(
             ReturnReportPdfView,
             ReturnReportView,
             StockAlertListView,
+            TourneeView,
             UserListView,
         )
 
@@ -196,6 +197,7 @@ class InvenTreeLocation(
                 name="return-report-pdf",
             ),
             path("deliveries/", DeliveryListView.as_view(), name="delivery-list"),
+            path("tournees/", TourneeView.as_view(), name="tournee-du-jour"),
             path(
                 "reservations/calendar/",
                 ReservationCalendarView.as_view(),

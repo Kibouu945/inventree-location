@@ -1638,3 +1638,246 @@ class ModificationBon(TimestampedModel):
 
     def __str__(self):
         return f"{self.reservation_id} — part#{self.part_id} → {self.etat_resultant}"
+
+
+# ---------------------------------------------------------------------------
+# 8. Exécution terrain : livraison et ramassage
+# ---------------------------------------------------------------------------
+
+
+class Livraison(TimestampedModel):
+    """Un passage de livraison sur un bon — le `DeliveryTask` du schéma client.
+
+    Rattachée au **bon**, pas au lieu : le lieu est un attribut du passage, pas
+    sa clé (R26). Un bon se livre en une ou plusieurs fois (R23), d'où la
+    séquence ; le regroupement par lieu et par journée que voit le livreur est
+    une vue, calculée à la lecture (R25, R30).
+
+    **Table de projection.** Aucun écran ne l'écrit à ce stade : les colonnes du
+    bon restent la vérité, `projeter_execution` alimente cette table et
+    `verifier_projection` la compare sans rien écrire. Le renversement de la
+    vérité est post-soutenance.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+
+    reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.CASCADE,
+        related_name="livraisons",
+        verbose_name=_("bon de réservation"),
+    )
+    lieu = models.ForeignKey(
+        "Lieu",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="livraisons",
+        verbose_name=_("lieu"),
+    )
+    sequence = models.PositiveSmallIntegerField(
+        default=1,
+        verbose_name=_("numéro de passage"),
+    )
+    date_prevue = models.DateTimeField(
+        null=True, blank=True, verbose_name=_("date et heure prévues")
+    )
+    date_reelle = models.DateTimeField(
+        null=True, blank=True, verbose_name=_("date et heure réelles")
+    )
+    #: Pluriel voulu : le CDC parle de « livreurs assignés » à une tâche.
+    livreurs = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        # `livraisons_assignees` est déjà pris par `Reservation.livreur_assigne`,
+        # qui porte l'assignation à la maille du bon.
+        related_name="passages_de_livraison",
+        verbose_name=_("livreurs assignés"),
+    )
+    commentaire = models.TextField(
+        blank=True, default="", verbose_name=_("commentaire")
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["date_prevue", "sequence"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["reservation", "sequence"],
+                name="livraison_unique_par_bon_et_sequence",
+            )
+        ]
+        verbose_name = _("livraison")
+        verbose_name_plural = _("livraisons")
+
+    def __str__(self):
+        return f"Livraison {self.reservation_id}#{self.sequence}"
+
+
+class LivraisonLigne(TimestampedModel):
+    """Ce qu'un passage a effectivement déposé, ligne par ligne.
+
+    `quantite_rest_a_livrer` ne vit pas ici : c'est un agrégat sur tous les
+    passages du bon, donc un calcul (R27) — la colonne serait la faute que la
+    migration 0021 a corrigée ailleurs.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+
+    livraison = models.ForeignKey(
+        Livraison,
+        on_delete=models.CASCADE,
+        related_name="lignes",
+        verbose_name=_("livraison"),
+    )
+    ligne = models.ForeignKey(
+        LigneReservation,
+        on_delete=models.CASCADE,
+        related_name="livraisons",
+        verbose_name=_("ligne de réservation"),
+    )
+    quantite_livree = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité livrée")
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["livraison", "ligne"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["livraison", "ligne"],
+                name="livraison_ligne_unique",
+            )
+        ]
+        verbose_name = _("ligne de livraison")
+        verbose_name_plural = _("lignes de livraison")
+
+    def __str__(self):
+        return f"{self.livraison_id} — ligne#{self.ligne_id} x{self.quantite_livree}"
+
+
+class Ramassage(TimestampedModel):
+    """Un passage de ramassage sur un bon — le `PickupTask` du schéma client.
+
+    Le livreur compose sa liste en choisissant des **lieux** (R29), mais la
+    maille de stockage reste le bon : c'est ce que dit le schéma du CDC, et
+    c'est ce qui permet à un bon d'être ramassé en plusieurs fois comme à un
+    passage de couvrir plusieurs prestations d'un même lieu (R31) — par
+    regroupement à la lecture, pas par une clé.
+
+    `ramassage_termine` porte le `FullPickup` du CDC : sans lui, ce qui reste
+    sur un lieu non terminé serait déclaré perdu alors qu'un autre passage
+    viendra (R35).
+    """
+
+    id = models.BigAutoField(primary_key=True)
+
+    reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.CASCADE,
+        related_name="ramassages",
+        verbose_name=_("bon de réservation"),
+    )
+    lieu = models.ForeignKey(
+        "Lieu",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="ramassages",
+        verbose_name=_("lieu"),
+    )
+    sequence = models.PositiveSmallIntegerField(
+        default=1,
+        verbose_name=_("numéro de passage"),
+    )
+    date_prevue = models.DateTimeField(
+        null=True, blank=True, verbose_name=_("date et heure prévues")
+    )
+    date_reelle = models.DateTimeField(
+        null=True, blank=True, verbose_name=_("date et heure réelles")
+    )
+    ramassage_termine = models.BooleanField(
+        default=False,
+        verbose_name=_("lieu entièrement ramassé"),
+    )
+    livreurs = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name="passages_de_ramassage",
+        verbose_name=_("livreurs assignés"),
+    )
+    commentaire = models.TextField(
+        blank=True, default="", verbose_name=_("commentaire")
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["date_prevue", "sequence"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["reservation", "sequence"],
+                name="ramassage_unique_par_bon_et_sequence",
+            )
+        ]
+        verbose_name = _("ramassage")
+        verbose_name_plural = _("ramassages")
+
+    def __str__(self):
+        return f"Ramassage {self.reservation_id}#{self.sequence}"
+
+
+class RamassageArticle(TimestampedModel):
+    """Les quatre compteurs d'un passage de ramassage, ligne par ligne.
+
+    Le vocabulaire est celui arrêté avec le client (R32) : récupéré réintègre le
+    stock, cassé part en réparation, détruit et manquant en sortent. « À
+    facturer » est une décision du livreur, indépendante du type (R37).
+
+    Aucun plafond en base : un surplus est légitime, des objets circulent entre
+    lieux (R36). On signale à la saisie, on ne refuse pas.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+
+    ramassage = models.ForeignKey(
+        Ramassage,
+        on_delete=models.CASCADE,
+        related_name="articles",
+        verbose_name=_("ramassage"),
+    )
+    ligne = models.ForeignKey(
+        LigneReservation,
+        on_delete=models.CASCADE,
+        related_name="ramassages",
+        verbose_name=_("ligne de réservation"),
+    )
+    quantite_recuperee = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité récupérée")
+    )
+    quantite_cassee = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité cassée")
+    )
+    quantite_detruite = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité détruite")
+    )
+    quantite_manquante = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité manquante")
+    )
+    facturer_client = models.BooleanField(
+        default=False, verbose_name=_("facturer au client")
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["ramassage", "ligne"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["ramassage", "ligne"],
+                name="ramassage_article_unique",
+            )
+        ]
+        verbose_name = _("article ramassé")
+        verbose_name_plural = _("articles ramassés")
+
+    def __str__(self):
+        return f"{self.ramassage_id} — ligne#{self.ligne_id}"
