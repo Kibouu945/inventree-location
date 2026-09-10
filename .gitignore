@@ -172,3 +172,4 @@ inventree_location/static/
 # Sorties du générateur de documentation (cf. docs/modele/README.md)
 docs/modele/schema.svg
 docs/modele/modele.html
+docs/visite/visite.html
