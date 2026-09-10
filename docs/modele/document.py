@@ -387,16 +387,18 @@ FRONT = [
     (
         "F1",
         "Onglet Contacts du back-office",
-        "Créer et éditer les contacts d'un client. <b>L'API est prête et complète</b> (`/backoffice/contacts/`, filtrable par client, avec désactivation) ; il n'existe simplement aucun écran, donc un contact ne peut aujourd'hui être créé que par la migration ou le shell. Seul détail back : ajouter `client_nom` au sérialiseur si l'écran liste tous les contacts d'un coup.",
-        "Nouveau `backoffice/ContactsTab.tsx`, branché dans `UsersBackOffice.tsx`. Copier la structure de `ClientsTab.tsx`, qui fait exactement le même travail pour les clients.",
+        "Créer et éditer les contacts d'un client. <b>L'API est prête et complète</b> — `/backoffice/contacts/`, filtrable par client, avec recherche, désactivation et `client_nom` pour la liste tous clients confondus. Il n'existe simplement aucun écran : un contact ne peut aujourd'hui être créé que par le shell.",
+        "Nouveau `backoffice/ContactsTab.tsx`, troisième onglet de `UsersBackOffice.tsx`. Copier la structure de `ClientsTab.tsx`, qui fait le même travail pour les clients ; les types et l'URL existent déjà. Pas de suppression : un contact se désactive, il a peut-être signé un devis. E-mail vide envoyé en `null`, jamais en chaîne vide.",
         "rien — prêt à prendre",
+        "on crée un contact depuis l'écran, le compteur « Contacts » du client s'incrémente, et la désactivation le sort du sélecteur de `ManifestationsTab` sans le faire disparaître de la liste.",
     ),
     (
         "F2",
         "Accueil du gestionnaire : ses clients",
-        "« Le gestionnaire doit voir en priorité la liste de ses clients dès la connexion, et pouvoir les retrouver rapidement lors d'un appel téléphonique » (réunion du 09/09). Le champ `Client.gestionnaire` existe en base et est exposé par l'API, mais <b>rien ne l'affiche ni ne l'édite</b>.",
-        "Nouvel écran dans `postes/definitions.tsx`, en <b>première</b> entrée du poste gestionnaire. Ajouter aussi le champ au formulaire de `ClientsTab.tsx`.",
+        "« Le gestionnaire doit voir en priorité la liste de ses clients dès la connexion, et pouvoir les retrouver rapidement lors d'un appel téléphonique » (réunion du 09/09). Son poste ouvre aujourd'hui sur l'arborescence. <b>L'API est prête</b> : `/clients/?gestionnaire=me` ne rend que ses clients, `gestionnaire_nom` donne le nom du référent.",
+        "Nouvel écran en <b>première</b> entrée du poste gestionnaire (`postes/definitions.tsx`), plus le champ « gestionnaire référent » au formulaire de `ClientsTab.tsx` — `Select` alimenté par `/users/?roles=gestionnaire`.",
         "rien — prêt à prendre",
+        "`demo_gestionnaire` ouvre son poste sur ses clients, et l'admin peut changer le référent depuis le back-office.",
     ),
     (
         "F3",
@@ -404,6 +406,7 @@ FRONT = [
         "L'arbre démarre à la manifestation ; la maquette et la réunion demandent client → manifestation → prestation → articles. Le niveau manquait parce que `Client` n'existait pas — <b>il existe maintenant</b>.",
         "`arborescence/Arborescence.tsx` : un niveau au-dessus, alimenté par `/clients/`. Le composant est déjà écrit par niveaux, chacun chargeant ses enfants au dépliage.",
         "rien — prêt à prendre",
+        "un client se déplie sur ses manifestations, la recherche et les filtres Futur / Passé marchent encore, et les clés d'URL restent préfixées.",
     ),
     (
         "F4",
@@ -411,6 +414,7 @@ FRONT = [
         "Les trois `+` de la maquette sont visibles mais <b>désactivés</b>, avec l'explication au survol. La création passe par l'écran « Fiches ».",
         "Extraire les formulaires de `ManifestationsTab.tsx` et `PrestationsTab.tsx` (dossier `organisation/`) en composants réutilisables, puis les ouvrir depuis l'arbre. C'est l'extraction qui fait le travail, pas le bouton.",
         "rien, mais chevauche F3",
+        "on crée une manifestation, une prestation et une ligne depuis l'arbre, sans passer par l'écran « Fiches ».",
     ),
     (
         "F5",
@@ -418,20 +422,23 @@ FRONT = [
         "Gantt des manifestations sur les jours, pastilles de statut, bascule calendrier / liste, fiche détaillée au survol avec contact, volumes et état de livraison. L'existant est un calendrier mensuel des réservations : ni Gantt, ni volumes, ni fiche.",
         "`ReservationCalendar.tsx` (dossier `reservation/`) à remplacer ou doubler. `Manifestation.couleur` est en base depuis L1 et n'est pas encore utilisée.",
         "rien — prêt à prendre",
+        "la même manifestation se lit en Gantt et en liste, avec sa couleur et son état de livraison.",
     ),
     (
         "F6",
         "Maquette Livraison",
         "Table hiérarchique aux quatre niveaux, compteurs −/+ et photo par ligne, cases de validation par ligne et par prestation, filtres Tous / À faire / Partiel / Complet, envoi groupé.",
-        "`delivery/DeliveriesList.tsx` (liste plate aujourd'hui). La hiérarchie et le chargement au dépliage sont déjà résolus dans `arborescence/Arborescence.tsx` : s'en inspirer.",
+        "`delivery/DeliveriesList.tsx` (liste plate aujourd'hui). La hiérarchie et le chargement au dépliage sont déjà résolus dans `arborescence/Arborescence.tsx` : le lire avant d'écrire.",
         "L6 pour la saisie ; lecture faisable avant",
+        "la tournée du jour s'affiche en quatre niveaux avec les quantités demandée / livrée / restante, les filtres opèrent, et le tout se vérifie avec `demo_livreur`.",
     ),
     (
         "F7",
         "Maquette Ramassage",
-        "Même table, avec <b>quatre compteurs par ligne</b> — récupéré, cassé, détruit, manquant —, la photo, la bascule de facturation et la case de ramassage complet. Le manquant est pré-rempli par l'autocomparaison et corrigeable (R34).",
+        "Même table, avec <b>quatre compteurs par ligne</b> — récupéré, cassé, détruit, manquant —, la photo, la bascule de facturation et la case de ramassage complet. Deux règles contre-intuitives : le manquant se <b>déduit</b> (R31) et n'est calculé qu'une fois le lieu déclaré entièrement ramassé (R32) ; et il n'y a <b>aucun plafond</b> (R33), un surplus est légitime.",
         "`ramassage/RamassagesList.tsx` et son formulaire, qui portent déjà les quatre quantités mais pas la table hiérarchique.",
         "L6, et F6 pour la structure",
+        "les quatre compteurs se saisissent par ligne, le manquant se déduit, et rien n'est déclaré perdu tant que le lieu n'est pas terminé.",
     ),
     (
         "F8",
@@ -439,6 +446,7 @@ FRONT = [
         "« Le magasinier gère le stock physique ; le catalogue et les clients ne le concernent pas » (09/09). Son poste affiche pourtant le catalogue, faute d'écran stock : c'est aujourd'hui le seul qui donne l'état article par article.",
         "Nouvel écran, puis remplacer l'entrée Catalogue du poste magasinier dans `postes/definitions.tsx`.",
         "rien — prêt à prendre",
+        "`demo_magasinier` voit l'état article par article sans passer par le catalogue.",
     ),
     (
         "F9",
@@ -446,6 +454,7 @@ FRONT = [
         "Génération, envoi, signature, états de ligne « hors devis » et « annulée », et la provenance de chaque modification (personne, canal, horodatage).",
         "Écrans neufs, plus une entrée Devis et une entrée Factures au poste gestionnaire — les deux manquent au CDC §95-101.",
         "L3",
+        "un devis se génère depuis une prestation, s'envoie, se signe, et une ligne ajoutée après signature ressort « hors devis ».",
     ),
 ]
 
@@ -474,6 +483,87 @@ BACK = [
         "Écriture des tables d'exécution",
         "Greffe sur les trois points d'écriture déjà transactionnels : le journal de livraison, le passage de statut, la saisie de ramassage. Se découpe en trois lots indépendants.",
         "L6",
+    ),
+]
+
+#: Mise en route d'un poste de développement. Commandes vérifiées sur le conteneur.
+DEMARRAGE = [
+    (
+        "Démarrer la stack",
+        "make up",
+        "Quatre services : `db`, `inventree` (port 8000), `backend` (worker), `frontend` (Vite).",
+    ),
+    (
+        "Peupler la base",
+        "docker compose exec inventree bash -lc \\<br>'cd /home/inventree/src/backend/InvenTree &amp;&amp; python manage.py seed_demo'",
+        "Trois clients et leurs contacts, seize articles, quatre manifestations autour d'aujourd'hui, des réservations dans tous les statuts, un retour avec incidents, un conflit de stock. <b>Sans elle, la base est vide et les écrans muets.</b> `--force` si la base contient déjà des données, `--date-pivot AAAA-MM-JJ` pour décaler les dates.",
+    ),
+    (
+        "Se connecter",
+        "admin / admin123 — puis demo_&lt;role&gt; / Demo!2026",
+        "Un compte par rôle : `demo_gestionnaire`, `demo_magasinier`, `demo_livreur`, `demo_acheteur`, `demo_admin`. <b>Tester avec le compte du rôle concerné</b>, jamais avec l'admin : la barre de navigation et les postes sont filtrés par les droits, donc un écran correct en admin peut être invisible pour sa persona.",
+    ),
+    (
+        "Déployer un changement",
+        "cd frontend &amp;&amp; npm run build — puis docker compose restart inventree",
+        "InvenTree sert le static <b>collecté au boot</b> du conteneur. Sans le redémarrage, on regarde l'ancien bundle et on cherche un bug déjà corrigé. `collectstatic` ne recopie pas le static du plugin.",
+    ),
+    (
+        "Vérifier avant de pousser",
+        "npx tsc -b · npx vitest run · pre-commit run --all-files",
+        "`pre-commit` deux fois de suite : `biome` et `ruff format` modifient les fichiers, la première passe échoue donc légitimement.",
+    ),
+]
+
+#: Pièges du dépôt, chacun déjà payé d'une session.
+PIEGES = [
+    (
+        "Mantine doit rester en <b>v8</b>",
+        "L'hôte fournit `@mantine/core` 8.3.18 en global. Un paquet Mantine en v9 dans le lockfile et le widget affiche « Error Loading Content ».",
+    ),
+    (
+        "Un composant réutilisé par un poste n'importe que des <b>types</b> depuis `@inventreedb/ui`",
+        "Un import de valeur fait entrer `@lingui` sans `i18n` initialisé : le poste rend une page blanche avec `Cannot read properties of undefined (reading 'i18n')`.",
+    ),
+    (
+        "Toute clé de query string passe par `urlState.ts`, <b>préfixée</b> par le widget",
+        "Tous les widgets écrivent la même URL : sans préfixe, le dernier à se synchroniser efface les filtres des autres.",
+    ),
+    (
+        "`Select` cherchable : ne jamais dériver l'entité choisie des seuls résultats de recherche",
+        "Mantine recopie le libellé de l'option dans le champ de recherche, qui repart au serveur. Si le libellé est enrichi (« Nom — N disponible(s) »), le serveur ne matche plus, la liste se vide et la sélection est perdue. Références correctes : `PartPicker.tsx`, `ReservationForm.tsx`.",
+    ),
+    (
+        "`npx tsc --noEmit` <b>ne vérifie rien</b>",
+        'Le `tsconfig.json` racine a `"files": []` et délègue à des project references. La commande qui vérifie est `npx tsc -b`.',
+    ),
+]
+
+#: Répartition proposée. Un fichier, un auteur.
+REPARTITION = [
+    (
+        "Joseph",
+        "F3 — niveau client dans l'arborescence",
+        "F4 — boutons d'ajout (extraction des formulaires)",
+        "`arborescence/`, `organisation/`",
+    ),
+    (
+        "Maxime",
+        "F6 — Livraison, <b>en lecture</b>",
+        "F7 — Ramassage, sur la table de F6",
+        "`delivery/`, `ramassage/`",
+    ),
+    (
+        "Hanane",
+        "F1 — onglet Contacts du back-office",
+        "F2 — accueil gestionnaire, puis F8 — écran stock",
+        "`backoffice/`, `postes/definitions.tsx`",
+    ),
+    (
+        "Back",
+        "L5 — couture d'exécution et deux bugs",
+        "L3 — devis, puis L6 et L7 — tables d'exécution",
+        "hors `frontend/`",
     ),
 ]
 
@@ -521,14 +611,27 @@ livre = "".join(
     for i, t, d, c in ((i, t, mono(d), c) for i, t, d, c in LIVRE)
 )
 front = "".join(
-    f'<tr><td class="id">{i}</td><td><b>{t}</b><br><span class="det">{d}</span></td><td class="det">{ou}</td><td class="src">{dep}</td></tr>'
-    for i, t, d, ou, dep in (
-        (i, t, mono(d), mono(ou), dep) for i, t, d, ou, dep in FRONT
-    )
+    f'<tr><td class="id">{i}</td>'
+    f'<td><b>{t}</b><br><span class="det">{mono(d)}</span>'
+    f'<span class="fin"><b>Fini quand</b> {mono(fini)}</span></td>'
+    f'<td class="det">{mono(ou)}</td><td class="src">{dep}</td></tr>'
+    for i, t, d, ou, dep, fini in FRONT
 )
 back = "".join(
     f'<tr><td class="id">{i}</td><td><b>{t}</b><br><span class="det">{d}</span></td><td class="src">{dep}</td></tr>'
     for i, t, d, dep in ((i, t, mono(d), dep) for i, t, d, dep in BACK)
+)
+demarrage = "".join(
+    f'<tr><td><b>{etape}</b></td><td class="cmd"><code>{cmd}</code></td><td class="det">{mono(pourquoi)}</td></tr>'
+    for etape, cmd, pourquoi in DEMARRAGE
+)
+pieges = "".join(
+    f'<tr><td class="id">{index}</td><td>{mono(piege)}</td><td class="det">{mono(effet)}</td></tr>'
+    for index, (piege, effet) in enumerate(PIEGES, start=1)
+)
+repartition = "".join(
+    f'<tr><td><b>{qui}</b></td><td>{mono(un)}</td><td>{mono(deux)}</td><td class="det">{mono(fichiers)}</td></tr>'
+    for qui, un, deux, fichiers in REPARTITION
 )
 gele = "".join(f"<tr><td><b>{mono(t)}</b></td><td>{mono(d)}</td></tr>" for t, d in GELE)
 corr = "".join(
@@ -563,9 +666,12 @@ table.front th:nth-child(4) {{ width:auto; }}
 table.front td.src {{ white-space:normal; width:auto; }}
 table.front td {{ overflow-wrap:break-word; }}
 table.front code {{ font-size:8.7pt; overflow-wrap:break-word; }}
+td.cmd {{ width:31%; overflow-wrap:anywhere; }}
+td.cmd code {{ font-size:8.2pt; }}
 td.mq {{ font-weight:700; color:#1d4ed8; width:92px; }}
 td.ec {{ color:#6b7280; font-size:9pt; width:34%; }}
 .det {{ color:#4b5563; font-size:8.8pt; }}
+.fin {{ display:block; margin-top:3px; color:#065f46; font-size:8.6pt; }}
 code {{ font:9.2pt ui-monospace, Menlo, monospace; background:#f3f4f6; padding:.5px 3px; border-radius:3px; }}
 .page {{ break-after:page; page-break-after:always; }}
 .legend {{ margin-top:10px; font-size:9pt; color:#4b5563; }}
@@ -577,7 +683,7 @@ footer {{ margin-top:22px; padding-top:8px; border-top:1px solid #e5e7eb; color:
 
 <h1>Modèle de données &amp; règles métier</h1>
 <div class="sub">InvenTree Location — gestion de location de matériel événementiel<br>
-Révision 4 · 10/09/2026 · Sources : point de revue du 09/09/2026, cahier des charges V06
+Révision 5 · 10/09/2026 · Sources : point de revue du 09/09/2026, cahier des charges V06
 (texte <b>et</b> annexes graphiques), code existant</div>
 
 <h2>Schéma du modèle cible</h2>
@@ -611,6 +717,27 @@ qu'un écran à écrire en copiant celui des clients.</div>
 
 <h2>À faire — back</h2>
 <table><thead><tr><th>#</th><th>Lot</th><th>Dépend de</th></tr></thead><tbody>{back}</tbody></table>
+
+<div class="page"></div>
+
+<h2>Répartition proposée</h2>
+<table><thead><tr><th>Qui</th><th>D'abord</th><th>Ensuite</th><th>Fichiers qui lui appartiennent</th></tr></thead><tbody>{repartition}</tbody></table>
+<div class="note"><b>Un fichier, un auteur</b> : c'est ce qui rend les quatre chantiers simultanés
+sans conflit de fusion. Une branche par tâche, depuis <code>develop</code>, PR vers
+<code>develop</code> — jamais vers <code>main</code>.<br>
+<b>F6 et F7 se font en lecture d'abord</b> : compteurs et validations ont besoin des tables
+d'exécution (lot L6). Ce n'est pas un retard, c'est le découpage — à dire avant, sinon la
+personne attend.<br>
+<b>F5 (Planning) et F9 (devis) sont un troisième tour</b>, au premier qui se libère. F5 consomme
+les formes de données que les autres sont en train de fixer ; F9 attend L3.</div>
+
+<h2>Mise en route</h2>
+<table><thead><tr><th>Étape</th><th>Commande</th><th>Pourquoi</th></tr></thead><tbody>{demarrage}</tbody></table>
+
+<h2>Pièges du dépôt — à lire avant d'écrire</h2>
+<table><thead><tr><th>#</th><th>Règle</th><th>Ce qu'on voit si on l'ignore</th></tr></thead><tbody>{pieges}</tbody></table>
+
+<div class="page"></div>
 
 <h2>Gelé jusqu'après la soutenance</h2>
 <table><thead><tr><th>Sujet</th><th>Raison</th></tr></thead><tbody>{gele}</tbody></table>
