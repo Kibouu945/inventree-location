@@ -2534,35 +2534,49 @@ class RentablePartDetailView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
-def _volume_engage_par_manifestation():
-    """Somme des quantités demandées d'une manifestation, annulés exclus."""
+#: Chemin du niveau agrégé, vu depuis `LigneReservation` puis depuis `Reservation`.
+#:
+#: Le planning se lit à deux mailles — la manifestation pour la barre, la
+#: prestation pour ses sous-lignes. Les deux se comptent avec la **même**
+#: requête au chemin près : c'est ce qui garantit que les sous-lignes d'une
+#: barre totalisent la barre, au lieu de mesurer deux choses différentes.
+DEPUIS_LIGNE = {
+    "manifestation": "reservation__prestation__manifestation",
+    "prestation": "reservation__prestation",
+}
+DEPUIS_BON = {
+    "manifestation": "prestation__manifestation",
+    "prestation": "prestation",
+}
+
+
+def _volume_engage_par(maille):
+    """Somme des quantités demandées sous une maille donnée, annulés exclus."""
+
+    champ = DEPUIS_LIGNE[maille]
 
     return (
-        LigneReservation.objects.filter(
-            reservation__prestation__manifestation=OuterRef("pk")
-        )
+        LigneReservation.objects.filter(**{champ: OuterRef("pk")})
         .exclude(reservation__statut__in=STATUTS_SANS_ENGAGEMENT)
-        .values("reservation__prestation__manifestation")
+        .values(champ)
         .annotate(total=Sum("quantite_demandee"))
         .values("total")[:1]
     )
 
 
-def _bons_par_manifestation(*, sortis=False):
-    """Nombre de bons d'une manifestation — tous, ou seulement ceux sortis."""
+def _bons_par(maille, *, sortis=False):
+    """Nombre de bons sous une maille — tous, ou seulement ceux sortis."""
 
-    queryset = Reservation.objects.filter(
-        prestation__manifestation=OuterRef("pk")
-    ).exclude(statut__in=STATUTS_SANS_ENGAGEMENT)
+    champ = DEPUIS_BON[maille]
+
+    queryset = Reservation.objects.filter(**{champ: OuterRef("pk")}).exclude(
+        statut__in=STATUTS_SANS_ENGAGEMENT
+    )
 
     if sortis:
         queryset = queryset.filter(statut__in=STATUTS_DEJA_SORTIS)
 
-    return (
-        queryset.values("prestation__manifestation")
-        .annotate(total=Count("id"))
-        .values("total")[:1]
-    )
+    return queryset.values(champ).annotate(total=Count("id")).values("total")[:1]
 
 
 class ManifestationListCreateView(generics.ListCreateAPIView):
@@ -2585,9 +2599,13 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
         queryset = (
             Manifestation.objects.select_related("client", "contact")
             .annotate(
-                volume_engage=Coalesce(Subquery(_volume_engage_par_manifestation()), 0),
-                bons_engages=Coalesce(Subquery(_bons_par_manifestation()), 0),
-                bons_livres=Coalesce(Subquery(_bons_par_manifestation(sortis=True)), 0),
+                volume_engage=Coalesce(
+                    Subquery(_volume_engage_par("manifestation")), 0
+                ),
+                bons_engages=Coalesce(Subquery(_bons_par("manifestation")), 0),
+                bons_livres=Coalesce(
+                    Subquery(_bons_par("manifestation", sortis=True)), 0
+                ),
                 # `distinct` obligatoire : ce `Count` joint, là où les trois
                 # autres agrégats sont des sous-requêtes.
                 prestations_total=Count("prestations", distinct=True),
@@ -2657,6 +2675,9 @@ class PrestationListCreateView(generics.ListCreateAPIView):
     Paramètres de filtre :
     - manifestation : filtre exact sur la manifestation parente.
     - search        : recherche sur le nom de la prestation ou de sa manifestation.
+    - from / to     : fenêtre du planning, au **chevauchement** comme pour les
+      manifestations — une prestation commencée avant la fenêtre et qui court
+      encore doit apparaître dans la semaine affichée.
     """
 
     permission_classes = [PrestationPermission]
@@ -2664,14 +2685,37 @@ class PrestationListCreateView(generics.ListCreateAPIView):
     pagination_class = LieuPagination
 
     def get_queryset(self):
-        """Retourne les prestations, filtrées par manifestation et recherche."""
+        """Retourne les prestations, filtrées par manifestation, fenêtre et recherche.
 
-        queryset = _prestation_queryset().order_by("-date_debut")
+        Les agrégats sont posés par sous-requête, avec la mécanique et les
+        raisons de `ManifestationListCreateView` : deux `Sum` sur deux
+        jointures se multiplieraient, et le planning déplié demande ces
+        nombres pour chaque sous-ligne d'un coup.
+        """
+
+        queryset = (
+            _prestation_queryset()
+            .annotate(
+                volume_engage=Coalesce(Subquery(_volume_engage_par("prestation")), 0),
+                bons_engages=Coalesce(Subquery(_bons_par("prestation")), 0),
+                bons_livres=Coalesce(Subquery(_bons_par("prestation", sortis=True)), 0),
+            )
+            .order_by("-date_debut")
+        )
 
         manifestation_id = self.request.query_params.get("manifestation")
 
         if manifestation_id:
             queryset = queryset.filter(manifestation_id=manifestation_id)
+
+        depuis = self.request.query_params.get("from")
+        jusqua = self.request.query_params.get("to")
+
+        if depuis:
+            queryset = queryset.filter(**_borne_journee("date_fin", depuis, "gte"))
+
+        if jusqua:
+            queryset = queryset.filter(**_borne_journee("date_debut", jusqua, "lte"))
 
         search = self.request.query_params.get("search")
 

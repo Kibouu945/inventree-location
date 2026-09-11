@@ -25,6 +25,7 @@ from inventree_location.models import (
     Prestation,
     RentableItem,
     StatutManifestation,
+    StatutReservation,
 )
 from inventree_location.views import (
     PrestationDetailView,
@@ -308,3 +309,208 @@ class TestPrestationDetail:
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
         assert not Prestation.objects.filter(pk=prestation.pk).exists()
+
+
+@pytest.mark.django_db
+class TestChampsDuPlanningPrestation:
+    """Le planning déplié : chaque prestation porte son volume et son avancement.
+
+    C'est la même mesure qu'à la maille manifestation, un cran plus bas. Elle
+    est calculée par la vue et non par le sérialiseur, pour la même raison :
+    agréger prestation par prestation ferait une requête par sous-ligne.
+    """
+
+    def _liste(self, factory, user, **params):
+        request = factory.get(PRESTATIONS_URL, params)
+        force_authenticate(request, user=user)
+
+        return PrestationListCreateView.as_view()(request)
+
+    def _bons(self, prestation, user, statuts, *, quantite=3):
+        """Un bon par statut donné sur la prestation, `quantite` objets chacun."""
+
+        from inventree_location.tests.factories import (
+            make_ligne,
+            make_part,
+            make_reservation,
+        )
+
+        part = make_part(rentable=True)
+
+        for statut in statuts:
+            bon = make_reservation(
+                prestation=prestation, demandeur=user, statut=statut
+            )
+            make_ligne(reservation=bon, part=part, quantite_demandee=quantite)
+
+    def test_le_volume_somme_les_bons_engages(
+        self, factory, user, prestation
+    ):
+        self._bons(
+            prestation,
+            user,
+            [
+                StatutReservation.VALIDEE,
+                StatutReservation.LIVREE,
+                StatutReservation.ANNULEE,  # n'engage plus rien
+                StatutReservation.BROUILLON,  # pas encore engagé
+            ],
+        )
+
+        row = self._liste(factory, user).data["results"][0]
+
+        assert row["quantite_totale"] == 6
+        assert row["etat_livraison"] == {"bons": 2, "livres": 1, "a_livrer": 1}
+
+    def test_une_prestation_sans_bon_rend_zero(self, factory, user, prestation):
+        row = self._liste(factory, user).data["results"][0]
+
+        assert row["quantite_totale"] == 0
+        assert row["etat_livraison"] == {"bons": 0, "livres": 0, "a_livrer": 0}
+
+    def test_les_prestations_totalisent_leur_manifestation(
+        self, factory, user, manifestation, prestation
+    ):
+        """Le point de la maille dépliée : les sous-lignes font la barre.
+
+        Deux mesures différentes — le prévisionnel de la prestation d'un côté,
+        les bons de l'autre — donneraient un planning où le détail contredit
+        l'ensemble.
+        """
+
+        from inventree_location.tests.factories import make_prestation
+        from inventree_location.views import ManifestationListCreateView
+
+        autre = make_prestation(
+            manifestation=manifestation,
+            nom="Démontage",
+            date_debut=manifestation.date_debut + timedelta(days=1),
+            date_fin=manifestation.date_debut + timedelta(days=1, hours=3),
+        )
+        self._bons(prestation, user, [StatutReservation.VALIDEE])
+        self._bons(autre, user, [StatutReservation.LIVREE, StatutReservation.LIVREE])
+
+        prestations = self._liste(
+            factory, user, manifestation=manifestation.pk
+        ).data["results"]
+
+        requete = factory.get("/plugin/inventree-location/manifestations/")
+        force_authenticate(requete, user=user)
+        barre = ManifestationListCreateView.as_view()(requete).data["results"][0]
+
+        assert sum(row["quantite_totale"] for row in prestations) == (
+            barre["quantite_totale"]
+        )
+        assert sum(row["etat_livraison"]["bons"] for row in prestations) == (
+            barre["etat_livraison"]["bons"]
+        )
+        assert sum(row["etat_livraison"]["livres"] for row in prestations) == (
+            barre["etat_livraison"]["livres"]
+        )
+
+    def test_le_detail_retombe_sur_le_calcul_ligne_a_ligne(
+        self, factory, user, prestation
+    ):
+        """Sans annotation — le détail n'en pose pas —, le repli doit rendre
+        la même chose que la liste."""
+
+        self._bons(prestation, user, [StatutReservation.LIVREE])
+
+        request = factory.get(f"{PRESTATIONS_URL}{prestation.pk}/")
+        force_authenticate(request, user=user)
+        response = PrestationDetailView.as_view()(request, pk=prestation.pk)
+
+        assert response.data["quantite_totale"] == 3
+        assert response.data["etat_livraison"] == {
+            "bons": 1,
+            "livres": 1,
+            "a_livrer": 0,
+        }
+
+    def test_la_liste_ne_fait_pas_une_requete_par_prestation(
+        self, factory, user, manifestation, django_assert_max_num_queries
+    ):
+        from inventree_location.tests.factories import make_prestation
+
+        for index in range(10):
+            presta = make_prestation(
+                manifestation=manifestation,
+                nom=f"Prestation {index}",
+                date_debut=manifestation.date_debut,
+                date_fin=manifestation.date_debut + timedelta(hours=2),
+            )
+            self._bons(
+                presta, user, [StatutReservation.VALIDEE, StatutReservation.LIVREE]
+            )
+
+        with django_assert_max_num_queries(6):
+            response = self._liste(factory, user)
+
+        assert len(response.data["results"]) == 10
+        assert all(row["quantite_totale"] == 6 for row in response.data["results"])
+
+
+@pytest.mark.django_db
+class TestFenetreDuPlanningPrestation:
+    """`from` / `to` : ce qui **chevauche** la fenêtre, pas ce qui y tient.
+
+    Même règle qu'à la maille manifestation : une prestation commencée la
+    semaine dernière et qui court encore doit apparaître dans la semaine
+    affichée, sinon le planning perd ce qui est en cours.
+    """
+
+    def _noms(self, factory, user, **params):
+        request = factory.get(PRESTATIONS_URL, params)
+        force_authenticate(request, user=user)
+
+        return {
+            row["nom"] for row in PrestationListCreateView.as_view()(request).data["results"]
+        }
+
+    @pytest.fixture
+    def trois_prestations(self, manifestation):
+        """Trois prestations ancrées à midi, heure de Paris.
+
+        À midi et pas à `now()` : le serveur compare au **jour** dans le fuseau
+        métier, et une fixture créée à 22 h UTC tombe déjà le lendemain à
+        Paris — le test mesurerait alors le décalage, pas la règle.
+        """
+
+        from inventree_location.tests.factories import make_prestation
+
+        debut = timezone.localtime(manifestation.date_debut).replace(
+            hour=12, minute=0, second=0, microsecond=0
+        )
+
+        for nom, decalage, duree in [
+            ("Avant", timedelta(days=0), timedelta(hours=2)),
+            ("Pendant", timedelta(days=3), timedelta(hours=2)),
+            ("Chevauchante", timedelta(days=1), timedelta(days=4)),
+        ]:
+            make_prestation(
+                manifestation=manifestation,
+                nom=nom,
+                date_debut=debut + decalage,
+                date_fin=debut + decalage + duree,
+            )
+
+        return debut
+
+    def test_la_fenetre_garde_ce_qui_chevauche(
+        self, factory, user, trois_prestations
+    ):
+        debut = trois_prestations
+        jour = timezone.localtime(debut + timedelta(days=3)).date().isoformat()
+
+        assert self._noms(factory, user, **{"from": jour, "to": jour}) == {
+            "Pendant",
+            "Chevauchante",
+        }
+
+    def test_la_fenetre_exclut_ce_qui_est_entierement_dehors(
+        self, factory, user, trois_prestations
+    ):
+        debut = trois_prestations
+        jour = timezone.localtime(debut + timedelta(days=6)).date().isoformat()
+
+        assert self._noms(factory, user, **{"from": jour, "to": jour}) == set()

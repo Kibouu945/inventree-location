@@ -1484,6 +1484,61 @@ STATUTS_DEJA_SORTIS = (
 )
 
 
+def _volume_des_bons(reservations):
+    """Volume engagé d'un lot de bons, annulés exclus.
+
+    Repli du sérialiseur quand la vue n'a pas annoté : il sert au détail d'une
+    prestation ou d'une manifestation, jamais à une liste, où il ferait une
+    requête par ligne.
+    """
+
+    return sum(
+        ligne.quantite_demandee
+        for bon in reservations
+        if bon.statut not in STATUTS_SANS_ENGAGEMENT
+        for ligne in bon.lignes.all()
+    )
+
+
+def _etat_des_bons(reservations):
+    """Avancement des livraisons d'un lot de bons : sortis sur engagés.
+
+    Trois nombres plutôt qu'un pourcentage : le planning affiche « 2/5 », et un
+    pourcentage se recalcule côté écran si besoin, l'inverse non.
+    """
+
+    engages = [bon for bon in reservations if bon.statut not in STATUTS_SANS_ENGAGEMENT]
+    livres = sum(1 for bon in engages if bon.statut in STATUTS_DEJA_SORTIS)
+
+    return {
+        "bons": len(engages),
+        "livres": livres,
+        "a_livrer": max(len(engages) - livres, 0),
+    }
+
+
+def _bons_de_la_manifestation(manifestation):
+    """Tous les bons d'une manifestation, quel que soit leur statut."""
+
+    return [
+        bon
+        for prestation in manifestation.prestations.all()
+        for bon in prestation.reservations.all()
+    ]
+
+
+def _etat_annote(obj):
+    """Avancement lu depuis les annotations de la vue, ou `None` si absentes."""
+
+    total = getattr(obj, "bons_engages", None)
+    livres = getattr(obj, "bons_livres", None)
+
+    if total is None or livres is None:
+        return None
+
+    return {"bons": total, "livres": livres, "a_livrer": max(total - livres, 0)}
+
+
 def _libelle_interlocuteur(manifestation):
     """Contact référent d'une manifestation, à défaut le nom du client."""
 
@@ -1592,6 +1647,8 @@ class PrestationSerializer(serializers.ModelSerializer):
     lignes = LignePrestationSerializer(
         source="lignes_prestation", many=True, required=False
     )
+    quantite_totale = serializers.SerializerMethodField()
+    etat_livraison = serializers.SerializerMethodField()
 
     class Meta:
         """Configuration du serializer Prestation."""
@@ -1610,6 +1667,8 @@ class PrestationSerializer(serializers.ModelSerializer):
             "lieu",
             "lieu_detail",
             "lignes",
+            "quantite_totale",
+            "etat_livraison",
             "created_at",
             "updated_at",
         ]
@@ -1617,9 +1676,33 @@ class PrestationSerializer(serializers.ModelSerializer):
             "id",
             "manifestation_nom",
             "lieu_detail",
+            "quantite_totale",
+            "etat_livraison",
             "created_at",
             "updated_at",
         ]
+
+    def get_quantite_totale(self, obj):
+        """Volume d'objets engagés sur cette prestation, annulés exclus.
+
+        Même mesure que `ManifestationSerializer.quantite_totale`, un cran plus
+        bas : les prestations d'une manifestation totalisent donc exactement sa
+        barre de planning. Prendre ici les lignes de prestation — le
+        prévisionnel — donnerait un autre nombre, et deux mailles qui ne
+        s'additionnent pas.
+        """
+
+        annotee = getattr(obj, "volume_engage", None)
+
+        if annotee is not None:
+            return annotee
+
+        return _volume_des_bons(obj.reservations.all())
+
+    def get_etat_livraison(self, obj):
+        """Avancement des livraisons de la prestation : sortis sur engagés."""
+
+        return _etat_annote(obj) or _etat_des_bons(obj.reservations.all())
 
     def validate(self, attrs):
         """Dates de prestation incluses dans celles de la manifestation."""
@@ -1880,35 +1963,12 @@ class ManifestationSerializer(serializers.ModelSerializer):
         if annotee is not None:
             return annotee
 
-        return sum(
-            ligne.quantite_demandee
-            for prestation in obj.prestations.all()
-            for reservation in prestation.reservations.all()
-            if reservation.statut not in STATUTS_SANS_ENGAGEMENT
-            for ligne in reservation.lignes.all()
-        )
+        return _volume_des_bons(_bons_de_la_manifestation(obj))
 
     def get_etat_livraison(self, obj):
-        """Avancement des livraisons : combien de bons sont sortis, sur combien.
+        """Avancement des livraisons : combien de bons sont sortis, sur combien."""
 
-        Trois nombres plutôt qu'un pourcentage : le planning affiche « 2/5 »,
-        et un pourcentage se recalcule côté écran si besoin, l'inverse non.
-        """
-
-        total = getattr(obj, "bons_engages", None)
-        livres = getattr(obj, "bons_livres", None)
-
-        if total is None or livres is None:
-            bons = [
-                reservation
-                for prestation in obj.prestations.all()
-                for reservation in prestation.reservations.all()
-                if reservation.statut not in STATUTS_SANS_ENGAGEMENT
-            ]
-            total = len(bons)
-            livres = sum(1 for bon in bons if bon.statut in STATUTS_DEJA_SORTIS)
-
-        return {"bons": total, "livres": livres, "a_livrer": max(total - livres, 0)}
+        return _etat_annote(obj) or _etat_des_bons(_bons_de_la_manifestation(obj))
 
     def validate_statut(self, value):
         """Refuse un statut dérivé posé à la main."""

@@ -13,23 +13,61 @@ import type {
   Colonne,
   EchellePlanning,
   FenetrePlanning,
-  ManifestationPlanning,
+  LignePlanning,
+  PrestationPlanning,
   VuePlanning
 } from './types';
 
 const MS_PAR_JOUR = 24 * 60 * 60 * 1000;
 
-/** Largeur d'une colonne, en pixels, selon l'échelle.
+/** Largeur **minimale** d'une colonne, en pixels, selon l'échelle.
  *
- * Un mois tient trente et une colonnes : elles doivent rester étroites. Une
- * année n'en a que douze, elles peuvent porter « janv. 26 ».
+ * Un mois tient trente et une colonnes : elles doivent pouvoir rester
+ * étroites. Une année n'en a que douze, elles portent « janv. 26 » et ne
+ * descendent pas sous la largeur du libellé. En dessous de ces valeurs, la
+ * grille défile horizontalement plutôt que d'écraser les en-têtes.
  */
-export const LARGEUR_COLONNE: Record<EchellePlanning, number> = {
+export const LARGEUR_MIN_COLONNE: Record<EchellePlanning, number> = {
   jour: 420,
   semaine: 92,
   mois: 34,
   annee: 74
 };
+
+/** Hauteurs de la grille, en pixels. Une barre respire dans sa ligne. */
+export const HAUTEUR = {
+  ligne: 30,
+  barre: 24,
+  sousLigne: 26,
+  sousBarre: 18
+};
+
+/** Largeur de la colonne des noms, à gauche de la grille. */
+export const LARGEUR_NOMS = 210;
+
+/** Largeur réelle d'une colonne : la grille occupe la place qu'on lui donne.
+ *
+ * À largeur fixe, un planning au mois laissait un tiers du panneau vide et
+ * tassait trente jours dans la moitié gauche. On répartit donc la place
+ * disponible entre les colonnes, sans jamais descendre sous le minimum de
+ * l'échelle — c'est alors le conteneur qui défile.
+ *
+ * `largeurDisponible` vaut 0 avant la première mesure du conteneur : on rend
+ * le minimum, et la mesure suivante élargit.
+ */
+export function largeurDeColonne(
+  echelle: EchellePlanning,
+  nombreDeColonnes: number,
+  largeurDisponible: number
+): number {
+  const minimum = LARGEUR_MIN_COLONNE[echelle];
+
+  if (nombreDeColonnes <= 0 || largeurDisponible <= 0) {
+    return minimum;
+  }
+
+  return Math.max(minimum, Math.floor(largeurDisponible / nombreDeColonnes));
+}
 
 export const ECHELLES: Array<{ value: EchellePlanning; label: string }> = [
   { value: 'jour', label: 'Jour' },
@@ -247,24 +285,24 @@ export function libellePeriode(
   return `${jourEtMois.format(debut)} – ${jourEtMois.format(fin)} ${fin.getUTCFullYear()}`;
 }
 
-/** Place une manifestation dans la grille, ou `null` si elle n'y paraît pas.
+/** Place une manifestation ou une prestation dans la grille, ou `null`.
  *
- * Le calcul est le même aux trois échelles : la première colonne qui se
- * termine après le début de la manifestation, la dernière qui commence avant
- * sa fin. Une manifestation qui déborde est **rognée**, pas écartée, et le
- * rognage est signalé — sinon l'écran mentirait par omission le lundi d'une
+ * Le calcul est le même aux quatre échelles et aux deux mailles : la première
+ * colonne qui se termine après le début du sujet, la dernière qui commence
+ * avant sa fin. Un sujet qui déborde est **rogné**, pas écarté, et le rognage
+ * est signalé — sinon l'écran mentirait par omission le lundi d'une
  * manifestation commencée le vendredi.
  */
-export function placer(
-  manifestation: ManifestationPlanning,
+export function placer<T extends LignePlanning>(
+  sujet: T,
   grille: Colonne[]
-): Barre | null {
+): Barre<T> | null {
   if (grille.length === 0) {
     return null;
   }
 
-  const debut = jourDe(manifestation.date_debut);
-  const fin = jourDe(manifestation.date_fin) || debut;
+  const debut = jourDe(sujet.date_debut);
+  const fin = jourDe(sujet.date_fin) || debut;
 
   if (!debut) {
     return null;
@@ -286,7 +324,7 @@ export function placer(
   }
 
   return {
-    manifestation,
+    sujet,
     colonne: premiere + 1,
     largeur: derniere - premiere + 1,
     deborde_avant: debut < grille[0].debut,
@@ -299,20 +337,44 @@ export function placer(
  * Le tri est stable et indépendant de l'ordre d'arrivée de l'API : deux
  * chargements de la même fenêtre donnent le même planning.
  */
-export function barres(
-  manifestations: ManifestationPlanning[],
+export function barres<T extends LignePlanning>(
+  sujets: T[],
   grille: Colonne[]
-): Barre[] {
-  return manifestations
-    .map((manifestation) => placer(manifestation, grille))
-    .filter((barre): barre is Barre => barre !== null)
+): Barre<T>[] {
+  return sujets
+    .map((sujet) => placer(sujet, grille))
+    .filter((barre): barre is Barre<T> => barre !== null)
     .sort((a, b) => {
       if (a.colonne !== b.colonne) {
         return a.colonne - b.colonne;
       }
 
-      return a.manifestation.nom.localeCompare(b.manifestation.nom, 'fr');
+      return a.sujet.nom.localeCompare(b.sujet.nom, 'fr');
     });
+}
+
+/** Les prestations de la fenêtre, rangées sous leur manifestation.
+ *
+ * Le serveur les rend à plat, triées par date ; l'écran les affiche sous leur
+ * barre. Une prestation ne peut pas sortir des dates de sa manifestation, donc
+ * toute prestation de la fenêtre a bien sa barre affichée au-dessus d'elle.
+ */
+export function parManifestation(
+  prestations: PrestationPlanning[]
+): Map<number, PrestationPlanning[]> {
+  const rangees = new Map<number, PrestationPlanning[]>();
+
+  for (const prestation of prestations) {
+    const deja = rangees.get(prestation.manifestation);
+
+    if (deja) {
+      deja.push(prestation);
+    } else {
+      rangees.set(prestation.manifestation, [prestation]);
+    }
+  }
+
+  return rangees;
 }
 
 /** Libellé court d'un jour : « lun. 15 ». */
@@ -387,8 +449,8 @@ export function libelleStatut(code: string): string {
 }
 
 /** Avancement des livraisons, en texte court : « 2/5 livrés ». */
-export function libelleLivraison(manifestation: ManifestationPlanning): string {
-  const etat = manifestation.etat_livraison;
+export function libelleLivraison(sujet: LignePlanning): string {
+  const etat = sujet.etat_livraison;
 
   if (!etat || etat.bons === 0) {
     return 'aucun bon';
@@ -399,17 +461,53 @@ export function libelleLivraison(manifestation: ManifestationPlanning): string {
 
 /** Clés d'URL du planning. Préfixées : le tableau de bord partage sa query
  * string entre tous les widgets montés. */
-export const PLANNING_URL_KEYS = ['plan_vue', 'plan_echelle', 'plan_date'];
+export const PLANNING_URL_KEYS = [
+  'plan_vue',
+  'plan_echelle',
+  'plan_date',
+  'plan_ouvertes'
+];
+
+/** Les manifestations dépliées, dans l'URL : « 3,7 ».
+ *
+ * Triées et sans doublon, pour que deux dépliages faits dans un ordre
+ * différent donnent la même URL — sinon l'historique du navigateur se remplit
+ * de variantes de la même vue.
+ */
+export function ouvertesEnTexte(ouvertes: Iterable<number>): string {
+  return Array.from(new Set(ouvertes))
+    .sort((a, b) => a - b)
+    .join(',');
+}
+
+/** Relit la liste des dépliées, en écartant tout ce qui n'est pas un identifiant. */
+export function ouvertesDepuisTexte(valeur: string | null): Set<number> {
+  return new Set(
+    (valeur || '')
+      .split(',')
+      .map((morceau) => Number.parseInt(morceau, 10))
+      .filter((id) => Number.isInteger(id) && id > 0)
+  );
+}
 
 export function urlDuPlanning(
   vue: VuePlanning,
-  fenetre: FenetrePlanning
+  fenetre: FenetrePlanning,
+  ouvertes: Iterable<number> = []
 ): URLSearchParams {
   const params = new URLSearchParams();
 
   params.set('plan_vue', vue);
   params.set('plan_echelle', fenetre.echelle);
   params.set('plan_date', debutDeLaFenetre(fenetre));
+
+  const depliees = ouvertesEnTexte(ouvertes);
+
+  // Rien de déplié : pas de clé. Une clé vide traînerait dans l'URL de tous
+  // les autres widgets du tableau de bord.
+  if (depliees) {
+    params.set('plan_ouvertes', depliees);
+  }
 
   return params;
 }
@@ -424,7 +522,7 @@ function echelleValide(valeur: string | null): EchellePlanning {
 export function etatDepuisUrl(
   recherche: string,
   maintenant: Date = new Date()
-): { vue: VuePlanning; fenetre: FenetrePlanning } {
+): { vue: VuePlanning; fenetre: FenetrePlanning; ouvertes: Set<number> } {
   const params = new URLSearchParams(recherche);
   const vue = params.get('plan_vue') === 'liste' ? 'liste' : 'gantt';
   const echelle = echelleValide(params.get('plan_echelle'));
@@ -435,6 +533,7 @@ export function etatDepuisUrl(
     fenetre: {
       echelle,
       ancre: estLisible(date) ? date : aujourdhui(maintenant)
-    }
+    },
+    ouvertes: ouvertesDepuisTexte(params.get('plan_ouvertes'))
   };
 }
