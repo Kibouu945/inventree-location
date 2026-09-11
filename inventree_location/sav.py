@@ -218,7 +218,18 @@ class RetourRamassageLigneSerializer(serializers.Serializer):
     commentaire = serializers.CharField(required=False, allow_blank=True, default="")
 
     def validate(self, attrs):
-        """Contrôle que les quantités ne dépassent pas la quantité attendue."""
+        """Contrôle la seule quantité qui ne peut pas dépasser l'attendu.
+
+        **Aucun plafond sur ce qui revient** (R36) : douze objets retrouvés
+        pour dix sortis est un cas légitime — du matériel circule d'un lieu à
+        l'autre, et refuser la saisie empêcherait le livreur de déclarer le
+        contenu de son camion. On signale à l'écran, on ne bloque pas.
+
+        Le manquant, lui, est plafonné : on ne peut pas perdre plus que ce qui
+        est sorti. C'est la règle arrêtée en recette le 11/09 — « on peut
+        récupérer plus, on ne peut pas avoir plus de manquant qu'il y a eu de
+        demandes ».
+        """
 
         ligne = (
             LigneReservation.objects.select_related("reservation")
@@ -232,23 +243,18 @@ class RetourRamassageLigneSerializer(serializers.Serializer):
             })
 
         expected = quantite_attendue_au_retour(ligne)
+        manquante = attrs.get("quantite_manquante", 0)
 
-        total = (
-            attrs.get("quantite_ramassee", 0)
-            + attrs.get("quantite_sav", 0)
-            + attrs.get("quantite_detruite", 0)
-            + attrs.get("quantite_manquante", 0)
-        )
-
-        if total > expected:
+        if manquante > expected:
             raise serializers.ValidationError({
                 "detail": (
-                    "La somme ramassée + SAV + détruite + manquante "
-                    "ne peut pas dépasser la quantité à ramasser."
+                    f"La quantité manquante ({manquante}) dépasse la quantité "
+                    f"sortie ({expected}) : on ne peut pas perdre plus que ce "
+                    "qui est parti."
                 ),
                 "ligne": ligne.pk,
                 "quantite_attendue": expected,
-                "quantite_saisie": total,
+                "quantite_manquante": manquante,
             })
 
         attrs["_ligne_instance"] = ligne

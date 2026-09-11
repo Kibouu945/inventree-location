@@ -9,7 +9,6 @@ from urllib.request import Request, urlopen
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -323,33 +322,32 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
         validators = []
 
     def validate(self, attrs):
-        """Le cumul des incidents d'une ligne ne peut pas dépasser sa quantité.
+        """Seul le manquant est plafonné par la quantité sortie.
 
-        Le plafond porte sur le cumul, pas sur l'incident isolé : deux
-        signalements de 3 sur une ligne de 3 passaient tous les deux, et la
-        ligne se retrouvait avec 6 unités en incident pour 3 engagées.
+        Le cassé et le détruit ne le sont pas : du matériel circule entre
+        lieux, et douze objets rendus cassés pour dix sortis est un constat
+        possible qu'il faut pouvoir enregistrer (R36). Le manquant, lui, ne
+        peut pas dépasser ce qui est parti — on ne perd pas ce qu'on n'a pas
+        livré. Règle arrêtée en recette le 11/09.
         """
 
         line = attrs.get("line") or getattr(self.instance, "line", None)
 
         if line is not None:
+            type_incident = attrs.get("type") or getattr(self.instance, "type", None)
             qty = attrs.get("qty", getattr(self.instance, "qty", 0))
-            max_qty = quantite_attendue_au_retour(line)
 
-            autres = line.incidents.all()
+            if type_incident == ReturnIncidentType.MISSING:
+                max_qty = quantite_attendue_au_retour(line)
 
-            if self.instance is not None:
-                autres = autres.exclude(pk=self.instance.pk)
-
-            deja_signale = autres.aggregate(total=Sum("qty"))["total"] or 0
-
-            if deja_signale + qty > max_qty:
-                raise serializers.ValidationError({
-                    "qty": (
-                        f"La quantité signalée ({deja_signale + qty} au total) "
-                        f"dépasse la quantité disponible ({max_qty})."
-                    )
-                })
+                if qty > max_qty:
+                    raise serializers.ValidationError({
+                        "qty": (
+                            f"La quantité manquante ({qty}) dépasse la "
+                            f"quantité sortie ({max_qty}) : on ne peut pas "
+                            "perdre plus que ce qui est parti."
+                        )
+                    })
 
             self._refuser_le_doublon(line, attrs)
 

@@ -469,7 +469,14 @@ class TestReturnIncidentCoherenceLigne:
         assert ligne.commentaire == "Commentaire métier à conserver"
 
     @pytest.mark.django_db
-    def test_cumul_des_incidents_plafonne(self, factory, magasinier, ligne):
+    def test_le_casse_n_est_pas_plafonne(self, factory, magasinier, ligne):
+        """Trois sorties, trois manquantes, et une cassée en plus : accepté.
+
+        Du matériel circule entre lieux : un objet rendu cassé qui ne venait
+        pas de ce bon reste un constat à enregistrer (R36). Le plafond global
+        transformait ce constat en 400, et la casse disparaissait des rapports.
+        """
+
         ReturnIncident.objects.create(
             line=ligne, type=ReturnIncidentType.MISSING, qty=3
         )
@@ -485,8 +492,27 @@ class TestReturnIncidentCoherenceLigne:
 
         response = ReturnIncidentListCreateView.as_view()(request)
 
+        assert response.status_code == status.HTTP_201_CREATED
+        assert ReturnIncident.objects.count() == 2
+
+    @pytest.mark.django_db
+    def test_le_manquant_reste_plafonne(self, factory, magasinier, ligne):
+        """Trois sorties, quatre manquantes : refusé, on ne perd pas plus que
+        ce qui est parti."""
+
+        payload = {
+            "line": ligne.pk,
+            "type": ReturnIncidentType.MISSING,
+            "qty": 4,
+            "comment": "",
+        }
+        request = factory.post(INCIDENTS_URL, payload, format="json")
+        force_authenticate(request, user=magasinier)
+
+        response = ReturnIncidentListCreateView.as_view()(request)
+
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert ReturnIncident.objects.count() == 1
+        assert ReturnIncident.objects.count() == 0
 
     @pytest.mark.django_db
     def test_quantite_nulle_refusee(self, factory, magasinier, ligne):
