@@ -289,3 +289,134 @@ class TestClientList:
         request = factory.get("/plugin/inventree-location/groupes/")
         response = ClientListView.as_view()(request)
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.django_db
+class TestChampsDuPlanning:
+    """Les quatre informations que la maquette Planning affiche au survol.
+
+    Elles sont calculées par la vue, pas par le sérialiseur : agréger
+    manifestation par manifestation ferait une requête par barre du planning.
+    Le repli du sérialiseur reste testé, parce qu'il sert au détail.
+    """
+
+    def _liste(self, factory, user):
+        request = factory.get(MANIF_URL)
+        force_authenticate(request, user=user)
+
+        return ManifestationListCreateView.as_view()(request)
+
+    def _manifestation_avec_bons(self, gestionnaire, statuts):
+        """Une manifestation, un bon par statut donné, trois objets chacun."""
+
+        from inventree_location.tests.factories import (
+            make_ligne,
+            make_manifestation,
+            make_part,
+            make_prestation,
+            make_reservation,
+        )
+
+        manifestation = make_manifestation()
+        prestation = make_prestation(manifestation=manifestation)
+        part = make_part(rentable=True)
+
+        for statut in statuts:
+            bon = make_reservation(
+                prestation=prestation, demandeur=gestionnaire, statut=statut
+            )
+            make_ligne(reservation=bon, part=part, quantite_demandee=3)
+
+        return manifestation
+
+    def test_le_client_et_le_contact_sont_nommes(
+        self, factory, gestionnaire, client
+    ):
+        from inventree_location.models import Contact
+        from inventree_location.tests.factories import make_manifestation
+
+        contact = Contact.objects.create(
+            client=client, nom="Durand", prenom="Paule", telephone="0611223344"
+        )
+        make_manifestation(client=client, contact=contact)
+
+        ligne = self._liste(factory, gestionnaire).data["results"][0]
+
+        assert ligne["client_nom"] == client.nom
+        assert ligne["organisateur_nom"] == "Paule Durand"
+        assert ligne["contact_telephone"] == "0611223344"
+
+    def test_sans_contact_le_telephone_est_vide(
+        self, factory, gestionnaire, client
+    ):
+        from inventree_location.tests.factories import make_manifestation
+
+        make_manifestation(client=client)
+
+        ligne = self._liste(factory, gestionnaire).data["results"][0]
+
+        assert ligne["contact_telephone"] == ""
+        # Le libellé retombe sur le client : le livreur a toujours un nom.
+        assert ligne["organisateur_nom"] == client.nom
+
+    def test_le_volume_somme_les_bons_engages(self, factory, gestionnaire):
+        self._manifestation_avec_bons(
+            gestionnaire,
+            [
+                StatutReservation.VALIDEE,
+                StatutReservation.LIVREE,
+                StatutReservation.ANNULEE,  # n'engage plus rien
+                StatutReservation.BROUILLON,  # pas encore engagé
+            ],
+        )
+
+        ligne = self._liste(factory, gestionnaire).data["results"][0]
+
+        assert ligne["quantite_totale"] == 6
+        assert ligne["etat_livraison"] == {"bons": 2, "livres": 1, "a_livrer": 1}
+
+    def test_le_volume_n_est_pas_multiplie_par_le_nombre_de_bons(
+        self, factory, gestionnaire
+    ):
+        """Le piège des agrégations jointes : deux `Sum` sur deux jointures
+        dans la même requête se multiplient l'une l'autre."""
+
+        self._manifestation_avec_bons(
+            gestionnaire,
+            [StatutReservation.VALIDEE] * 4,
+        )
+
+        ligne = self._liste(factory, gestionnaire).data["results"][0]
+
+        # Quatre bons de trois objets : douze, pas quarante-huit.
+        assert ligne["quantite_totale"] == 12
+        assert ligne["etat_livraison"]["bons"] == 4
+
+    def test_une_manifestation_sans_bon_rend_zero(
+        self, factory, gestionnaire, client
+    ):
+        from inventree_location.tests.factories import make_manifestation
+
+        make_manifestation(client=client)
+
+        ligne = self._liste(factory, gestionnaire).data["results"][0]
+
+        assert ligne["quantite_totale"] == 0
+        assert ligne["etat_livraison"] == {"bons": 0, "livres": 0, "a_livrer": 0}
+
+    def test_la_liste_ne_fait_pas_une_requete_par_manifestation(
+        self, factory, gestionnaire, django_assert_max_num_queries
+    ):
+        """Le vrai enjeu des annotations : un planning de dix manifestations
+        ne doit pas coûter dix fois le prix d'une."""
+
+        for _ in range(10):
+            self._manifestation_avec_bons(
+                gestionnaire, [StatutReservation.VALIDEE, StatutReservation.LIVREE]
+            )
+
+        with django_assert_max_num_queries(6):
+            reponse = self._liste(factory, gestionnaire)
+
+        assert len(reponse.data["results"]) == 10
+        assert all(row["quantite_totale"] == 6 for row in reponse.data["results"])

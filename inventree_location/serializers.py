@@ -1471,6 +1471,21 @@ class CatalogPartSerializer(serializers.Serializer):
         return rentable_info.seuil_alerte_haut
 
 
+#: Un bon annulé ou refusé n'engage plus rien : ni volume, ni livraison.
+STATUTS_SANS_ENGAGEMENT = (
+    StatutReservation.ANNULEE,
+    StatutReservation.REFUSEE,
+    StatutReservation.BROUILLON,
+)
+
+#: Bons dont le matériel est physiquement sorti.
+STATUTS_DEJA_SORTIS = (
+    StatutReservation.LIVREE,
+    StatutReservation.RETOURNEE,
+    StatutReservation.CLOTUREE,
+)
+
+
 def _libelle_interlocuteur(manifestation):
     """Contact référent d'une manifestation, à défaut le nom du client."""
 
@@ -1768,12 +1783,21 @@ class PrestationSerializer(serializers.ModelSerializer):
 
 
 class ManifestationSerializer(serializers.ModelSerializer):
-    """CRUD d'une manifestation (événement)."""
+    """CRUD d'une manifestation (événement).
+
+    Le planning (maquette du CDC) affiche au survol d'une barre le nom du
+    client, son interlocuteur, le volume d'objets engagés et l'avancement des
+    livraisons. Ces quatre informations sont lues, jamais écrites, et calculées
+    par la vue : les agréger ici, manifestation par manifestation, ferait une
+    requête par ligne de planning.
+    """
 
     organisateur_nom = serializers.SerializerMethodField()
-    prestations_count = serializers.IntegerField(
-        source="prestations.count", read_only=True
-    )
+    client_nom = serializers.CharField(source="client.nom", read_only=True)
+    contact_telephone = serializers.SerializerMethodField()
+    quantite_totale = serializers.SerializerMethodField()
+    etat_livraison = serializers.SerializerMethodField()
+    prestations_count = serializers.SerializerMethodField()
     statut_effectif = serializers.CharField(read_only=True)
 
     #: en_cours / terminée sont dérivés des dates, pas posables à la main.
@@ -1798,8 +1822,12 @@ class ManifestationSerializer(serializers.ModelSerializer):
             "couleur",
             "pourcent_remise_globale",
             "client",
+            "client_nom",
             "contact",
             "organisateur_nom",
+            "contact_telephone",
+            "quantite_totale",
+            "etat_livraison",
             "prestations_count",
             "created_at",
             "updated_at",
@@ -1821,6 +1849,68 @@ class ManifestationSerializer(serializers.ModelSerializer):
         """
 
         return _libelle_interlocuteur(obj)
+
+    def get_prestations_count(self, obj):
+        """Nombre de prestations.
+
+        Lu depuis l'annotation de la vue : `source="prestations.count"`
+        déclenchait un `SELECT COUNT` par manifestation, soit dix requêtes pour
+        dix barres de planning.
+        """
+
+        annotee = getattr(obj, "prestations_total", None)
+
+        return annotee if annotee is not None else obj.prestations.count()
+
+    def get_contact_telephone(self, obj):
+        """Téléphone du contact référent — celui qu'on compose depuis le planning."""
+
+        contact = obj.contact
+
+        return contact.telephone if contact is not None else ""
+
+    def get_quantite_totale(self, obj):
+        """Volume d'objets engagés, annulés exclus.
+
+        Lue depuis l'annotation posée par la vue quand elle existe. Le repli
+        calcule ligne à ligne : il sert au détail d'une manifestation, pas à la
+        liste, où il ferait une requête par ligne.
+        """
+
+        annotee = getattr(obj, "volume_engage", None)
+
+        if annotee is not None:
+            return annotee
+
+        return sum(
+            ligne.quantite_demandee
+            for prestation in obj.prestations.all()
+            for reservation in prestation.reservations.all()
+            if reservation.statut not in STATUTS_SANS_ENGAGEMENT
+            for ligne in reservation.lignes.all()
+        )
+
+    def get_etat_livraison(self, obj):
+        """Avancement des livraisons : combien de bons sont sortis, sur combien.
+
+        Trois nombres plutôt qu'un pourcentage : le planning affiche « 2/5 »,
+        et un pourcentage se recalcule côté écran si besoin, l'inverse non.
+        """
+
+        total = getattr(obj, "bons_engages", None)
+        livres = getattr(obj, "bons_livres", None)
+
+        if total is None or livres is None:
+            bons = [
+                reservation
+                for prestation in obj.prestations.all()
+                for reservation in prestation.reservations.all()
+                if reservation.statut not in STATUTS_SANS_ENGAGEMENT
+            ]
+            total = len(bons)
+            livres = sum(1 for bon in bons if bon.statut in STATUTS_DEJA_SORTIS)
+
+        return {"bons": total, "livres": livres, "a_livrer": max(total - livres, 0)}
 
     def validate_statut(self, value):
         """Refuse un statut dérivé posé à la main."""

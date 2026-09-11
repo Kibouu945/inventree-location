@@ -10,7 +10,8 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.mail import send_mail
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Count, OuterRef, Q, Subquery, Sum
+from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
@@ -75,6 +76,8 @@ from .retours import (
     quantites_du_retour,
 )
 from .serializers import (
+    STATUTS_DEJA_SORTIS,
+    STATUTS_SANS_ENGAGEMENT,
     CatalogPartSerializer,
     DeliverySerializer,
     ExampleSerializer,
@@ -2531,6 +2534,37 @@ class RentablePartDetailView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+def _volume_engage_par_manifestation():
+    """Somme des quantités demandées d'une manifestation, annulés exclus."""
+
+    return (
+        LigneReservation.objects.filter(
+            reservation__prestation__manifestation=OuterRef("pk")
+        )
+        .exclude(reservation__statut__in=STATUTS_SANS_ENGAGEMENT)
+        .values("reservation__prestation__manifestation")
+        .annotate(total=Sum("quantite_demandee"))
+        .values("total")[:1]
+    )
+
+
+def _bons_par_manifestation(*, sortis=False):
+    """Nombre de bons d'une manifestation — tous, ou seulement ceux sortis."""
+
+    queryset = Reservation.objects.filter(
+        prestation__manifestation=OuterRef("pk")
+    ).exclude(statut__in=STATUTS_SANS_ENGAGEMENT)
+
+    if sortis:
+        queryset = queryset.filter(statut__in=STATUTS_DEJA_SORTIS)
+
+    return (
+        queryset.values("prestation__manifestation")
+        .annotate(total=Count("id"))
+        .values("total")[:1]
+    )
+
+
 class ManifestationListCreateView(generics.ListCreateAPIView):
     """CRUD manifestation — collection (ORG-01)."""
 
@@ -2539,11 +2573,25 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
     pagination_class = LieuPagination
 
     def get_queryset(self):
-        """Manifestations, filtrées par statut, recherche et période."""
+        """Manifestations, filtrées par statut, recherche et période.
+
+        Les trois agrégats du planning — volume engagé, bons engagés, bons
+        sortis — sont posés par sous-requête et non par `annotate(Sum(...))`
+        enchaînés : deux agrégations sur deux jointures dans la même requête se
+        multiplient l'une l'autre, et le volume ressortirait multiplié par le
+        nombre de bons. Chaque sous-requête compte dans son coin.
+        """
 
         queryset = (
             Manifestation.objects.select_related("client", "contact")
-            .all()
+            .annotate(
+                volume_engage=Coalesce(Subquery(_volume_engage_par_manifestation()), 0),
+                bons_engages=Coalesce(Subquery(_bons_par_manifestation()), 0),
+                bons_livres=Coalesce(Subquery(_bons_par_manifestation(sortis=True)), 0),
+                # `distinct` obligatoire : ce `Count` joint, là où les trois
+                # autres agrégats sont des sous-requêtes.
+                prestations_total=Count("prestations", distinct=True),
+            )
             .order_by("-date_debut")
         )
 
