@@ -31,18 +31,42 @@ export interface ManifestationPlanning {
 /** La bascule de la maquette. */
 export type VuePlanning = 'gantt' | 'liste';
 
-/** Fenêtre affichée, en nombre de jours à partir du premier. */
+/** Ce qu'on regarde — nommé comme on en parle, pas comme c'est découpé.
+ *
+ * Une semaine se lit jour par jour, un mois aussi, une année se lit mois par
+ * mois : le grain des colonnes se déduit de l'échelle, il ne se choisit pas
+ * séparément.
+ */
+export type EchellePlanning = 'semaine' | 'mois' | 'annee';
+
+/** Fenêtre affichée : une échelle et un point d'ancrage.
+ *
+ * Le nombre de colonnes n'est pas stocké — il se déduit : sept pour une
+ * semaine, la longueur du mois pour un mois, douze pour une année. Le stocker
+ * autoriserait un février de trente-et-un jours.
+ */
 export interface FenetrePlanning {
-  /** Premier jour affiché, `AAAA-MM-JJ`. */
+  echelle: EchellePlanning;
+  /** Un jour de la période regardée, `AAAA-MM-JJ`. */
+  ancre: string;
+}
+
+/** Une colonne de la grille — un jour, ou un mois à l'échelle de l'année. */
+export interface Colonne {
+  /** Premier jour couvert, `AAAA-MM-JJ`. */
   debut: string;
-  /** Nombre de jours de la fenêtre. */
-  jours: number;
+  /** Dernier jour couvert, inclus. */
+  fin: string;
+  /** Ce qui s'écrit en en-tête : « lun. 15 », « 15 », « janv. 26 ». */
+  libelle: string;
+  /** Vrai pour un samedi ou un dimanche. */
+  weekend: boolean;
 }
 
 /** Placement d'une barre dans la grille : colonne de départ et largeur. */
 export interface Barre {
   manifestation: ManifestationPlanning;
-  /** Colonne de départ, 1 pour le premier jour de la fenêtre. */
+  /** Index de la colonne de départ, 1 pour la première. */
   colonne: number;
   /** Largeur en nombre de colonnes, au moins 1. */
   largeur: number;

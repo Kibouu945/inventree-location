@@ -420,3 +420,62 @@ class TestChampsDuPlanning:
 
         assert len(reponse.data["results"]) == 10
         assert all(row["quantite_totale"] == 6 for row in reponse.data["results"])
+
+
+@pytest.mark.django_db
+class TestFenetreDuPlanning:
+    """`from` / `to` : ce qui **chevauche** la fenêtre, pas ce qui y tient.
+
+    Le planning se déplace d'une semaine à l'autre et d'un mois à l'autre :
+    sans le chevauchement, une manifestation d'une semaine disparaîtrait dès
+    qu'on affiche son deuxième jour.
+    """
+
+    def _noms(self, factory, user, params):
+        request = factory.get(MANIF_URL, params)
+        force_authenticate(request, user=user)
+        response = ManifestationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+
+        return {row["nom"] for row in response.data["results"]}
+
+    @pytest.fixture
+    def trois_manifestations(self, db):
+        from inventree_location.tests.factories import make_manifestation
+
+        make_manifestation(
+            nom="Avant", date_debut="2026-01-05 09:00", date_fin="2026-01-09 18:00"
+        )
+        make_manifestation(
+            nom="À cheval", date_debut="2026-01-28 09:00", date_fin="2026-02-03 18:00"
+        )
+        make_manifestation(
+            nom="Après", date_debut="2026-03-10 09:00", date_fin="2026-03-12 18:00"
+        )
+
+    def test_la_fenetre_retient_ce_qui_la_chevauche(
+        self, factory, gestionnaire, trois_manifestations
+    ):
+        noms = self._noms(
+            factory, gestionnaire, {"from": "2026-02-01", "to": "2026-02-28"}
+        )
+
+        assert noms == {"À cheval"}
+
+    def test_une_borne_seule_fonctionne(
+        self, factory, gestionnaire, trois_manifestations
+    ):
+        assert self._noms(factory, gestionnaire, {"from": "2026-03-01"}) == {"Après"}
+        assert self._noms(factory, gestionnaire, {"to": "2026-01-10"}) == {"Avant"}
+
+    def test_le_premier_et_le_dernier_jour_sont_inclus(
+        self, factory, gestionnaire, trois_manifestations
+    ):
+        # Bornes fournies au jour : comparées à la journée entière, sinon une
+        # manifestation qui commence à 9 h le dernier jour sortirait.
+        noms = self._noms(
+            factory, gestionnaire, {"from": "2026-02-03", "to": "2026-02-03"}
+        )
+
+        assert noms == {"À cheval"}

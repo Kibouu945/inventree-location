@@ -2618,6 +2618,18 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
             else:
                 queryset = queryset.filter(date_fin__date__lt=aujourdhui)
 
+        # Fenêtre du planning : on veut ce qui **chevauche** la période, pas ce
+        # qui y tient entièrement. Une manifestation commencée le mois dernier
+        # et qui court encore doit apparaître sur la semaine affichée.
+        depuis = self.request.query_params.get("from")
+        jusqua = self.request.query_params.get("to")
+
+        if depuis:
+            queryset = queryset.filter(**_borne_journee("date_fin", depuis, "gte"))
+
+        if jusqua:
+            queryset = queryset.filter(**_borne_journee("date_debut", jusqua, "lte"))
+
         return queryset
 
 

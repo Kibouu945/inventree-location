@@ -32,31 +32,31 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { ownsKeys, syncOwnedParams } from '../urlState';
 import {
-  aujourdhui,
   barres,
+  bornes,
   COULEUR_STATUT,
+  colonnes as colonnesDeLaFenetre,
+  contientAujourdhui,
   decaler,
-  estWeekEnd,
+  ECHELLES,
   etatDepuisUrl,
-  JOURS_PAR_DEFAUT,
+  fenetreParDefaut,
   jourDe,
-  joursDeLaFenetre,
-  libelleJour,
+  LARGEUR_COLONNE,
   libelleLivraison,
+  libellePeriode,
   libelleStatut,
   PLANNING_URL_KEYS,
   urlDuPlanning
 } from './planningLogic';
 import type {
+  EchellePlanning,
   FenetrePlanning,
   ManifestationPlanning,
   VuePlanning
 } from './types';
 
 const MANIFESTATIONS_URL = '/plugin/inventree-location/manifestations/';
-
-/** Largeur d'une colonne de jour. Assez pour « lun. 15 », pas plus. */
-const LARGEUR_JOUR = 46;
 
 /** Largeur de la colonne des noms, à gauche de la grille. */
 const LARGEUR_NOMS = 190;
@@ -149,17 +149,21 @@ export function Planning({ context }: { context: InvenTreePluginContext }) {
     syncOwnedParams(ownsKeys(PLANNING_URL_KEYS), urlDuPlanning(vue, fenetre));
   }, [vue, fenetre]);
 
-  const jours = useMemo(() => joursDeLaFenetre(fenetre), [fenetre]);
+  const grille = useMemo(() => colonnesDeLaFenetre(fenetre), [fenetre]);
+  const fenetreServeur = useMemo(() => bornes(fenetre), [fenetre]);
 
-  // La fenêtre borne l'affichage, pas la requête : le serveur ne filtre les
-  // manifestations que sur « futur / passé ». On demande le futur et on place
-  // côté écran, ce qui évite un aller-retour à chaque flèche.
+  // La fenêtre borne la requête : sur une vue à l'année, demander « le futur »
+  // laisserait vides des mois pourtant affichés.
   const query = useQuery<Page<ManifestationPlanning>>(
     {
-      queryKey: ['planning-manifestations'],
+      queryKey: [
+        'planning-manifestations',
+        fenetreServeur.from,
+        fenetreServeur.to
+      ],
       queryFn: async () => {
         const response = await context.api.get(MANIFESTATIONS_URL, {
-          params: { periode: 'futur', page_size: 100 }
+          params: { ...fenetreServeur, page_size: 100 }
         });
 
         return response.data;
@@ -170,25 +174,39 @@ export function Planning({ context }: { context: InvenTreePluginContext }) {
 
   const manifestations = query.data?.results ?? [];
   const placees = useMemo(
-    () => barres(manifestations, fenetre),
-    [manifestations, fenetre]
+    () => barres(manifestations, grille),
+    [manifestations, grille]
   );
 
-  const largeurGrille = jours.length * LARGEUR_JOUR;
-  const aujourdHui = aujourdhui();
+  const largeurColonne = LARGEUR_COLONNE[fenetre.echelle];
+  const largeurGrille = grille.length * largeurColonne;
 
   return (
     <Stack gap='md'>
       <Group justify='space-between' align='center'>
-        <Title order={4} c={context.theme.primaryColor}>
-          Planning
-        </Title>
+        <Group gap='sm' align='baseline'>
+          <Title order={4} c={context.theme.primaryColor}>
+            Planning
+          </Title>
+          <Text size='sm' c='dimmed'>
+            {libellePeriode(fenetre)}
+          </Text>
+        </Group>
 
         <Group gap='xs'>
-          <Tooltip label='Trois semaines plus tôt'>
+          <SegmentedControl
+            size='xs'
+            value={fenetre.echelle}
+            onChange={(valeur) =>
+              setFenetre(fenetreParDefaut(valeur as EchellePlanning))
+            }
+            data={ECHELLES}
+          />
+
+          <Tooltip label='Période précédente'>
             <ActionIcon
               variant='default'
-              onClick={() => setFenetre((f) => decaler(f, -f.jours))}
+              onClick={() => setFenetre((f) => decaler(f, -1))}
               aria-label='Reculer'
             >
               <IconChevronLeft size={16} />
@@ -198,19 +216,17 @@ export function Planning({ context }: { context: InvenTreePluginContext }) {
           <Tooltip label="Revenir à aujourd'hui">
             <ActionIcon
               variant='default'
-              onClick={() =>
-                setFenetre({ debut: aujourdhui(), jours: JOURS_PAR_DEFAUT })
-              }
+              onClick={() => setFenetre((f) => fenetreParDefaut(f.echelle))}
               aria-label="Aujourd'hui"
             >
               <IconCalendarDue size={16} />
             </ActionIcon>
           </Tooltip>
 
-          <Tooltip label='Trois semaines plus tard'>
+          <Tooltip label='Période suivante'>
             <ActionIcon
               variant='default'
-              onClick={() => setFenetre((f) => decaler(f, f.jours))}
+              onClick={() => setFenetre((f) => decaler(f, 1))}
               aria-label='Avancer'
             >
               <IconChevronRight size={16} />
@@ -247,23 +263,22 @@ export function Planning({ context }: { context: InvenTreePluginContext }) {
             <Group gap={0} align='stretch' wrap='nowrap'>
               <Box w={LARGEUR_NOMS} />
 
-              {jours.map((jour) => (
+              {grille.map((colonne) => (
                 <Box
-                  key={jour}
-                  w={LARGEUR_JOUR}
+                  key={colonne.debut}
+                  w={largeurColonne}
                   style={{
                     textAlign: 'center',
                     borderLeft: '1px solid var(--mantine-color-gray-3)',
-                    background:
-                      jour === aujourdHui
-                        ? 'var(--mantine-color-blue-0)'
-                        : estWeekEnd(jour)
-                          ? 'var(--mantine-color-gray-1)'
-                          : undefined
+                    background: contientAujourdhui(colonne)
+                      ? 'var(--mantine-color-blue-0)'
+                      : colonne.weekend
+                        ? 'var(--mantine-color-gray-1)'
+                        : undefined
                   }}
                 >
                   <Text size='9px' c='dimmed' style={{ lineHeight: 1.6 }}>
-                    {libelleJour(jour)}
+                    {colonne.libelle}
                   </Text>
                 </Box>
               ))}
@@ -302,22 +317,21 @@ export function Planning({ context }: { context: InvenTreePluginContext }) {
                         height: 26
                       }}
                     >
-                      {jours.map((jour, index) => (
+                      {grille.map((colonne, index) => (
                         <Box
-                          key={jour}
+                          key={colonne.debut}
                           style={{
                             position: 'absolute',
-                            left: index * LARGEUR_JOUR,
+                            left: index * largeurColonne,
                             top: 0,
                             bottom: 0,
-                            width: LARGEUR_JOUR,
+                            width: largeurColonne,
                             borderLeft: '1px solid var(--mantine-color-gray-2)',
-                            background:
-                              jour === aujourdHui
-                                ? 'var(--mantine-color-blue-0)'
-                                : estWeekEnd(jour)
-                                  ? 'var(--mantine-color-gray-0)'
-                                  : undefined
+                            background: contientAujourdhui(colonne)
+                              ? 'var(--mantine-color-blue-0)'
+                              : colonne.weekend
+                                ? 'var(--mantine-color-gray-0)'
+                                : undefined
                           }}
                         />
                       ))}
@@ -326,8 +340,8 @@ export function Planning({ context }: { context: InvenTreePluginContext }) {
                         <UnstyledButton
                           style={{
                             position: 'absolute',
-                            left: (barre.colonne - 1) * LARGEUR_JOUR + 2,
-                            width: barre.largeur * LARGEUR_JOUR - 4,
+                            left: (barre.colonne - 1) * largeurColonne + 2,
+                            width: barre.largeur * largeurColonne - 4,
                             top: 3,
                             height: 20,
                             background:
