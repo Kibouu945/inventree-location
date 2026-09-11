@@ -1,333 +1,444 @@
 # -*- coding: utf-8 -*-
-"""Génère le SVG du modèle de données cible (cf. README.md)."""
+"""Génère les schémas SVG du modèle de données (cf. README.md).
+
+Le contenu est tiré des **clés étrangères réelles** du code, pas d'un souvenir :
+`models.py` déclare vingt-six tables et cinquante-deux relations, toutes
+représentées ici.
+
+Trois planches plutôt qu'une : vingt-six tables sur une page A4 donneraient des
+libellés illisibles. Le découpage suit les domaines — la chaîne métier, le
+devis et sa tarification, l'exécution terrain et ses journaux — et les tables
+déjà présentées sur une planche précédente sont **rappelées en gris** pour que
+chaque planche se lise seule.
+
+Cardinalités notées aux deux extrémités, à lire « un client porte zéro à
+plusieurs contacts, un contact appartient à un et un seul client ».
+"""
 
 from pathlib import Path
 
 ICI = Path(__file__).parent
 
-W, H = 1180, 1560
+# ---------------------------------------------------------------------------
+# Les tables. clé : (titre, [lignes], domaine)
+# ---------------------------------------------------------------------------
 
-BOXES = {
-    # cle: (x, y, w, titre, [champs], couleur)
+TABLES = {
     "user": (
-        40,
-        30,
-        250,
-        "Utilisateur  (auth.User)",
-        ["1 rôle unique (auth.Group)", "interne uniquement"],
+        "Utilisateur",
+        ["auth.User + auth.Group", "un seul rôle métier"],
         "acteur",
     ),
+    "profile": ("Profile", ["telephone", "extension 1–1 du compte"], "acteur"),
     "client": (
-        450,
-        30,
-        280,
         "Client",
-        [
-            "nom · email ✦ · telephone",
-            "type_client · siret · actif",
-            "gestionnaire → User",
-        ],
+        ["nom · email ✦ · telephone", "type_client · siret · actif"],
         "client",
     ),
     "contact": (
-        880,
-        30,
-        260,
         "Contact",
         ["nom · prenom", "email ✦ · telephone · actif"],
         "client",
     ),
-    "devis": (
-        40,
-        240,
-        300,
-        "Devis",
-        [
-            "numero ✦ · statut",
-            "date_acceptation · motif_refus",
-            "support_acceptation",
-            "signataire_contact → Contact",
-            "signataire_libelle (figé)",
-            "montant_ht / tva / ttc (figés)",
-        ],
-        "devis",
-    ),
     "manif": (
-        450,
-        240,
-        280,
         "Manifestation",
-        [
-            "nom · date_debut · date_fin",
-            "couleur · statut",
-            "pourcent_remise_globale",
-            "contact → Contact",
-        ],
+        ["nom · date_debut · date_fin", "statut · couleur · remise %"],
         "coeur",
-    ),
-    "facture": (
-        40,
-        470,
-        300,
-        "FactureReservation",
-        ["date_emission · remise_pct", "montant_total_ht", "entierement_regle"],
-        "devis",
     ),
     "presta": (
-        450,
-        470,
-        280,
         "Prestation",
-        [
-            "nom · heure_debut · heure_fin",
-            "statut · description",
-            "modifie_apres_devis",
-            "lieu → Lieu  (nullable)",
-        ],
+        ["nom · date_debut · date_fin", "statut · lieu (nullable)"],
         "coeur",
     ),
-    "lieu": (
-        880,
-        470,
-        260,
-        "Lieu",
-        ["nom · description", "adresse · latitude · longitude"],
-        "ref",
-    ),
-    "lignedevis": (
-        40,
-        690,
-        300,
-        "LigneDevis   [snapshot figé]",
-        ["part · quantite", "prix_unitaire_ht · taux_tva", "remise_pct · montant_ht"],
-        "devis",
+    "lignepresta": (
+        "LignePrestation",
+        ["part · quantite", "le prévisionnel"],
+        "coeur",
     ),
     "bon": (
-        450,
-        690,
-        280,
-        "Bon de réservation",
-        [
-            "numero ✦ · statut",
-            "date_livraison_attendue",
-            "date_retrait / retour prévus",
-        ],
+        "Reservation  (bon)",
+        ["numero · statut", "etat_livraison · dates"],
         "coeur",
-    ),
-    "article": (
-        880,
-        690,
-        260,
-        "Article",
-        [
-            "part.Part  (natif InvenTree)",
-            "NOI = IPN · nom · actif · vendable",
-            "RentableItem : poids, virtuel,",
-            "consommable, seuils, caution,",
-            "prix_location_ht, taux_tva",
-        ],
-        "ref",
     ),
     "ligne": (
-        450,
-        910,
-        280,
-        "Ligne de réservation",
-        ["part · quantite", "etat : normale | hors_devis |", "            annulee"],
+        "LigneReservation",
+        ["part · quantite_demandee", "quantite_livree · retournee"],
         "coeur",
     ),
+    "lieu": ("Lieu", ["nom · adresse", "latitude · longitude"], "ref"),
+    "part": (
+        "Part  (InvenTree)",
+        ["l'article du catalogue", "stock = StockItem"],
+        "ref",
+    ),
+    "rentable": (
+        "RentableItem",
+        ["1–1 avec Part", "prix_ht · taux_tva · poids"],
+        "ref",
+    ),
+    "tremise": ("TableRemise", ["nom · actif"], "devis"),
+    "premise": ("PalierRemise", ["quantite_min", "pourcentage"], "devis"),
+    "ptarif": ("PalierTarif", ["quantite_min", "prix_ht"], "devis"),
+    "devis": (
+        "Devis",
+        ["numero · statut · montants", "acceptation · signataire"],
+        "devis",
+    ),
+    "lignedevis": (
+        "LigneDevis",
+        ["part · quantite · prix", "etat_ligne"],
+        "devis",
+    ),
+    "facture": ("FactureReservation", ["numero · montants"], "devis"),
     "modif": (
-        40,
-        910,
-        300,
-        "LigneModification",
-        ["auteur · canal · message", "horodatage"],
+        "ModificationBon",
+        ["canal · auteur · message", "etat_resultant"],
         "devis",
     ),
     "livr": (
-        110,
-        1120,
-        330,
-        "Livraison   (DeliveryTask)",
-        [
-            "lieu · heure_prevue · statut",
-            "quantite_livree",
-            "commentaires · preuves (photo)",
-            "livreur(s)  (M:N)",
-        ],
+        "Livraison",
+        ["sequence · lieu", "date prévue / réelle"],
         "exec",
     ),
+    "livrl": ("LivraisonLigne", ["quantite_livree"], "exec"),
     "ram": (
-        610,
-        1120,
-        340,
-        "Ramassage   (PickupTask)",
-        [
-            "lieu · date_heure_ramassage · statut",
-            "qte_ramassee · qte_cassee",
-            "qte_detruite · qte_manquante",
-            "facturation_souhaitee",
-            "ramassage_termine · preuves",
-            "livreur(s)  (M:N)",
-        ],
+        "Ramassage",
+        ["sequence · lieu", "ramassage_termine"],
         "exec",
     ),
-    "repair": (
-        610,
-        1360,
-        340,
-        "RepairTicket",
-        [
-            "part · motif · quantite",
-            "duree_estimee / reelle",
-            "date_ticket · date_reparation",
-            "statut · facturation_client",
-        ],
+    "rama": (
+        "RamassageArticle",
+        ["recuperee · cassee", "detruite · manquante"],
         "exec",
     ),
+    "incident": (
+        "ReturnIncident",
+        ["type · qty · bill_client", "le registre des retours"],
+        "journal",
+    ),
+    "sav": ("SavTicket", ["type · statut · quantite"], "journal"),
+    "logresa": ("ReservationStatusLog", ["from → to · auteur"], "journal"),
+    "loglivr": ("LivraisonStatusLog", ["from → to · photo"], "journal"),
+    "conflit": ("ConflictHistory", ["part · manquant · resolu"], "journal"),
 }
 
-# (depuis, vers, cardinalité, style)  style: v = vertical, h = horizontal
-LINKS = [
-    ("client", "contact", "1", "N", "h"),
-    ("user", "client", "1", "N", "h"),
-    ("client", "manif", "1", "N", "v"),
-    ("manif", "devis", "1", "N", "h-left"),
-    ("manif", "presta", "1", "1..N", "v"),
-    ("devis", "facture", "1", "0..1", "v"),
-    ("devis", "lignedevis", "1", "1..N", "left-bypass"),
-    ("devis", "bon", "M", "N", "devis-bon"),
-    ("presta", "lieu", "N", "1", "h"),
-    ("presta", "bon", "1", "N", "v"),
-    ("bon", "ligne", "1", "1..N", "v"),
-    ("article", "ligne", "1", "N", "art-ligne"),
-    ("ligne", "modif", "1", "N", "h-left"),
-    ("ligne", "livr", "1", "N", "v-left"),
-    ("ligne", "ram", "1", "N", "v-right"),
-    ("ram", "repair", "1", "0..N", "v"),
+# ---------------------------------------------------------------------------
+# Les relations. (source, cible, card. côté source, card. côté cible, libellé)
+# ---------------------------------------------------------------------------
+
+RELATIONS = [
+    ("user", "profile", "1", "0..1", ""),
+    ("user", "client", "1", "0..N", "gestionnaire"),
+    ("client", "contact", "1", "0..N", ""),
+    ("client", "manif", "1", "0..N", ""),
+    ("contact", "manif", "0..1", "0..N", "référent"),
+    ("manif", "presta", "1", "1..N", ""),
+    ("presta", "lieu", "0..N", "0..1", ""),
+    ("presta", "lignepresta", "1", "0..N", ""),
+    ("lignepresta", "part", "0..N", "1", ""),
+    ("presta", "bon", "1", "0..N", ""),
+    ("bon", "ligne", "1", "1..N", ""),
+    ("ligne", "part", "0..N", "1", ""),
+    ("user", "bon", "1", "0..N", "demandeur"),
+    ("rentable", "part", "1", "1", ""),
+    ("rentable", "ptarif", "1", "0..N", ""),
+    ("rentable", "tremise", "0..N", "0..1", ""),
+    ("tremise", "premise", "1", "1..N", ""),
+    ("manif", "devis", "1", "0..N", ""),
+    ("devis", "bon", "M", "N", "table de liaison"),
+    ("devis", "lignedevis", "1", "1..N", ""),
+    ("lignedevis", "part", "0..N", "1", ""),
+    ("facture", "devis", "M", "N", ""),
+    ("bon", "modif", "1", "0..N", ""),
+    ("bon", "livr", "1", "0..N", ""),
+    ("livr", "livrl", "1", "1..N", ""),
+    ("livrl", "ligne", "0..N", "1", ""),
+    ("livr", "lieu", "0..N", "0..1", ""),
+    ("user", "livr", "M", "N", "livreurs"),
+    ("bon", "ram", "1", "0..N", ""),
+    ("ram", "rama", "1", "1..N", ""),
+    ("rama", "ligne", "0..N", "1", ""),
+    ("user", "ram", "M", "N", "livreurs"),
+    ("ligne", "incident", "1", "0..N", ""),
+    ("ligne", "sav", "1", "0..N", ""),
+    ("bon", "logresa", "1", "0..N", ""),
+    ("bon", "loglivr", "1", "0..N", ""),
+    ("bon", "conflit", "1", "0..N", ""),
 ]
 
+# ---------------------------------------------------------------------------
+# Les planches. (titre, [(libellé de colonne, [clés])], rappels)
+# ---------------------------------------------------------------------------
 
-COLORS = {
+PLANCHES = [
+    (
+        "La chaîne métier",
+        [
+            ("Acteurs", ["user", "profile"]),
+            ("Client", ["client", "contact"]),
+            ("Cœur", ["manif", "presta", "lignepresta", "bon", "ligne"]),
+            ("Référentiel", ["lieu", "part", "rentable"]),
+        ],
+        set(),
+    ),
+    (
+        "Devis, tarification et facturation",
+        [
+            ("Rappel", ["manif", "bon"]),
+            ("Devis", ["devis", "lignedevis", "facture"]),
+            ("Traçabilité", ["modif"]),
+            ("Tarification", ["rentable", "ptarif", "tremise", "premise"]),
+            ("Rappel ", ["part"]),
+        ],
+        {"manif", "bon", "part"},
+    ),
+    (
+        "Exécution terrain, retours et journaux",
+        [
+            ("Rappel", ["bon", "ligne"]),
+            ("Livraison", ["livr", "livrl"]),
+            ("Ramassage", ["ram", "rama"]),
+            (
+                "Retours & journaux",
+                ["incident", "sav", "logresa", "loglivr", "conflit"],
+            ),
+        ],
+        {"bon", "ligne"},
+    ),
+]
+
+COULEURS = {
     "acteur": ("#eef2ff", "#4f46e5"),
     "client": ("#ecfdf5", "#059669"),
     "coeur": ("#eff6ff", "#2563eb"),
     "devis": ("#fef3c7", "#b45309"),
     "exec": ("#fce7f3", "#be185d"),
+    "journal": ("#f5f3ff", "#7c3aed"),
     "ref": ("#f1f5f9", "#475569"),
+    "rappel": ("#f8fafc", "#94a3b8"),
 }
 
-LH = 17  # hauteur de ligne d'un champ
-HEAD = 30  # hauteur du bandeau titre
-PAD = 10
+LARGEUR = 208  # largeur d'une boîte
+GOUTTIERE = 74  # espace entre deux colonnes
+LIGNE = 15  # hauteur d'une ligne de champ
+BANDEAU = 24  # hauteur du bandeau de titre
+MARGE = 26
+ESPACE_V = 26  # espace vertical entre deux boîtes
 
 
-def box_h(fields):
-    return HEAD + PAD + len(fields) * LH + 4
+def hauteur(cle):
+    return BANDEAU + 6 + len(TABLES[cle][1]) * LIGNE + 6
 
 
-def esc(s):
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+def echappe(texte):
+    return texte.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def geom(key):
-    x, y, w, title, fields, _ = BOXES[key]
-    return x, y, w, box_h(fields)
+def disposer(colonnes, minimums=None):
+    """Position de chaque boîte : colonnes en x, empilement en y.
+
+    `minimums` impose une hauteur plancher : une table qui porte cinq relations
+    d'un même côté a besoin de place pour cinq ancres, sinon les cardinalités
+    se chevauchent.
+    """
+
+    minimums = minimums or {}
+    positions = {}
+
+    for index, (_, cles) in enumerate(colonnes):
+        x = MARGE + index * (LARGEUR + GOUTTIERE)
+        y = MARGE + 22
+
+        for cle in cles:
+            h = max(hauteur(cle), minimums.get(cle, 0))
+            positions[cle] = {"x": x, "y": y, "h": h, "col": index}
+            y += h + ESPACE_V
+
+    return positions
 
 
-out = []
-out.append(
-    f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="100%">'
-)
-out.append(
-    "<style>"
-    ".t{font:600 13.5px -apple-system,Helvetica,sans-serif;fill:#fff}"
-    ".f{font:11.5px ui-monospace,Menlo,monospace;fill:#1f2937}"
-    ".c{font:600 11px -apple-system,Helvetica,sans-serif;fill:#6b7280}"
-    ".lnk{stroke:#94a3b8;stroke-width:1.6;fill:none}"
-    "</style>"
-)
+def dessiner(titre, colonnes, rappels):
+    """Rend une planche en SVG."""
 
+    # Premier passage : combien de relations tombent de chaque côté de chaque
+    # table, pour réserver la hauteur nécessaire aux ancres.
+    provisoire = disposer(colonnes)
+    liens_provisoires = [
+        relation
+        for relation in RELATIONS
+        if relation[0] in provisoire and relation[1] in provisoire
+    ]
+    charge = {}
 
-# --- liens d'abord (sous les boîtes) ---
-def anchor(key, side):
-    x, y, w, h = geom(key)
-    return {
-        "t": (x + w / 2, y),
-        "b": (x + w / 2, y + h),
-        "l": (x, y + h / 2),
-        "r": (x + w, y + h / 2),
-    }[side]
+    for src, dst, *_ in liens_provisoires:
+        if provisoire[src]["col"] == provisoire[dst]["col"]:
+            continue
 
+        gauche, droite = (
+            (src, dst)
+            if provisoire[src]["col"] < provisoire[dst]["col"]
+            else (dst, src)
+        )
+        charge[(gauche, "droite")] = charge.get((gauche, "droite"), 0) + 1
+        charge[(droite, "gauche")] = charge.get((droite, "gauche"), 0) + 1
 
-for a, b, ca, cb, style in LINKS:
-    if style == "v":
-        p1, p2 = anchor(a, "b"), anchor(b, "t")
-        pts = f"{p1[0]},{p1[1]} {p1[0]},{(p1[1] + p2[1]) / 2} {p2[0]},{(p1[1] + p2[1]) / 2} {p2[0]},{p2[1]}"
-        mx, my = (p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2
-    elif style == "v2":
-        p1, p2 = anchor(a, "b"), anchor(b, "t")
-        pts = f"{p1[0]},{p1[1]} {p2[0]},{p2[1]}"
-        mx, my = p1[0], (p1[1] + p2[1]) / 2
-    elif style in ("h", "h2"):
-        p1, p2 = anchor(a, "r"), anchor(b, "l")
-        pts = f"{p1[0]},{p1[1]} {p2[0]},{p2[1]}"
-        mx, my = (p1[0] + p2[0]) / 2, p1[1] - 6
-    elif style == "h-left":
-        p1, p2 = anchor(a, "l"), anchor(b, "r")
-        pts = f"{p1[0]},{p1[1]} {p2[0]},{p2[1]}"
-        mx, my = (p1[0] + p2[0]) / 2, p1[1] - 6
-    elif style == "left-bypass":
-        x1, y1, w1, h1 = geom(a)
-        x2, y2, w2, h2 = geom(b)
-        p1 = (x1 + 60, y1 + h1)
-        p2 = (x2 + 60, y2)
-        pts = f"{p1[0]},{p1[1]} 22,{p1[1]} 22,{p2[1]} {p2[0]},{p2[1]}"
-        mx, my = 78, p1[1] + 30
-    elif style == "devis-bon":
-        x1, y1, w1, h1 = geom(a)
-        x2, y2, w2, h2 = geom(b)
-        p1 = (x1 + w1, y1 + h1 - 22)
-        p2 = (x2, y2 + 46)
-        pts = f"{p1[0]},{p1[1]} 396,{p1[1]} 396,{p2[1]} {p2[0]},{p2[1]}"
-        mx, my = 396, (p1[1] + p2[1]) / 2
-    elif style == "art-ligne":
-        x1, y1, w1, h1 = geom(a)
-        x2, y2, w2, h2 = geom(b)
-        p1 = (x1 + w1 / 2, y1 + h1)
-        p2 = (x2 + w2, y2 + h2 / 2)
-        pts = f"{p1[0]},{p1[1]} {p1[0]},{p2[1]} {p2[0]},{p2[1]}"
-        mx, my = (p1[0] + p2[0]) / 2, p2[1] - 6
-    elif style in ("v-left", "v-right"):
-        p1 = anchor(a, "b")
-        p2 = anchor(b, "t")
-        mid = p1[1] + 60
-        pts = f"{p1[0]},{p1[1]} {p1[0]},{mid} {p2[0]},{mid} {p2[0]},{p2[1]}"
-        mx, my = p2[0], mid - 6
-    out.append(f'<polyline class="lnk" points="{pts}"/>')
-    out.append(f'<text class="c" x="{mx - 16:.0f}" y="{my - 3:.0f}">{ca}</text>')
-    out.append(f'<text class="c" x="{mx + 8:.0f}" y="{my - 3:.0f}">{cb}</text>')
+    minimums = {}
 
-# --- boîtes ---
-for key, (x, y, w, title, fields, kind) in BOXES.items():
-    bg, br = COLORS[kind]
-    h = box_h(fields)
-    out.append(
-        f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="7" fill="{bg}" stroke="{br}" stroke-width="1.6"/>'
-    )
-    out.append(
-        f'<path d="M{x} {y + HEAD} v-{HEAD - 7} a7 7 0 0 1 7-7 h{w - 14} a7 7 0 0 1 7 7 v{HEAD - 7} z" fill="{br}"/>'
-    )
-    out.append(f'<text class="t" x="{x + 11}" y="{y + 20}">{esc(title)}</text>')
-    for i, f in enumerate(fields):
-        out.append(
-            f'<text class="f" x="{x + 11}" y="{y + HEAD + 16 + i * LH}">{esc(f)}</text>'
+    for (cle, _), nombre in charge.items():
+        minimums[cle] = max(minimums.get(cle, 0), 19 * nombre + 16)
+
+    positions = disposer(colonnes, minimums)
+    largeur = MARGE * 2 + len(colonnes) * LARGEUR + (len(colonnes) - 1) * GOUTTIERE
+    hauteur_totale = max(pos["y"] + pos["h"] for pos in positions.values()) + MARGE + 4
+
+    liens = [
+        relation
+        for relation in RELATIONS
+        if relation[0] in positions and relation[1] in positions
+    ]
+
+    # Répartition des ancres : plusieurs liens sur un même côté ne doivent pas
+    # partir du même point, sinon les cardinalités se chevauchent.
+    compteurs = {}
+
+    for src, dst, *_ in liens:
+        for cle, cote in (
+            (
+                src,
+                "droite"
+                if positions[src]["col"] <= positions[dst]["col"]
+                else "gauche",
+            ),
+            (
+                dst,
+                "gauche"
+                if positions[src]["col"] <= positions[dst]["col"]
+                else "droite",
+            ),
+        ):
+            compteurs.setdefault((cle, cote), 0)
+            compteurs[(cle, cote)] += 1
+
+    utilises = {}
+    traits = []
+
+    for index, (src, dst, card_src, card_dst, libelle) in enumerate(liens):
+        a, b = positions[src], positions[dst]
+        meme_colonne = a["col"] == b["col"]
+
+        if meme_colonne:
+            # Lien vertical : on sort par le bas du plus haut.
+            haut, bas = (a, b) if a["y"] < b["y"] else (b, a)
+            x = haut["x"] + LARGEUR / 2
+            y1, y2 = haut["y"] + haut["h"], bas["y"]
+            chemin = f"M {x} {y1} L {x} {y2}"
+            pos_src = (x + 6, y1 + 12) if haut is a else (x + 6, y2 - 6)
+            pos_dst = (x + 6, y2 - 6) if haut is a else (x + 6, y1 + 12)
+        else:
+            gauche, droite = (a, b) if a["col"] < b["col"] else (b, a)
+            cote_src = "droite" if a["col"] < b["col"] else "gauche"
+
+            def ancre(pos, cle, cote):
+                total = compteurs.get((cle, cote), 1)
+                rang = utilises.get((cle, cote), 0)
+                utilises[(cle, cote)] = rang + 1
+
+                return pos["y"] + pos["h"] * (rang + 1) / (total + 1)
+
+            y_gauche = ancre(gauche, src if gauche is a else dst, "droite")
+            y_droite = ancre(droite, dst if droite is b else src, "gauche")
+            x1 = gauche["x"] + LARGEUR
+            x2 = droite["x"]
+            milieu = x1 + (x2 - x1) * (0.3 + 0.4 * ((index % 3) / 2))
+
+            chemin = (
+                f"M {x1} {y_gauche} L {milieu} {y_gauche} "
+                f"L {milieu} {y_droite} L {x2} {y_droite}"
+            )
+            pos_gauche = (x1 + 5, y_gauche - 5)
+            pos_droite = (x2 - 5, y_droite - 5)
+            pos_src, pos_dst = (
+                (pos_gauche, pos_droite)
+                if cote_src == "droite"
+                else (pos_droite, pos_gauche)
+            )
+
+        ancrage_src = "start" if pos_src[0] < pos_dst[0] else "end"
+        ancrage_dst = "end" if pos_src[0] < pos_dst[0] else "start"
+
+        traits.append(
+            f'<path d="{chemin}" fill="none" stroke="#94a3b8" stroke-width="1.1"/>'
+            f'<text x="{pos_src[0]:.0f}" y="{pos_src[1]:.0f}" class="card" '
+            f'text-anchor="{ancrage_src}">{card_src}</text>'
+            f'<text x="{pos_dst[0]:.0f}" y="{pos_dst[1]:.0f}" class="card" '
+            f'text-anchor="{ancrage_dst}">{card_dst}</text>'
         )
 
-out.append(
-    f'<text class="c" x="40" y="{H - 14}">✦ = unique   ·   M:N = table de liaison   ·   [figé] = copie non recalculée</text>'
-)
-out.append("</svg>")
+        if libelle:
+            mx = (pos_src[0] + pos_dst[0]) / 2
+            my = (pos_src[1] + pos_dst[1]) / 2 - 4
+            traits.append(
+                f'<text x="{mx:.0f}" y="{my:.0f}" class="rel" '
+                f'text-anchor="middle">{echappe(libelle)}</text>'
+            )
 
-(ICI / "schema.svg").write_text("\n".join(out))
-print("svg ok")
+    boites = []
+
+    for cle, pos in positions.items():
+        nom, champs, domaine = TABLES[cle]
+        fond, bord = COULEURS["rappel" if cle in rappels else domaine]
+        boites.append(
+            f'<g><rect x="{pos["x"]}" y="{pos["y"]}" width="{LARGEUR}" '
+            f'height="{pos["h"]}" rx="5" fill="{fond}" stroke="{bord}" '
+            f'stroke-width="1.4"/>'
+            f'<rect x="{pos["x"]}" y="{pos["y"]}" width="{LARGEUR}" '
+            f'height="{BANDEAU}" rx="5" fill="{bord}"/>'
+            f'<rect x="{pos["x"]}" y="{pos["y"] + BANDEAU - 5}" width="{LARGEUR}" '
+            f'height="5" fill="{bord}"/>'
+            f'<text x="{pos["x"] + 9}" y="{pos["y"] + 16}" class="t">'
+            f"{echappe(nom)}</text>"
+        )
+
+        for rang, champ in enumerate(champs):
+            boites.append(
+                f'<text x="{pos["x"] + 9}" y="{pos["y"] + BANDEAU + 14 + rang * LIGNE}" '
+                f'class="f">{echappe(champ)}</text>'
+            )
+
+        boites.append("</g>")
+
+    entetes = "".join(
+        f'<text x="{MARGE + index * (LARGEUR + GOUTTIERE)}" y="{MARGE + 6}" '
+        f'class="col">{echappe(libelle.strip().upper())}</text>'
+        for index, (libelle, _) in enumerate(colonnes)
+    )
+
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {largeur} {hauteur_totale:.0f}" width="100%">
+<style>
+  .t {{ font: 700 11px -apple-system, Helvetica, Arial, sans-serif; fill: #fff; }}
+  .f {{ font: 9.5px ui-monospace, Menlo, monospace; fill: #334155; }}
+  .card {{ font: 700 9px -apple-system, Helvetica, Arial, sans-serif; fill: #1e3a8a; }}
+  .rel {{ font: italic 8.5px -apple-system, Helvetica, Arial, sans-serif; fill: #64748b; }}
+  .col {{ font: 700 8.5px -apple-system, Helvetica, Arial, sans-serif; fill: #94a3b8; letter-spacing: 1px; }}
+</style>
+{entetes}
+{"".join(traits)}
+{"".join(boites)}
+</svg>"""
+
+
+def main():
+    rendus = []
+
+    for titre, colonnes, rappels in PLANCHES:
+        rendus.append((titre, dessiner(titre, colonnes, rappels)))
+
+    for index, (titre, svg) in enumerate(rendus, start=1):
+        (ICI / f"schema{index}.svg").write_text(svg, encoding="utf-8")
+        print(f"schema{index}.svg — {titre} ({len(svg)} octets)")
+
+    return rendus
+
+
+if __name__ == "__main__":
+    main()

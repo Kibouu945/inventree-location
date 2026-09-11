@@ -14,9 +14,14 @@ existant.
 import re
 from pathlib import Path
 
+import schema as _schema
+
 ICI = Path(__file__).parent
 
-svg = (ICI / "schema.svg").read_text()
+planches = [
+    ((ICI / f"schema{index}.svg").read_text(), titre)
+    for index, (titre, *_) in enumerate(__import__("schema").PLANCHES, start=1)
+]
 
 R = {
     "Acteurs et accès": [
@@ -394,6 +399,169 @@ LIVRE = [
     ),
 ]
 
+#: État de chaque table. Dérivé à la main : le code ne dit pas si une table
+#: est exploitée par un écran ou seulement créée.
+ETAT_TABLES = {
+    "user": ("En service", "auth"),
+    "profile": ("En service", ""),
+    "client": ("En service", "L2"),
+    "contact": ("En service", "L2"),
+    "manif": ("En service", ""),
+    "presta": ("En service", "L1"),
+    "lignepresta": ("En service", ""),
+    "bon": ("En service", ""),
+    "ligne": ("En service", ""),
+    "lieu": ("En service", "L1"),
+    "part": ("InvenTree", ""),
+    "rentable": ("En service", "L1"),
+    "tremise": ("Créée, pas encore exploitée", "D0"),
+    "premise": ("Créée, pas encore exploitée", "D0"),
+    "ptarif": ("Créée, pas encore exploitée", "D0"),
+    "devis": ("Créée, pas encore exploitée", "D0"),
+    "lignedevis": ("Créée, pas encore exploitée", "D0"),
+    "facture": ("Créée, pas encore exploitée", "D0"),
+    "modif": ("Créée, pas encore exploitée", "D0"),
+    "livr": ("Projection, en lecture", "L6"),
+    "livrl": ("Projection, en lecture", "L6"),
+    "ram": ("Projection, en lecture", "L6"),
+    "rama": ("Projection, en lecture", "L6"),
+    "incident": ("En service", "L5"),
+    "sav": ("En service", ""),
+    "logresa": ("En service", ""),
+    "loglivr": ("En service", ""),
+    "conflit": ("En service", ""),
+}
+
+#: Recette du 11/09/2026 (Hanane), confrontée aux règles et au code.
+RECETTE = [
+    (
+        "Remplacer groupe par client",
+        "Fait",
+        "L2 — migration `0026`, renommage sur place",
+    ),
+    (
+        "Remplacer client par contact",
+        "Fait",
+        "L2 — `Manifestation.organisateur` → `contact`",
+    ),
+    (
+        "Séparer création d'utilisateur et de client",
+        "Fait",
+        "L2 — `Profile.groupe` supprimé",
+    ),
+    (
+        "Un client peut avoir plusieurs contacts",
+        "Fait",
+        "R8 — `Client 1 — 0..N Contact`",
+    ),
+    ("Client = personne morale, contacts à l'intérieur", "Fait", "R7"),
+    (
+        "Chaîne client → manifestation → prestation → réservation → matériel",
+        "Fait",
+        "R10, portée par les clés étrangères",
+    ),
+    (
+        "Voir le livré et le restant à livrer",
+        "Fait",
+        "L6 — calculé, exposé par `/tournees/`",
+    ),
+    (
+        "Consulter le stock sur une période donnée",
+        "Fait côté API",
+        "l'endpoint existe ; reste à l'exposer à l'écran",
+    ),
+    ("Voir les calendriers sur une période", "Fait", "planning semaine / mois / année"),
+    (
+        "Rôles principaux gestionnaire, livreur, magasinier",
+        "Fait",
+        "R1 — un seul rôle par acteur",
+    ),
+    (
+        "Onglets Client puis Contact, côte à côte",
+        "À faire",
+        "**F1** — l'API est prête, l'écran manque",
+    ),
+    ("Widget client en premier chez le gestionnaire", "À faire", "**F2**"),
+    (
+        "Renommer le widget Organisation en Manifestations",
+        "À faire",
+        "une ligne dans `core.py`",
+    ),
+    (
+        "Rechercher les manifestations d'un client défini",
+        "À faire",
+        "filtre `client=` absent de `/manifestations/`",
+    ),
+    (
+        "Préremplir nom et dates de la manifestation à la création d'une prestation",
+        "À faire",
+        "front",
+    ),
+    (
+        "Ne pas bloquer la prestation en brouillon si le stock manque",
+        "À faire",
+        "R13b — permissif au stockage, strict à la transition",
+    ),
+    (
+        "Bon généré automatiquement à la modification d'une prestation",
+        "À faire",
+        "**L3** — c'est R14 mot pour mot",
+    ),
+    (
+        "Livraison partielle saisie par le livreur",
+        "À faire",
+        "**L7** — la table existe depuis L6",
+    ),
+    ("Modifier l'information là où elle se trouve", "À faire", "**F4**"),
+    ("Magasinier → comptage de stock", "À faire", "**F8** + R42"),
+    (
+        "Remplacer « OK » par « Récupéré »",
+        "À faire",
+        "`CheckinForm.tsx` — la colonne s'appelle déjà `quantite_recuperee`",
+    ),
+    ("Retirer les articles de la partie manifestation", "À faire", "revue d'écran"),
+    ("Revoir l'affichage (CDC page 19)", "À faire", "maquette"),
+    (
+        "Retirer les dates au niveau de la réservation",
+        "<b>Arbitrage</b>",
+        "contredit R14 — voir ci-dessous",
+    ),
+    (
+        "Ne pas bloquer le check-in si le retour ≠ le livré",
+        "<b>Corrige le code</b>",
+        "R36 le disait déjà ; le serveur refuse encore",
+    ),
+    (
+        "Contraindre les saisies : plus de récupéré oui, plus de manquant non",
+        "<b>Affine R34</b>",
+        "règle plus fine que la mienne",
+    ),
+    (
+        "Calendrier : une ligne par prestation",
+        "<b>Corrige le planning</b>",
+        "livré à la maille manifestation",
+    ),
+]
+
+#: Les trois points de la recette qui ne se rangent pas sous une règle existante.
+ARBITRAGES = [
+    (
+        "Retirer les dates de la réservation",
+        "Le CDC §44 demande que le bon porte « les dates de l'évènement <b>et</b> la date/heure de livraison attendue ». Et `date_retrait_prevue` est le champ sur lequel la tournée du livreur est filtrée : le supprimer sec casse `/tournees/`.",
+        "Retirer la <b>paire</b> retrait/retour prévus, qui duplique le créneau de la prestation, et garder <b>une seule date</b> sur le bon : l'heure de livraison attendue, que la prestation ne porte pas.",
+    ),
+    (
+        "Le ramassage ne doit pas être plafonné",
+        "R36 dit depuis le début « aucun plafond, un surplus est légitime ». Le serveur refuse pourtant tout total supérieur au sorti (`sav.py`), et le test écrit au lot L5 a gravé ce refus dans la suite. Une règle et son contraire, à trois jours d'intervalle.",
+        "Lever le plafond global, le remplacer par la contrainte proposée en recette — on peut récupérer plus, on ne peut pas déclarer plus de manquants qu'il n'y a eu de demandes — et réécrire le test correspondant.",
+    ),
+    (
+        "Le planning à la maille prestation",
+        "La maquette et la recette demandent une ligne par prestation. Le planning livré fait une ligne par manifestation : la maille est prise un cran trop haut.",
+        "Descendre d'un niveau, ou rendre la manifestation dépliable sur ses prestations — ce qui garde la vue d'ensemble tout en donnant le détail.",
+    ),
+]
+
 #: Tâches front. Colonnes : ce que la tâche fait, où, de quoi elle dépend.
 FRONT = [
     (
@@ -639,6 +807,41 @@ repartition = "".join(
     for qui, un, deux, fichiers in REPARTITION
 )
 gele = "".join(f"<tr><td><b>{mono(t)}</b></td><td>{mono(d)}</td></tr>" for t, d in GELE)
+_relations_par_table = {}
+
+for _src, _dst, _cs, _cd, _lib in _schema.RELATIONS:
+    _relations_par_table.setdefault(_src, []).append(
+        f"→ {_schema.TABLES[_dst][0].split('  ')[0]} ({_cs}–{_cd})"
+    )
+    _relations_par_table.setdefault(_dst, []).append(
+        f"← {_schema.TABLES[_src][0].split('  ')[0]} ({_cd}–{_cs})"
+    )
+
+inventaire = "".join(
+    f"<tr><td><b>{_schema.TABLES[cle][0]}</b><br>"
+    f'<span class="det">{" · ".join(_schema.TABLES[cle][1])}</span></td>'
+    f'<td class="det">{"<br>".join(_relations_par_table.get(cle, ["—"]))}</td>'
+    f'<td class="src">{etat}</td><td class="src">{lot or "—"}</td></tr>'
+    for cle, (etat, lot) in ETAT_TABLES.items()
+)
+
+recette = "".join(
+    f'<tr><td>{mono(point)}</td><td class="src">{statut}</td>'
+    f'<td class="det">{mono(ou)}</td></tr>'
+    for point, statut, ou in RECETTE
+)
+
+arbitrages = "".join(
+    f'<tr><td><b>{mono(sujet)}</b></td><td class="det">{mono(constat)}</td>'
+    f'<td class="det">{mono(proposition)}</td></tr>'
+    for sujet, constat, proposition in ARBITRAGES
+)
+
+planches_html = "".join(
+    f"<h3>Planche {index} — {titre}</h3>{svg}"
+    + ('<div class="page"></div>' if index < len(planches) else "")
+    for index, (svg, titre) in enumerate(planches, start=1)
+)
 corr = "".join(
     f'<tr><td class="id">{i}</td><td>{t}</td><td>{d}</td></tr>' for i, t, d in C
 )
@@ -663,6 +866,8 @@ td {{ padding:5px 6px; border-bottom:1px solid #eef2f7; vertical-align:top; font
 tr {{ break-inside:avoid; page-break-inside:avoid; }}
 td.id {{ font-weight:700; color:#1d4ed8; white-space:nowrap; width:38px; }}
 td.src {{ color:#6b7280; font-size:8.6pt; white-space:nowrap; width:118px; }}
+table.inv td:nth-child(1) {{ width:26%; }}
+table.inv td:nth-child(2) {{ width:44%; font-size:8.6pt; }}
 table.front {{ table-layout:fixed; }}
 table.front th:nth-child(1) {{ width:34px; }}
 table.front th:nth-child(2) {{ width:40%; }}
@@ -688,25 +893,80 @@ footer {{ margin-top:22px; padding-top:8px; border-top:1px solid #e5e7eb; color:
 
 <h1>Modèle de données &amp; règles métier</h1>
 <div class="sub">InvenTree Location — gestion de location de matériel événementiel<br>
-Révision 6 · 10/09/2026 · Sources : point de revue du 09/09/2026, cahier des charges V06
+Révision 7 · 11/09/2026 · Sources : point de revue du 09/09/2026, cahier des charges V06
 (texte <b>et</b> annexes graphiques), code existant</div>
 
-<h2>Schéma du modèle cible</h2>
-{svg}
-<div class="legend">
-<span><i class="dot" style="background:#4f46e5"></i>Acteur interne</span>
-<span><i class="dot" style="background:#059669"></i>Client (externe)</span>
-<span><i class="dot" style="background:#2563eb"></i>Cœur métier</span>
-<span><i class="dot" style="background:#b45309"></i>Devis &amp; facturation</span>
-<span><i class="dot" style="background:#be185d"></i>Exécution terrain</span>
-<span><i class="dot" style="background:#475569"></i>Référentiel</span>
-</div>
+<h2>Schéma du modèle de données</h2>
+<p>Vingt-six tables et cinquante-deux relations, relevées dans le code et non de
+mémoire. Trois planches plutôt qu'une : sur une seule page, les libellés
+deviendraient illisibles. Les tables déjà montrées sur une planche précédente
+sont <b>rappelées en gris</b>, pour que chacune se lise seule.</p>
+
+<div class="note"><b>Comment lire les cardinalités.</b> Elles se lisent aux deux
+bouts d'un trait : <code>Client 1 — 0..N Contact</code> se dit « un client porte
+zéro à plusieurs contacts, et un contact appartient à un et un seul client ».
+<code>M — N</code> signale une relation portée par une table de liaison — il n'y
+en a que deux : un devis couvre plusieurs bons et un bon peut figurer sur
+plusieurs devis, une facture couvre plusieurs devis.</div>
+
+<div class="note"><b>Rappel : la normalisation.</b> Un schéma est normalisé quand
+chaque fait n'est écrit qu'une fois et au bon endroit.
+<b>1<sup>re</sup> forme</b> : pas de valeur répétée dans une colonne — d'où
+<code>LigneReservation</code> plutôt qu'une liste d'articles dans le bon.
+<b>2<sup>e</sup> forme</b> : chaque colonne dépend de la clé <i>entière</i> —
+d'où <code>RamassageArticle</code>, où les quatre compteurs dépendent du couple
+(passage, ligne) et non du seul passage.
+<b>3<sup>e</sup> forme</b> : aucune colonne ne dépend d'une autre colonne — d'où
+le nom du client absent de la manifestation, qui le tient de sa clé étrangère.
+<br>Le modèle a été dénormalisé <b>une fois</b>, sciemment :
+<code>Devis.signataire_libelle</code> fige le nom du signataire au moment de la
+signature. Un devis signé doit rester lisible tel qu'il a été signé, même si le
+contact est renommé ou désactivé ensuite — c'est un instantané, pas une
+duplication.</div>
+
+<div class="note"><b>La faute inverse, corrigée en cours de route.</b> Le bon de
+réservation portait sept colonnes de quantités de retour — <code>ok</code>,
+<code>manquant</code>, <code>casse</code>, <code>sav</code>… — alimentées par
+trois écrans différents avec trois vocabulaires. Trois écrivains pour un même
+fait : les chiffres divergeaient. La migration <code>0021</code> les a
+supprimées au profit d'un registre unique, <code>ReturnIncident</code>, et les
+totaux se recalculent. C'est l'exemple à citer si l'on demande ce que la
+normalisation apporte concrètement.</div>
+
 <div class="page"></div>
+
+{planches_html}
 
 {sections}
 
 <h2>Écarts assumés par rapport au schéma soumis</h2>
 <table><thead><tr><th>#</th><th>Point du schéma</th><th>Correction et raison</th></tr></thead><tbody>{corr}</tbody></table>
+
+<div class="page"></div>
+
+<h2>Les tables en jeu</h2>
+<p>Les vingt-six tables du modèle, leurs relations avec leurs cardinalités, et
+leur état réel — car une table peut exister en base sans qu'aucun écran ne
+l'utilise encore. Les cardinalités se lisent <b>(côté de cette table – côté de
+l'autre)</b> : sur <code>Contact</code>, « ← Client (0..N–1) » se dit « ce
+client porte zéro à plusieurs contacts, ce contact appartient à un seul
+client ».</p>
+<table class="inv"><thead><tr><th>Table</th><th>Relations</th><th>État</th><th>Lot</th></tr></thead>
+<tbody>{inventaire}</tbody></table>
+
+<div class="page"></div>
+
+<h2>Recette du 11/09/2026</h2>
+<p>Les points relevés en équipe, confrontés un par un aux règles et au code.
+Vingt-trois sur vingt-sept tombent sur une règle déjà écrite ou un lot déjà
+livré ; les quatre autres corrigent ce qui était écrit, et sont repris dans le
+tableau suivant.</p>
+<table><thead><tr><th>Point</th><th>Statut</th><th>Où ça tombe</th></tr></thead>
+<tbody>{recette}</tbody></table>
+
+<h2>Les trois arbitrages ouverts</h2>
+<table><thead><tr><th>Sujet</th><th>Le constat</th><th>La proposition</th></tr></thead>
+<tbody>{arbitrages}</tbody></table>
 
 <div class="page"></div>
 

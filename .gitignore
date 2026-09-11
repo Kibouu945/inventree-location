@@ -170,8 +170,9 @@ cython_debug/
 inventree_location/static/
 
 # Sorties du générateur de documentation (cf. docs/modele/README.md)
-docs/modele/schema.svg
+docs/modele/schema*.svg
 docs/modele/modele.html
+docs/modele/apercu*.html
 docs/visite/visite.html
 
 # Les PDF sont des sorties, pas des sources : ils se régénèrent depuis
