@@ -264,13 +264,34 @@ ETAPE_1 = {
             "note",
             "<b>`null` et `blank` ne sont pas synonymes</b>, et c'est une "
             "question de revue classique. `null=True` autorise l'absence <b>en "
-            "base</b>. `blank=True` autorise le champ vide <b>dans un "
+            "base</b> ; `blank=True` autorise le champ vide <b>dans un "
             "formulaire</b>. Notre règle : un texte se laisse vide "
-            '(`blank=True, default=""`) et n\'est <b>jamais</b> `null` — sinon '
-            "il existe deux façons de dire « rien ». <b>Sauf `email`</b> : il "
-            "est `unique=True`, or l'unicité tolère plusieurs `NULL` mais refuse "
-            "deux chaînes vides. D'où `null=True` sur lui seul, et le front qui "
-            'envoie `null` plutôt que `""`.',
+            '(`blank=True, default=""`) et n\'est <b>jamais</b> `null`, sinon '
+            "il existe deux façons de dire « rien ».",
+        ),
+        (
+            "note",
+            "<b>Pourquoi `email` fait exception — et ce n'est pas « parce qu'il "
+            "est optionnel ».</b> `prenom`, `telephone` et `adresse` sont "
+            "optionnels aussi, et ne sont pas `null`. Le discriminant est "
+            "`unique=True` : en SQL, `NULL` signifie « inconnu », et deux "
+            "inconnus ne sont pas réputés égaux — l'unicité les laisse donc "
+            "passer autant de fois qu'on veut. Deux chaînes vides, elles, sont "
+            "deux valeurs <b>égales</b> : la seconde est refusée. Sans "
+            "`null=True`, la base n'accepterait qu'<b>un seul</b> client sans "
+            "e-mail.",
+        ),
+        (
+            "code",
+            """>>> Client.objects.create(nom="A", email=None)
+>>> Client.objects.create(nom="B", email=None)
+deux e-mails NULL   -> acceptés
+
+>>> Client.objects.create(nom="C", email="")
+>>> Client.objects.create(nom="D", email="")
+deux chaînes vides  -> REFUSÉS
+IntegrityError: duplicate key value violates unique constraint
+                inventree_location_client_email_key""",
         ),
         ("titre", "1.3 — La clé étrangère et `on_delete` : la question de revue"),
         (
@@ -386,7 +407,9 @@ ETAPE_1 = {
                     ],
                     [
                         "`showmigrations`",
-                        "la liste, avec une croix devant celles qui sont appliquées.",
+                        "la liste, avec une croix devant celles qui sont appliquées "
+                        "— la croix vient de la table `django_migrations`, où Django "
+                        "note ce qu'il a déjà fait.",
                     ],
                 ],
             ),
@@ -473,6 +496,22 @@ ETAPE_1 = {
                 ],
             ),
         ),
+        ("titre", "1.6 — Où lancer ces commandes"),
+        (
+            "prose",
+            "Il y a <b>quatre</b> conteneurs, et un seul reçoit les commandes "
+            "Django : `inventree`, le serveur, parce qu'il est le seul à avoir "
+            "le code Python et le `manage.py`. `db` n'est que PostgreSQL. Et "
+            "il n'y a pas de `manage.py` à la racine du dépôt : le dépôt est "
+            "<i>monté</i> dans ce conteneur à `/home/inventree/plugin`, tandis "
+            "que `manage.py` appartient à InvenTree, ailleurs dans l'image. "
+            "D'où le raccourci :",
+        ),
+        (
+            "code",
+            """make manage cmd="showmigrations inventree_location"
+make manage cmd="makemigrations --check --dry-run\"""",
+        ),
         ("titre", "1.6 — À faire toi-même"),
         (
             "exo",
@@ -483,9 +522,9 @@ ETAPE_1 = {
                 "Ouvre `inventree_location/migrations/0026_client_et_contact.py`. "
                 "Lis d'abord `dependencies`, puis les trois premières "
                 "`operations`. Raconte à voix haute ce que la base va faire.",
-                "Dans le conteneur : `python manage.py showmigrations "
-                "inventree_location | tail -12`. Retrouve `0031` et sa croix.",
-                "Puis `python manage.py makemigrations --check --dry-run`. "
+                '`make manage cmd="showmigrations inventree_location"` : '
+                "retrouve `0031` et sa croix.",
+                'Puis `make manage cmd="makemigrations --check --dry-run"`. '
                 "« No changes detected » signifie que le code et la base disent "
                 "la même chose — c'est la phrase à montrer en revue.",
             ],
