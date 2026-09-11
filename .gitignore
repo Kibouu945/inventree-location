@@ -173,3 +173,8 @@ inventree_location/static/
 docs/modele/schema.svg
 docs/modele/modele.html
 docs/visite/visite.html
+
+# Les PDF sont des sorties, pas des sources : ils se régénèrent depuis
+# docs/modele/document.py et docs/visite/guide.py, et atterrissent dans
+# ~/Downloads. Aucun ne doit entrer dans le dépôt.
+*.pdf
