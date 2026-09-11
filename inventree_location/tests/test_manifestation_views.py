@@ -444,14 +444,22 @@ class TestFenetreDuPlanning:
     def trois_manifestations(self, db):
         from inventree_location.tests.factories import make_manifestation
 
+        # Horodatages avec fuseau : le serveur tourne en Europe/Paris, et une
+        # date naïve déclencherait un avertissement Django à chaque création.
         make_manifestation(
-            nom="Avant", date_debut="2026-01-05 09:00", date_fin="2026-01-09 18:00"
+            nom="Avant",
+            date_debut="2026-01-05T09:00:00+01:00",
+            date_fin="2026-01-09T18:00:00+01:00",
         )
         make_manifestation(
-            nom="À cheval", date_debut="2026-01-28 09:00", date_fin="2026-02-03 18:00"
+            nom="À cheval",
+            date_debut="2026-01-28T09:00:00+01:00",
+            date_fin="2026-02-03T18:00:00+01:00",
         )
         make_manifestation(
-            nom="Après", date_debut="2026-03-10 09:00", date_fin="2026-03-12 18:00"
+            nom="Après",
+            date_debut="2026-03-10T09:00:00+01:00",
+            date_fin="2026-03-12T18:00:00+01:00",
         )
 
     def test_la_fenetre_retient_ce_qui_la_chevauche(

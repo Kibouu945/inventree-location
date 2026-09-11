@@ -43,6 +43,7 @@ function manifestation(
 }
 
 // Le 16 septembre 2026 est un mercredi : sa semaine court du 14 au 20.
+const JOUR: FenetrePlanning = { echelle: 'jour', ancre: '2026-09-16' };
 const SEMAINE: FenetrePlanning = { echelle: 'semaine', ancre: '2026-09-16' };
 const MOIS: FenetrePlanning = { echelle: 'mois', ancre: '2026-09-16' };
 const ANNEE: FenetrePlanning = { echelle: 'annee', ancre: '2026-09-16' };
@@ -64,6 +65,11 @@ describe('alignement de la fenêtre', () => {
     expect(debutDeLaFenetre(SEMAINE)).toBe('2026-09-14');
   });
 
+  it('la journée commence et finit sur elle-même', () => {
+    expect(debutDeLaFenetre(JOUR)).toBe('2026-09-16');
+    expect(bornes(JOUR)).toEqual({ from: '2026-09-16', to: '2026-09-16' });
+  });
+
   it('le mois commence le premier', () => {
     expect(debutDeLaFenetre(MOIS)).toBe('2026-09-01');
   });
@@ -80,6 +86,13 @@ describe('alignement de la fenêtre', () => {
 });
 
 describe('colonnes', () => {
+  it('la journée en fait une seule', () => {
+    const grille = colonnes(JOUR);
+
+    expect(grille).toHaveLength(1);
+    expect(grille[0]).toMatchObject({ debut: '2026-09-16', fin: '2026-09-16' });
+  });
+
   it('la semaine en fait sept, du lundi au dimanche', () => {
     const grille = colonnes(SEMAINE);
 
@@ -130,6 +143,11 @@ describe('joursDuMois', () => {
 });
 
 describe('decaler', () => {
+  it('avance et recule d’un jour', () => {
+    expect(debutDeLaFenetre(decaler(JOUR, 1))).toBe('2026-09-17');
+    expect(debutDeLaFenetre(decaler(JOUR, -1))).toBe('2026-09-15');
+  });
+
   it('avance et recule d’une semaine entière', () => {
     expect(debutDeLaFenetre(decaler(SEMAINE, 1))).toBe('2026-09-21');
     expect(debutDeLaFenetre(decaler(SEMAINE, -1))).toBe('2026-09-07');
@@ -194,6 +212,21 @@ describe('placer', () => {
           date_fin: '2026-08-03 18:00'
         }),
         colonnes(SEMAINE)
+      )
+    ).toBeNull();
+  });
+
+  it('paraît sur la journée qu’elle traverse', () => {
+    // Du 14 au 16 : le 16 est dedans, le 20 non.
+    expect(placer(manifestation(), colonnes(JOUR))).toMatchObject({
+      colonne: 1,
+      largeur: 1,
+      deborde_avant: true
+    });
+    expect(
+      placer(
+        manifestation(),
+        colonnes({ echelle: 'jour', ancre: '2026-09-20' })
       )
     ).toBeNull();
   });
@@ -273,6 +306,10 @@ describe('barres', () => {
 });
 
 describe('libellePeriode', () => {
+  it('nomme la journée en toutes lettres', () => {
+    expect(libellePeriode(JOUR)).toBe('Mercredi 16 septembre 2026');
+  });
+
   it('nomme la semaine par ses bornes', () => {
     expect(libellePeriode(SEMAINE)).toContain('14 sept.');
     expect(libellePeriode(SEMAINE)).toContain('2026');
@@ -351,7 +388,7 @@ describe('libelleStatut', () => {
 
 describe('état d’URL', () => {
   it('fait l’aller-retour sur les trois échelles', () => {
-    for (const fenetre of [SEMAINE, MOIS, ANNEE]) {
+    for (const fenetre of [JOUR, SEMAINE, MOIS, ANNEE]) {
       const relu = etatDepuisUrl(urlDuPlanning('liste', fenetre).toString());
 
       expect(relu.vue).toBe('liste');

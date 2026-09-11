@@ -33,11 +33,11 @@ export type VuePlanning = 'gantt' | 'liste';
 
 /** Ce qu'on regarde — nommé comme on en parle, pas comme c'est découpé.
  *
- * Une semaine se lit jour par jour, un mois aussi, une année se lit mois par
- * mois : le grain des colonnes se déduit de l'échelle, il ne se choisit pas
- * séparément.
+ * Le grain des colonnes se déduit de l'échelle : une journée tient en une
+ * colonne, une semaine en sept, un mois en autant de jours qu'il en a, une
+ * année en douze mois. Il ne se choisit pas séparément.
  */
-export type EchellePlanning = 'semaine' | 'mois' | 'annee';
+export type EchellePlanning = 'jour' | 'semaine' | 'mois' | 'annee';
 
 /** Fenêtre affichée : une échelle et un point d'ancrage.
  *
@@ -57,7 +57,7 @@ export interface Colonne {
   debut: string;
   /** Dernier jour couvert, inclus. */
   fin: string;
-  /** Ce qui s'écrit en en-tête : « lun. 15 », « 15 », « janv. 26 ». */
+  /** Ce qui s'écrit en en-tête : « lundi 15 », « lun. 15 », « 15 », « janv. 26 ». */
   libelle: string;
   /** Vrai pour un samedi ou un dimanche. */
   weekend: boolean;

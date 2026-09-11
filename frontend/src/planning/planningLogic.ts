@@ -25,12 +25,14 @@ const MS_PAR_JOUR = 24 * 60 * 60 * 1000;
  * année n'en a que douze, elles peuvent porter « janv. 26 ».
  */
 export const LARGEUR_COLONNE: Record<EchellePlanning, number> = {
+  jour: 420,
   semaine: 92,
   mois: 34,
   annee: 74
 };
 
 export const ECHELLES: Array<{ value: EchellePlanning; label: string }> = [
+  { value: 'jour', label: 'Jour' },
   { value: 'semaine', label: 'Semaine' },
   { value: 'mois', label: 'Mois' },
   { value: 'annee', label: 'Année' }
@@ -102,6 +104,10 @@ export function debutDeLaFenetre(fenetre: FenetrePlanning): string {
     return aujourdhui();
   }
 
+  if (fenetre.echelle === 'jour') {
+    return fenetre.ancre;
+  }
+
   if (fenetre.echelle === 'semaine') {
     return lundiDeLaSemaine(fenetre.ancre);
   }
@@ -138,7 +144,12 @@ export function colonnes(fenetre: FenetrePlanning): Colonne[] {
     });
   }
 
-  const nombre = fenetre.echelle === 'semaine' ? 7 : joursDuMois(debut);
+  const nombre =
+    fenetre.echelle === 'jour'
+      ? 1
+      : fenetre.echelle === 'semaine'
+        ? 7
+        : joursDuMois(debut);
 
   return Array.from({ length: nombre }, (_, index) => {
     const jour = ajouterJours(debut, index);
@@ -147,7 +158,7 @@ export function colonnes(fenetre: FenetrePlanning): Colonne[] {
       debut: jour,
       fin: jour,
       libelle:
-        fenetre.echelle === 'semaine' ? libelleJour(jour) : jour.slice(8, 10),
+        fenetre.echelle === 'mois' ? jour.slice(8, 10) : libelleJour(jour),
       weekend: estWeekEnd(jour)
     };
   });
@@ -159,6 +170,10 @@ export function decaler(
   pas: number
 ): FenetrePlanning {
   const debut = debutDeLaFenetre(fenetre);
+
+  if (fenetre.echelle === 'jour') {
+    return { ...fenetre, ancre: ajouterJours(debut, pas) };
+  }
 
   if (fenetre.echelle === 'semaine') {
     return { ...fenetre, ancre: ajouterJours(debut, pas * 7) };
@@ -199,6 +214,18 @@ export function libellePeriode(
 
   if (fenetre.echelle === 'annee') {
     return grille[0].debut.slice(0, 4);
+  }
+
+  if (fenetre.echelle === 'jour') {
+    const rendu = new Intl.DateTimeFormat(locale, {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC'
+    }).format(debut);
+
+    return rendu.charAt(0).toUpperCase() + rendu.slice(1);
   }
 
   if (fenetre.echelle === 'mois') {
@@ -388,7 +415,9 @@ export function urlDuPlanning(
 }
 
 function echelleValide(valeur: string | null): EchellePlanning {
-  return valeur === 'semaine' || valeur === 'annee' ? valeur : 'mois';
+  return valeur === 'jour' || valeur === 'semaine' || valeur === 'annee'
+    ? valeur
+    : 'mois';
 }
 
 /** Relit l'état depuis l'URL, en se rabattant sur les valeurs par défaut. */
