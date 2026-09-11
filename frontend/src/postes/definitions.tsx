@@ -66,10 +66,8 @@ const RamassagesList = lazy(() =>
     default: m.RamassagesList
   }))
 );
-const ReservationCalendar = lazy(() =>
-  import('../reservation/ReservationCalendar').then((m) => ({
-    default: m.ReservationCalendar
-  }))
+const Planning = lazy(() =>
+  import('../planning/Planning').then((m) => ({ default: m.Planning }))
 );
 const ReservationsList = lazy(() =>
   import('../reservation/ReservationsList').then((m) => ({
@@ -133,12 +131,10 @@ const RESERVATIONS = onglet(
   IconCalendarEvent,
   ReservationsList
 );
-const PLANNING = onglet(
-  'planning',
-  'Planning',
-  IconCalendarMonth,
-  ReservationCalendar
-);
+// La maquette du CDC : manifestations étalées sur les jours, fiche au survol.
+// L'ancien calendrier mensuel des réservations est remplacé — il montrait les
+// bons, pas les manifestations, et ni volume ni avancement.
+const PLANNING = onglet('planning', 'Planning', IconCalendarMonth, Planning);
 const CATALOGUE = onglet('catalogue', 'Catalogue', IconListSearch, CatalogList);
 const CONFLITS = onglet(
   'conflits',
