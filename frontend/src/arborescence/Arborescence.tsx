@@ -16,6 +16,7 @@ import {
   Group,
   Loader,
   Radio,
+  Select,
   Stack,
   Text,
   TextInput,
@@ -39,6 +40,7 @@ import { ownsKeys, syncOwnedParams } from '../urlState';
 const MANIFESTATIONS_URL = '/plugin/inventree-location/manifestations/';
 const PRESTATIONS_URL = '/plugin/inventree-location/prestations/';
 const RESERVATIONS_URL = '/plugin/inventree-location/reservations/';
+const CLIENTS_URL = '/plugin/inventree-location/clients/';
 
 /** Teintes des quatre niveaux, dans l'esprit de la maquette. */
 const FOND = {
@@ -398,6 +400,7 @@ function PrestationsDeLaManifestation({
 export function Arborescence({ context }: { context: InvenTreePluginContext }) {
   const [recherche, setRecherche] = useState('');
   const [periode, setPeriode] = useState('futur');
+  const [client, setClient] = useState<string | null>(null);
   const [ouvertes, setOuvertes] = useState<Set<number>>(new Set());
 
   const params = useMemo(() => {
@@ -412,15 +415,38 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
       valeurs.periode = periode;
     }
 
-    return valeurs;
-  }, [recherche, periode]);
+    // « Retrouver les manifestations d'un client au téléphone » (09/09). La
+    // recherche texte porte sur le nom de la manifestation : sans ce filtre,
+    // il fallait connaître le nom de l'évènement pour retrouver le client.
+    if (client) {
+      valeurs.client = client;
+    }
 
-  // Clé possédée, préfixée (cf. `urlState`).
+    return valeurs;
+  }, [recherche, periode, client]);
+
+  // Le sélecteur de client se remplit une fois : la liste ne bouge pas au fil
+  // des filtres, et elle est partagée avec les autres écrans qui la lisent.
+  const clientsQuery = useQuery<Page<{ id: number; nom: string }>>(
+    {
+      queryKey: ['clients'],
+      queryFn: async () => {
+        const reponse = await context.api.get(CLIENTS_URL);
+        return reponse.data as Page<{ id: number; nom: string }>;
+      }
+    },
+    context.queryClient
+  );
+
+  // Clés possédées, préfixées (cf. `urlState`).
   const own = new URLSearchParams();
   if (periode !== 'futur') {
     own.set('arbo_periode', periode);
   }
-  syncOwnedParams(ownsKeys(['arbo_periode']), own);
+  if (client) {
+    own.set('arbo_client', client);
+  }
+  syncOwnedParams(ownsKeys(['arbo_periode', 'arbo_client']), own);
 
   const query = useQuery<Page<Manifestation>>(
     {
@@ -448,6 +474,19 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
           value={recherche}
           onChange={(evenement) => setRecherche(evenement.currentTarget.value)}
           w={280}
+        />
+        <Select
+          placeholder='Tous les clients'
+          data={(clientsQuery.data?.results ?? []).map((c) => ({
+            value: String(c.id),
+            label: c.nom
+          }))}
+          value={client}
+          onChange={setClient}
+          clearable
+          searchable
+          w={220}
+          aria-label='Client'
         />
         <Radio.Group value={periode} onChange={setPeriode}>
           <Group gap='md'>

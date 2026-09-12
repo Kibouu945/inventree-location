@@ -75,6 +75,7 @@ export function ManifestationsTab({
 
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
+  const [clientFiltre, setClientFiltre] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
 
@@ -82,11 +83,21 @@ export function ManifestationsTab({
 
   const listQuery = useQuery<Manifestation[] | Page<Manifestation>>(
     {
-      queryKey: ['manifestations', debouncedSearch],
+      queryKey: ['manifestations', debouncedSearch, clientFiltre],
       queryFn: async () => {
-        const response = await context.api.get(MANIFESTATIONS_URL, {
-          params: debouncedSearch ? { search: debouncedSearch } : {}
-        });
+        // Deux filtres distincts : au téléphone on cherche par client, dans
+        // une liste on cherche par nom. Les envoyer ensemble les cumule.
+        const params: Record<string, string> = {};
+
+        if (debouncedSearch) {
+          params.search = debouncedSearch;
+        }
+
+        if (clientFiltre) {
+          params.client = clientFiltre;
+        }
+
+        const response = await context.api.get(MANIFESTATIONS_URL, { params });
         return response.data;
       }
     },
@@ -215,13 +226,26 @@ export function ManifestationsTab({
         )}
       </Group>
 
-      <TextInput
-        label='Recherche'
-        placeholder='Nom de la manifestation…'
-        value={search}
-        onChange={(event) => setSearch(event.currentTarget.value)}
-        w={280}
-      />
+      <Group align='flex-end' gap='md'>
+        <TextInput
+          label='Recherche'
+          placeholder='Nom de la manifestation…'
+          value={search}
+          onChange={(event) => setSearch(event.currentTarget.value)}
+          w={280}
+        />
+
+        <Select
+          label='Client'
+          placeholder='Tous les clients'
+          data={clientOptions}
+          value={clientFiltre}
+          onChange={setClientFiltre}
+          clearable
+          searchable
+          w={280}
+        />
+      </Group>
 
       {listQuery.isError && (
         <Alert color='red' title='Erreur'>
@@ -240,6 +264,7 @@ export function ManifestationsTab({
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Nom</Table.Th>
+              <Table.Th>Client</Table.Th>
               <Table.Th>Début</Table.Th>
               <Table.Th>Fin</Table.Th>
               <Table.Th>Statut</Table.Th>
@@ -254,6 +279,7 @@ export function ManifestationsTab({
                 onClick={() => canWrite && openEdit(manifestation)}
               >
                 <Table.Td>{manifestation.nom}</Table.Td>
+                <Table.Td>{manifestation.client_nom || '—'}</Table.Td>
                 <Table.Td>
                   {new Date(manifestation.date_debut).toLocaleDateString()}
                 </Table.Td>

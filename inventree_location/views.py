@@ -2600,6 +2600,14 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
         if statuts:
             queryset = queryset.filter(statut__in=statuts)
 
+        # « Rechercher les manifestations d'un client défini » (recette du
+        # 11/09). La recherche texte porte sur le nom de la manifestation, pas
+        # sur celui du client : deux besoins distincts, deux paramètres.
+        client_id = self.request.query_params.get("client")
+
+        if client_id:
+            queryset = queryset.filter(client_id=client_id)
+
         search = self.request.query_params.get("search")
 
         if search:
