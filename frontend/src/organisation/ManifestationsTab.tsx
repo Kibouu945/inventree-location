@@ -20,6 +20,7 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { optionsDeContacts } from '../backoffice/contactLogic';
 import { DateTimeField } from '../DateTimeField';
 
 import { canWriteOrganisation } from '../roles';
@@ -122,7 +123,12 @@ export function ManifestationsTab({
   const clientChoisi = form.values.client;
 
   const contactsQuery = useQuery<{
-    results: Array<{ id: number; nom: string; prenom: string }>;
+    results: Array<{
+      id: number;
+      nom: string;
+      prenom: string;
+      actif: boolean;
+    }>;
   }>(
     {
       queryKey: ['contacts', clientChoisi],
@@ -146,10 +152,10 @@ export function ManifestationsTab({
     label: c.nom
   }));
 
-  const contactOptions = (contactsQuery.data?.results ?? []).map((c) => ({
-    value: String(c.id),
-    label: `${c.prenom} ${c.nom}`.trim()
-  }));
+  const contactOptions = optionsDeContacts(
+    contactsQuery.data?.results ?? [],
+    form.values.contact
+  );
 
   const mutation = useMutation(
     {
