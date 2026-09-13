@@ -1,4 +1,3 @@
-/** Types de l'API tournée livreur (`/plugin/inventree-location/deliveries/`). */
 import type { LieuSummary } from '../reservation/types';
 
 export interface DeliveryLigne {
@@ -6,11 +5,11 @@ export interface DeliveryLigne {
   part: number;
   part_name: string;
   quantite_demandee: number;
-  /** Un service : listé à part sur le bon, hors du total à charger. */
+  quantite_livree?: number;
+  quantite_retournee?: number;
   is_virtual: boolean;
 }
 
-/** Sous-état de la tournée livreur (US-18/US-19), vide tant que non assignée. */
 export type EtatLivraison =
   | ''
   | 'assignee'
@@ -18,7 +17,6 @@ export type EtatLivraison =
   | 'livree'
   | 'probleme';
 
-/** Entrée du journal d'état de livraison (`LivraisonStatusLogSerializer`). */
 export interface LivraisonStatusLogEntry {
   id: number;
   from_etat: EtatLivraison;
@@ -30,12 +28,13 @@ export interface LivraisonStatusLogEntry {
   created_at: string;
 }
 
-/** Livraison telle que renvoyée par l'API (`DeliverySerializer`). */
 export interface Delivery {
   id: number;
   numero: string;
   statut: string;
   prestation_nom: string;
+  manifestation_nom?: string;
+  client_nom?: string;
   demandeur_nom: string;
   lieu_detail: LieuSummary | null;
   organisateur_nom: string;
