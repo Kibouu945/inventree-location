@@ -132,11 +132,18 @@ function apiErrorMessage(error: unknown): string | null {
 export function ReservationForm({
   context,
   reservationId,
+  prestationId,
   readOnly = false,
   onSaved
 }: {
   context: InvenTreePluginContext;
   reservationId?: number;
+  /** Prestation imposée à la création — l'appelant sait déjà laquelle.
+   *
+   * Sert à l'arborescence, où l'on crée un bon depuis la ligne de sa
+   * prestation : la poser ici déclenche la reprise habituelle de ses dates et
+   * de son matériel, comme si l'utilisateur l'avait choisie au sélecteur. */
+  prestationId?: number;
   /** Masque toute action d'écriture (rôles sans droit — cf. roles.ts). */
   readOnly?: boolean;
   onSaved?: () => void;
@@ -144,7 +151,10 @@ export function ReservationForm({
   const isEdit = reservationId != null;
 
   const form = useForm<ReservationFormValues>({
-    initialValues: emptyReservationValues(),
+    initialValues: {
+      ...emptyReservationValues(),
+      ...(isEdit || prestationId == null ? {} : { prestation: prestationId })
+    },
     validate: {}
   });
 

@@ -313,12 +313,12 @@ M = [
     (
         "Planning",
         "Gantt des manifestations sur les jours, pastilles de statut (brouillon, confirmé, annulé, livré, ramassé), bascule Calendrier / Liste, fiche détaillée par manifestation : contact, nombre de personnes, lieux, volumes, état de livraison et de ramassage.",
-        "<code>ReservationCalendar</code> : calendrier mensuel des réservations. Ni Gantt, ni volumes, ni fiche.",
+        "<b>Livré</b> (F5) : <code>Planning</code> — Gantt en grille CSS aux échelles jour / semaine / mois / année, barres dépliables sur les prestations, fiche au survol, bascule Calendrier / Liste. L'ancien calendrier mensuel reste sous l'onglet Réservations.",
     ),
     (
         "Manifestation",
         "Arborescence dépliable <b>manifestation → prestation → bon de réservation → articles</b>, avec par ligne la quantité réservée, livrée et ramassée. Recherche, filtres Futur / Passé / Tout / À facturer, boutons d'ajout de prestation, de réservation et d'article.",
-        "<code>OrganisationPanel</code> : trois onglets plats. L'arborescence n'existe pas.",
+        "<b>Livré</b> (A2, F4) : arborescence dépliable, quantités par ligne, et les trois boutons d'ajout branchés sur les formulaires existants. Manquent le niveau <b>client</b> au-dessus (F3) et le filtre « À facturer », affiché désactivé faute de règle de facturation.",
     ),
     (
         "Livraison",
@@ -396,6 +396,36 @@ LIVRE = [
         "Tables d'exécution et tournée du jour",
         "`Livraison` et `Ramassage` rattachées au bon, leurs quantités à la maille de la ligne. Projection recalculée depuis la vérité (`projeter_execution`), divergences affichées sans rien écrire (`verifier_projection`), et `GET /tournees/?date=` qui rend les arrêts par lieu **et** le récapitulatif tous lieux confondus.",
         "2e74fca",
+    ),
+    (
+        "L5b",
+        "Plafond du ramassage levé",
+        "R36 dit depuis le début qu'un surplus est légitime ; le serveur refusait pourtant tout total supérieur au sorti, à deux endroits — la saisie de ramassage et le registre d'incidents. Seul le manquant reste borné : on ne perd pas ce qui n'est pas parti. Trois tests affirmaient l'inverse, dont un écrit au lot L5.",
+        "be356a4",
+    ),
+    (
+        "A3",
+        "Filtre client sur les manifestations",
+        "`client=` sur `/manifestations/`, distinct de `search` qui porte sur le nom de l'évènement : au téléphone on connaît le client, pas le nom de la manifestation. Sélecteur posé sur les deux écrans qui en listent.",
+        "f012a15",
+    ),
+    (
+        "F5",
+        "Écran Planning",
+        "Les manifestations étalées sur les jours, aux échelles jour / semaine / mois / année, avec leur couleur, leur statut, la fiche au survol — client, interlocuteur, volume, avancement — et la bascule Calendrier / Liste. La barre se déplie sur ses **prestations** : la maille demandée en recette, sans perdre la vue d'ensemble. Grille CSS, pas de bibliothèque de Gantt.",
+        "3211735",
+    ),
+    (
+        "F1",
+        "Onglet Contacts du back-office",
+        "Créer, éditer et désactiver les interlocuteurs d'un client. L'API existait depuis L2 ; aucun écran ne s'y branchait, un contact ne pouvait naître que du shell. Pas de suppression — un contact a peut-être signé un devis. Le contact déjà choisi reste proposé même désactivé, sinon rouvrir une manifestation effacerait silencieusement son interlocuteur.",
+        "3f3da9e",
+    ),
+    (
+        "F4",
+        "Boutons d'ajout de l'arborescence",
+        "Les trois « + » ouvrent les formulaires existants — `PrestationCreateModal`, `ReservationForm` — montés en modale plutôt que réécrits, et disparaissent sans le droit d'écriture.",
+        "1c72982",
     ),
 ]
 
@@ -478,8 +508,8 @@ RECETTE = [
     ),
     (
         "Onglets Client puis Contact, côte à côte",
-        "À faire",
-        "**F1** — l'API est prête, l'écran manque",
+        "Fait",
+        "**F1** — livré le 12/09",
     ),
     ("Widget client en premier chez le gestionnaire", "À faire", "**F2**"),
     (
@@ -489,8 +519,8 @@ RECETTE = [
     ),
     (
         "Rechercher les manifestations d'un client défini",
-        "À faire",
-        "filtre `client=` absent de `/manifestations/`",
+        "Fait",
+        "**A3** — filtre `client=`, distinct de `search`",
     ),
     (
         "Préremplir nom et dates de la manifestation à la création d'une prestation",
@@ -512,7 +542,7 @@ RECETTE = [
         "À faire",
         "**L7** — la table existe depuis L6",
     ),
-    ("Modifier l'information là où elle se trouve", "À faire", "**F4**"),
+    ("Modifier l'information là où elle se trouve", "Fait", "**F4** — livré le 12/09"),
     ("Magasinier → comptage de stock", "À faire", "**F8** + R42"),
     (
         "Remplacer « OK » par « Récupéré »",
@@ -528,50 +558,46 @@ RECETTE = [
     ),
     (
         "Ne pas bloquer le check-in si le retour ≠ le livré",
-        "<b>Corrige le code</b>",
-        "R36 le disait déjà ; le serveur refuse encore",
+        "Fait",
+        "**L5b** — R36 le disait déjà, le serveur l'applique enfin",
     ),
     (
         "Contraindre les saisies : plus de récupéré oui, plus de manquant non",
-        "<b>Affine R34</b>",
-        "règle plus fine que la mienne",
+        "Fait",
+        "**L5b** — la règle de recette, plus fine que la mienne, a remplacé R34",
     ),
     (
         "Calendrier : une ligne par prestation",
-        "<b>Corrige le planning</b>",
-        "livré à la maille manifestation",
+        "Fait",
+        "**F5** — la barre se déplie sur ses prestations",
     ),
 ]
 
-#: Les trois points de la recette qui ne se rangent pas sous une règle existante.
+#: Les trois points de la recette qui ne se rangeaient sous aucune règle
+#: existante. Colonnes : sujet, constat, décision, où ça en est.
 ARBITRAGES = [
     (
         "Retirer les dates de la réservation",
         "Le CDC §44 demande que le bon porte « les dates de l'évènement <b>et</b> la date/heure de livraison attendue ». Et `date_retrait_prevue` est le champ sur lequel la tournée du livreur est filtrée : le supprimer sec casse `/tournees/`.",
         "Retirer la <b>paire</b> retrait/retour prévus, qui duplique le créneau de la prestation, et garder <b>une seule date</b> sur le bon : l'heure de livraison attendue, que la prestation ne porte pas.",
+        "<b>Ouvert</b> — c'est le seul point de la recette qui attend encore une décision.",
     ),
     (
         "Le ramassage ne doit pas être plafonné",
         "R36 dit depuis le début « aucun plafond, un surplus est légitime ». Le serveur refuse pourtant tout total supérieur au sorti (`sav.py`), et le test écrit au lot L5 a gravé ce refus dans la suite. Une règle et son contraire, à trois jours d'intervalle.",
         "Lever le plafond global, le remplacer par la contrainte proposée en recette — on peut récupérer plus, on ne peut pas déclarer plus de manquants qu'il n'y a eu de demandes — et réécrire le test correspondant.",
+        "<b>Tranché, livré</b> (`be356a4`) : plafond levé des deux côtés, manquant seul borné, trois tests réécrits.",
     ),
     (
         "Le planning à la maille prestation",
         "La maquette et la recette demandent une ligne par prestation. Le planning livré fait une ligne par manifestation : la maille est prise un cran trop haut.",
         "Descendre d'un niveau, ou rendre la manifestation dépliable sur ses prestations — ce qui garde la vue d'ensemble tout en donnant le détail.",
+        "<b>Tranché, livré</b> (`3211735`) : la barre se déplie. Le volume d'une prestation se mesure comme celui de sa manifestation, un cran plus bas — sinon le détail ne totalise pas son ensemble.",
     ),
 ]
 
 #: Tâches front. Colonnes : ce que la tâche fait, où, de quoi elle dépend.
 FRONT = [
-    (
-        "F1",
-        "Onglet Contacts du back-office",
-        "Créer et éditer les contacts d'un client. <b>L'API est prête et complète</b> — `/backoffice/contacts/`, filtrable par client, avec recherche, désactivation et `client_nom` pour la liste tous clients confondus. Il n'existe simplement aucun écran : un contact ne peut aujourd'hui être créé que par le shell.",
-        "Nouveau `backoffice/ContactsTab.tsx`, troisième onglet de `UsersBackOffice.tsx`. Copier la structure de `ClientsTab.tsx`, qui fait le même travail pour les clients ; les types et l'URL existent déjà. Pas de suppression : un contact se désactive, il a peut-être signé un devis. E-mail vide envoyé en `null`, jamais en chaîne vide.",
-        "rien — prêt à prendre",
-        "on crée un contact depuis l'écran, le compteur « Contacts » du client s'incrémente, et la désactivation le sort du sélecteur de `ManifestationsTab` sans le faire disparaître de la liste.",
-    ),
     (
         "F2",
         "Accueil du gestionnaire : ses clients",
@@ -584,25 +610,9 @@ FRONT = [
         "F3",
         "Niveau client dans l'arborescence",
         "L'arbre démarre à la manifestation ; la maquette et la réunion demandent client → manifestation → prestation → articles. Le niveau manquait parce que `Client` n'existait pas — <b>il existe maintenant</b>.",
-        "`arborescence/Arborescence.tsx` : un niveau au-dessus, alimenté par `/clients/`. Le composant est déjà écrit par niveaux, chacun chargeant ses enfants au dépliage.",
+        "`arborescence/Arborescence.tsx` : un niveau au-dessus, alimenté par `/clients/`. Le composant est déjà écrit par niveaux, chacun chargeant ses enfants au dépliage. Le filtre client (A3) et les boutons d'ajout (F4) y sont posés depuis le 12/09 : le niveau s'insère au-dessus sans les défaire, et le filtre devient redondant avec lui — à retirer, pas à empiler.",
         "rien — prêt à prendre",
         "un client se déplie sur ses manifestations, la recherche et les filtres Futur / Passé marchent encore, et les clés d'URL restent préfixées.",
-    ),
-    (
-        "F4",
-        "Boutons d'ajout de l'arborescence",
-        "Les trois `+` de la maquette sont visibles mais <b>désactivés</b>, avec l'explication au survol. La création passe par l'écran « Fiches ».",
-        "Extraire les formulaires de `ManifestationsTab.tsx` et `PrestationsTab.tsx` (dossier `organisation/`) en composants réutilisables, puis les ouvrir depuis l'arbre. C'est l'extraction qui fait le travail, pas le bouton.",
-        "rien, mais chevauche F3",
-        "on crée une manifestation, une prestation et une ligne depuis l'arbre, sans passer par l'écran « Fiches ».",
-    ),
-    (
-        "F5",
-        "Maquette Planning",
-        "Gantt des manifestations sur les jours, pastilles de statut, bascule calendrier / liste, fiche détaillée au survol avec contact, volumes et état de livraison. L'existant est un calendrier mensuel des réservations : ni Gantt, ni volumes, ni fiche.",
-        "`ReservationCalendar.tsx` (dossier `reservation/`) à remplacer ou doubler. `Manifestation.couleur` est en base depuis L1 et n'est pas encore utilisée.",
-        "rien — prêt à prendre",
-        "la même manifestation se lit en Gantt et en liste, avec sa couleur et son état de livraison.",
     ),
     (
         "F6",
@@ -712,12 +722,12 @@ PIEGES = [
     ),
 ]
 
-#: Répartition proposée. Un fichier, un auteur.
+#: Répartition des six tâches front restantes. Un fichier, un auteur.
 REPARTITION = [
     (
         "Joseph",
         "F3 — niveau client dans l'arborescence",
-        "F4 — boutons d'ajout (extraction des formulaires)",
+        "F9 — écrans du devis, quand L3 est posé",
         "`arborescence/`, `organisation/`",
     ),
     (
@@ -728,14 +738,14 @@ REPARTITION = [
     ),
     (
         "Hanane",
-        "F1 — onglet Contacts du back-office",
-        "F2 — accueil gestionnaire, puis F8 — écran stock",
+        "F2 — accueil gestionnaire : ses clients",
+        "F8 — écran stock du magasinier",
         "`backoffice/`, `postes/definitions.tsx`",
     ),
     (
         "Back",
-        "L5 — couture d'exécution et deux bugs",
-        "L3 — devis, puis L6 et L7 — tables d'exécution",
+        "L3 — devis : prix, génération, signature",
+        "L7 — écriture des tables d'exécution",
         "hors `frontend/`",
     ),
 ]
@@ -825,6 +835,37 @@ inventaire = "".join(
     for cle, (etat, lot) in ETAT_TABLES.items()
 )
 
+recette_fait = sum(1 for _, statut, _ in RECETTE if statut.startswith("Fait"))
+recette_reste = sum(1 for _, statut, _ in RECETTE if statut.startswith("À faire"))
+recette_autres = len(RECETTE) - recette_fait - recette_reste
+
+avancement = "".join(
+    f"<tr><td><b>{chantier}</b></td><td>{mono(fait)}</td>"
+    f'<td class="det">{mono(reste)}</td></tr>'
+    for chantier, fait, reste in [
+        (
+            "Front",
+            "L'arborescence (A2), l'onglet Contacts (F1), les boutons d'ajout (F4), le Planning jusqu'à la maille prestation (F5) et le filtre client (A3).",
+            f"{len(FRONT)} tâches, toutes attribuées : F2 puis F8 pour Hanane, F3 puis F9 pour Joseph, F6 puis F7 pour Maxime.",
+        ),
+        (
+            "Back",
+            "D0 et L0 à L6 : tables du devis, client et contacts, rôle unique, couture d'exécution, tournée du jour. Plus L5b, le plafond du ramassage levé.",
+            f"{len(BACK)} lots : L3, le devis — dont F9 dépend — et L7, l'écriture des tables d'exécution, dont F6 et F7 ont besoin pour la saisie.",
+        ),
+        (
+            "Recette du 11/09",
+            f"{recette_fait} points sur {len(RECETTE)}, dont six réglés depuis la révision 7.",
+            f"{recette_reste} à faire, et {recette_autres} arbitrage ouvert — les dates portées par le bon, seul point qui attend encore une décision.",
+        ),
+        (
+            "Maquettes du cahier des charges",
+            "Planning et Manifestation, aux détails près listés en fin de document.",
+            "Livraison (F6) et Ramassage (F7) : les deux tables hiérarchiques, en lecture d'abord.",
+        ),
+    ]
+)
+
 recette = "".join(
     f'<tr><td>{mono(point)}</td><td class="src">{statut}</td>'
     f'<td class="det">{mono(ou)}</td></tr>'
@@ -833,8 +874,8 @@ recette = "".join(
 
 arbitrages = "".join(
     f'<tr><td><b>{mono(sujet)}</b></td><td class="det">{mono(constat)}</td>'
-    f'<td class="det">{mono(proposition)}</td></tr>'
-    for sujet, constat, proposition in ARBITRAGES
+    f'<td class="det">{mono(proposition)}</td><td class="det">{mono(etat)}</td></tr>'
+    for sujet, constat, proposition, etat in ARBITRAGES
 )
 
 planches_html = "".join(
@@ -893,8 +934,19 @@ footer {{ margin-top:22px; padding-top:8px; border-top:1px solid #e5e7eb; color:
 
 <h1>Modèle de données &amp; règles métier</h1>
 <div class="sub">InvenTree Location — gestion de location de matériel événementiel<br>
-Révision 7 · 11/09/2026 · Sources : point de revue du 09/09/2026, cahier des charges V06
+Révision 8 · 12/09/2026 · Sources : point de revue du 09/09/2026, cahier des charges V06
 (texte <b>et</b> annexes graphiques), code existant</div>
+
+<h2>Où on en est — 12/09/2026</h2>
+<p>Le point en une page. Chaque ligne est détaillée plus loin : le plan de mise
+en œuvre pour ce qui est livré, les deux tableaux « à faire » pour le reste, et
+la répartition pour savoir qui prend quoi.</p>
+<table><thead><tr><th>Chantier</th><th>Ce qui est fait</th><th>Ce qui reste</th></tr></thead>
+<tbody>{avancement}</tbody></table>
+<div class="note"><b>Les six tâches front restantes sont indépendantes deux à deux</b> — chacune
+sur ses propres fichiers, donc trois personnes peuvent avancer en parallèle sans conflit de
+fusion. Seules F6 et F7 s'enchaînent, dans cet ordre, et F9 attend que le devis (L3) soit
+posé côté back.</div>
 
 <h2>Schéma du modèle de données</h2>
 <p>Vingt-six tables et cinquante-deux relations, relevées dans le code et non de
@@ -958,14 +1010,14 @@ client ».</p>
 
 <h2>Recette du 11/09/2026</h2>
 <p>Les points relevés en équipe, confrontés un par un aux règles et au code.
-Vingt-trois sur vingt-sept tombent sur une règle déjà écrite ou un lot déjà
-livré ; les quatre autres corrigent ce qui était écrit, et sont repris dans le
-tableau suivant.</p>
+<b>{recette_fait} sur {len(RECETTE)}</b> sont faits — six sont passés à « fait » depuis la
+révision 7 —, {recette_reste} restent à faire, et {recette_autres} attend encore un
+arbitrage : il est repris dans le tableau suivant.</p>
 <table><thead><tr><th>Point</th><th>Statut</th><th>Où ça tombe</th></tr></thead>
 <tbody>{recette}</tbody></table>
 
-<h2>Les trois arbitrages ouverts</h2>
-<table><thead><tr><th>Sujet</th><th>Le constat</th><th>La proposition</th></tr></thead>
+<h2>Les trois arbitrages — deux tranchés</h2>
+<table><thead><tr><th>Sujet</th><th>Le constat</th><th>La proposition</th><th>Où ça en est</th></tr></thead>
 <tbody>{arbitrages}</tbody></table>
 
 <div class="page"></div>
@@ -975,10 +1027,11 @@ tableau suivant.</p>
 
 <h2>À faire — front</h2>
 <table class="front"><thead><tr><th>#</th><th>Tâche</th><th>Où</th><th>Dépend de</th></tr></thead><tbody>{front}</tbody></table>
-<div class="note"><b>Cinq des neuf tâches front ne dépendent de rien</b> — F1, F2, F3, F5, F8 —
-et F4 ne chevauche que F3. Elles portent sur des fichiers distincts, donc
-sans conflit de fusion. F1 est la plus courte et la plus isolée : l'API est complète, il n'y a
-qu'un écran à écrire en copiant celui des clients.</div>
+<div class="note"><b>Trois des six tâches restantes ne dépendent de rien</b> — F2, F3, F8 —
+et portent sur des fichiers distincts, donc sans conflit de fusion. F6 et F7 s'enchaînent
+dans cet ordre, sur les mêmes fichiers. F9 attend L3.<br>
+F1, F4 et F5 ont quitté ce tableau : elles sont livrées, et figurent au plan ci-dessus avec
+leur commit.</div>
 
 <h2>À faire — back</h2>
 <table><thead><tr><th>#</th><th>Lot</th><th>Dépend de</th></tr></thead><tbody>{back}</tbody></table>
@@ -993,8 +1046,15 @@ sans conflit de fusion. Une branche par tâche, depuis <code>develop</code>, PR 
 <b>F6 et F7 se font en lecture d'abord</b> : compteurs et validations ont besoin des tables
 d'exécution (lot L6). Ce n'est pas un retard, c'est le découpage — à dire avant, sinon la
 personne attend.<br>
-<b>F5 (Planning) et F9 (devis) sont un troisième tour</b>, au premier qui se libère. F5 consomme
-les formes de données que les autres sont en train de fixer ; F9 attend L3.</div>
+<b>F9 (devis) attend L3</b> : les écrans n'ont rien à montrer tant que le prix ne se résout pas.
+C'est pour cela qu'il vient en second chez Joseph, derrière F3 qui, lui, est prenable
+tout de suite.</div>
+
+<div class="note"><b>Ce qui a bougé depuis la révision 7</b> (11/09). F1 — l'onglet Contacts —,
+F4 — les boutons d'ajout de l'arborescence — et F5 — le Planning, jusqu'à la maille prestation
+demandée en recette — sont livrés, ainsi que le filtre client (A3) et la levée du plafond de
+ramassage (L5b). Joseph et Hanane changent donc de première tâche : F3 et F2. Maxime garde
+F6 puis F7, inchangés.</div>
 
 <h2>Mise en route</h2>
 <table><thead><tr><th>Étape</th><th>Commande</th><th>Pourquoi</th></tr></thead><tbody>{demarrage}</tbody></table>
@@ -1017,7 +1077,7 @@ lieu × journée et un manquant déduit. Les règles R29 à R34 ont été corrig
 l'écart qui reprochait au schéma client de rattacher le ramassage à la réservation a été retiré :
 il était infondé.</div>
 
-<footer>Document généré le 10/09/2026 — projet InvenTree Location, groupe 6.</footer>
+<footer>Document généré le 12/09/2026 — projet InvenTree Location, groupe 6.</footer>
 </body></html>"""
 
 (ICI / "modele.html").write_text(html)

@@ -36,6 +36,8 @@ export interface Manifestation {
   couleur: string;
   pourcent_remise_globale: string;
   client: number;
+  /** Nom du client, rendu par le sérialiseur : la liste l'affiche sans second appel. */
+  client_nom: string;
   contact: number | null;
   // Clé conservée : la source est le contact référent, à défaut le client.
   organisateur_nom: string;

@@ -76,6 +76,7 @@ export function PrestationCreateModal({
   context,
   opened,
   manifestationId,
+  libelleAction = 'Créer et sélectionner',
   onClose,
   onCreated
 }: {
@@ -84,6 +85,12 @@ export function PrestationCreateModal({
   /** Manifestation à pré-sélectionner (celle de la prestation déjà choisie
    * dans le formulaire, s'il y en a une). */
   manifestationId: number | null;
+  /** Libellé du bouton d'action.
+   *
+   * « et sélectionner » n'a de sens qu'appelé depuis le formulaire de
+   * réservation, où la prestation créée vient se poser dans le champ. Depuis
+   * l'arborescence, il n'y a rien à sélectionner ensuite. */
+  libelleAction?: string;
   onClose: () => void;
   onCreated: (prestation: Prestation) => void;
 }) {
@@ -270,7 +277,7 @@ export function PrestationCreateModal({
             loading={mutation.isPending}
             disabled={!canSubmit}
           >
-            Créer et sélectionner
+            {libelleAction}
           </Button>
         </Group>
       </Stack>
