@@ -163,3 +163,70 @@ Passer par l'API (`POST /api/user/` exige `username`, `password`, `first_name`,
 `last_name`, `email`) : ajouter un groupe en shell Django échoue tant que le
 `profile` InvenTree n'existe pas (signal
 `validate_primary_group_on_group_change`).
+## 8. Les deux scénarios de bout en bout
+
+`driver.mjs` sert à écrire un cas ; ces deux-là sont écrits et rejouables.
+
+```bash
+mkdir -p /tmp/plugin-e2e && cd /tmp/plugin-e2e   # playwright doit résoudre ici
+npm install playwright                            # les navigateurs sont déjà posés
+cp ~/hetic/InvenTreeLocation/.claude/skills/run-plugin/{driver,nominal,alternatifs}.mjs .
+
+node nominal.mjs           # silencieux, ~2 min
+LENT=1 node nominal.mjs    # fenêtre visible et ralentie, pour une démonstration
+node alternatifs.mjs
+```
+
+### `nominal.mjs` — la chaîne complète
+
+Client → contact → manifestation → prestation → bon → validation → livraison →
+ramassage → retour, en neuf étapes indépendantes : une étape qui casse
+n'empêche pas les suivantes de s'exécuter, et chacune se conclut par une
+capture en cas d'échec. Le bilan final dit laquelle est tombée.
+
+**Trois règles font échouer une saisie improvisée**, et ce n'est pas un bug :
+
+1. **Le gérant interne est obligatoire** sur un bon — « Le demandeur est
+   obligatoire » au moment de soumettre.
+2. **Un article virtuel est obligatoire à la soumission**, en plus du matériel.
+3. **L'écran Livraisons s'ouvre sur la tournée du jour** (`horizon: 'jour'`) :
+   une manifestation datée de la semaine prochaine n'y apparaît pas. Le
+   scénario date donc sa manifestation sur *aujourd'hui*.
+
+Deux pièges d'automatisation, payés une fois chacun : `Échap` ferme la
+**modale** Mantine et pas seulement le calendrier — fermer un `DateTimePicker`
+en cliquant le titre de la modale ; et les jours du calendrier portent un
+`aria-label` complet (« 20 septembre 2026 »), donc se ciblent par
+`button.mantine-DateTimePicker-day` et leur texte.
+
+### `alternatifs.mjs` — ce qui doit être refusé, toléré ou masqué
+
+| Cas | Attendu |
+|---|---|
+| A — ramassage en surplus, à l'écran | accepté (R36) ; **échoue aujourd'hui** |
+| B — le même surplus, côté serveur | accepté, HTTP 200 |
+| C — manquant supérieur au sorti | refusé, HTTP 400 |
+| D — poste lecteur | aucun bouton d'ajout, pas de back-office |
+| E — conflits de stock | l'écran liste le conflit |
+| F — manifestation dont la fin précède le début | refusé, HTTP 400 |
+
+**Les cas B et C écrivent** sur un bon livré : ils le passent en `retournee`
+avec des quantités de test. Remettre en état après coup, sinon la base de
+démonstration ment :
+
+```bash
+make manage cmd="shell -c '
+from inventree_location.models import Reservation, ReturnIncident
+from inventree_location import models as m
+b = Reservation.objects.get(numero=\"RES-2026-0003\")
+for l in b.lignes.all():
+    l.quantite_ramassee = l.quantite_sav = l.quantite_detruite = 0
+    l.quantite_manquante = l.quantite_retournee = 0
+    l.save()
+ReturnIncident.objects.filter(line__reservation=b).delete()
+m.Ramassage.objects.filter(reservation=b).delete()
+b.statut = \"livree\"; b.save()
+'"
+make manage cmd="projeter_execution"
+make manage cmd="verifier_projection"   # doit dire « Aucune divergence. »
+```
