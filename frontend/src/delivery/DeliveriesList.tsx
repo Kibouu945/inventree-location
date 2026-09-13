@@ -24,8 +24,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Page, Ramassage } from '../ramassage/types';
 import { canMarquerLivree, hasAnyRole, LIVREUR } from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
-import { DeliveryCalendar } from './DeliveryCalendar';
 import { DeliveriesHierarchicalTable } from './DeliveriesHierarchicalTable';
+import { DeliveryCalendar } from './DeliveryCalendar';
 import { DeliveryNote } from './DeliveryNote';
 import { DeliveryStatusForm } from './DeliveryStatusForm';
 import {

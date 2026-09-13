@@ -10,11 +10,9 @@ import {
   Image,
   Modal,
   NumberInput,
-  Paper,
   SegmentedControl,
   Stack,
   Text,
-  Title,
   Tooltip,
   UnstyledButton
 } from '@mantine/core';
@@ -137,12 +135,12 @@ interface LigneState {
 }
 
 export function DeliveriesHierarchicalTable({
-  context,
+  context: _context,
   deliveries,
   onLivrerReservations,
   onOpenNote
 }: {
-  context: InvenTreePluginContext;
+  context?: InvenTreePluginContext;
   deliveries: Delivery[];
   onLivrerReservations: (reservationIds: number[]) => Promise<void>;
   onOpenNote?: (delivery: Delivery) => void;
@@ -159,7 +157,10 @@ export function DeliveriesHierarchicalTable({
   } | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
 
-  function getLigneState(ligne: DeliveryLigne, isDelivered: boolean): LigneState {
+  function getLigneState(
+    ligne: DeliveryLigne,
+    isDelivered: boolean
+  ): LigneState {
     const existing = lignesState[ligne.id];
     if (existing) {
       return existing;
@@ -611,7 +612,10 @@ export function DeliveriesHierarchicalTable({
 
                                 {bonOuvert &&
                                   bon.lignes.map((ligne) => {
-                                    const st = getLigneState(ligne, isDelivered);
+                                    const st = getLigneState(
+                                      ligne,
+                                      isDelivered
+                                    );
                                     const restante = Math.max(
                                       0,
                                       ligne.quantite_demandee -
@@ -747,9 +751,7 @@ export function DeliveriesHierarchicalTable({
                                                     : 'light'
                                                 }
                                                 color={
-                                                  st.photoUrl
-                                                    ? 'blue'
-                                                    : 'gray'
+                                                  st.photoUrl ? 'blue' : 'gray'
                                                 }
                                                 onClick={() =>
                                                   setPhotoModal({

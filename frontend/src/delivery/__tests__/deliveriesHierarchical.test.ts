@@ -2,21 +2,30 @@ import { describe, expect, it } from 'vitest';
 
 import type { Delivery } from '../types';
 
-export function computeAvancement(fait: number, attendu: number): 'rien' | 'partiel' | 'complet' {
+export function computeAvancement(
+  fait: number,
+  attendu: number
+): 'rien' | 'partiel' | 'complet' {
   if (attendu <= 0 || fait <= 0) {
     return 'rien';
   }
   return fait >= attendu ? 'complet' : 'partiel';
 }
 
-export function agregerAvancement(etats: ('rien' | 'partiel' | 'complet')[]): 'rien' | 'partiel' | 'complet' {
+export function agregerAvancement(
+  etats: ('rien' | 'partiel' | 'complet')[]
+): 'rien' | 'partiel' | 'complet' {
   if (etats.length === 0 || etats.every((e) => e === 'rien')) {
     return 'rien';
   }
   return etats.every((e) => e === 'complet') ? 'complet' : 'partiel';
 }
 
-function makeDelivery(id: number, quantiteDemandee: number, quantiteLivree: number): Delivery {
+function makeDelivery(
+  id: number,
+  quantiteDemandee: number,
+  quantiteLivree: number
+): Delivery {
   return {
     id,
     numero: `RES-${id}`,

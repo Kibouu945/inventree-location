@@ -1,4 +1,8 @@
-export type DeliveryViewMode = 'hierarchique' | 'liste' | 'calendrier' | 'carte';
+export type DeliveryViewMode =
+  | 'hierarchique'
+  | 'liste'
+  | 'calendrier'
+  | 'carte';
 
 export type DeliveryHorizon = 'jour' | 'avenir' | 'tout';
 
