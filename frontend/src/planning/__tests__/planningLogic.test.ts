@@ -12,14 +12,22 @@ import {
   fenetreParDefaut,
   jourDe,
   joursDuMois,
+  largeurDeColonne,
   libelleLivraison,
   libellePeriode,
   libelleStatut,
   lundiDeLaSemaine,
+  ouvertesDepuisTexte,
+  ouvertesEnTexte,
+  parManifestation,
   placer,
   urlDuPlanning
 } from '../planningLogic';
-import type { FenetrePlanning, ManifestationPlanning } from '../types';
+import type {
+  FenetrePlanning,
+  ManifestationPlanning,
+  PrestationPlanning
+} from '../types';
 
 function manifestation(
   overrides: Partial<ManifestationPlanning> = {}
@@ -38,6 +46,23 @@ function manifestation(
     quantite_totale: 24,
     etat_livraison: { bons: 2, livres: 1, a_livrer: 1 },
     prestations_count: 2,
+    ...overrides
+  };
+}
+
+function prestation(
+  overrides: Partial<PrestationPlanning> = {}
+): PrestationPlanning {
+  return {
+    id: 10,
+    manifestation: 1,
+    nom: 'Montage',
+    date_debut: '2026-09-14 09:00',
+    date_fin: '2026-09-14 18:00',
+    statut: 'planifiee',
+    lieu_detail: { nom: 'Terrain central' },
+    quantite_totale: 12,
+    etat_livraison: { bons: 1, livres: 1, a_livrer: 0 },
     ...overrides
   };
 }
@@ -281,7 +306,7 @@ describe('barres', () => {
       colonnes(SEMAINE)
     );
 
-    expect(rendues.map((barre) => barre.manifestation.nom)).toEqual([
+    expect(rendues.map((barre) => barre.sujet.nom)).toEqual([
       'Bravo',
       'Alpha',
       'Zoulou'
@@ -420,5 +445,92 @@ describe('fenetreParDefaut', () => {
     const fenetre = fenetreParDefaut('mois', new Date('2026-09-16T10:00:00Z'));
 
     expect(debutDeLaFenetre(fenetre)).toBe('2026-09-01');
+  });
+});
+
+describe('la maille prestation', () => {
+  it('place une prestation comme une manifestation', () => {
+    // Le même calcul aux deux mailles : c'est ce qui garantit qu'une
+    // sous-ligne tombe sous la portion de barre qui la contient.
+    expect(
+      placer(
+        prestation({
+          date_debut: '2026-09-15 08:00',
+          date_fin: '2026-09-16 20:00'
+        }),
+        colonnes(SEMAINE)
+      )
+    ).toMatchObject({ colonne: 2, largeur: 2 });
+  });
+
+  it('range les prestations sous leur manifestation', () => {
+    const rangees = parManifestation([
+      prestation({ id: 1, manifestation: 7 }),
+      prestation({ id: 2, manifestation: 9 }),
+      prestation({ id: 3, manifestation: 7 })
+    ]);
+
+    expect(Array.from(rangees.keys()).sort()).toEqual([7, 9]);
+    expect(rangees.get(7)?.map((p) => p.id)).toEqual([1, 3]);
+    expect(rangees.get(9)?.map((p) => p.id)).toEqual([2]);
+  });
+
+  it('rend une table vide sans prestation, plutôt que rien', () => {
+    expect(parManifestation([]).size).toBe(0);
+  });
+
+  it('lit l’avancement d’une prestation comme celui d’une manifestation', () => {
+    expect(
+      libelleLivraison(
+        prestation({ etat_livraison: { bons: 3, livres: 2, a_livrer: 1 } })
+      )
+    ).toBe('2/3 livrés');
+  });
+});
+
+describe('les manifestations dépliées, dans l’URL', () => {
+  it('fait l’aller-retour', () => {
+    const relu = etatDepuisUrl(
+      urlDuPlanning('gantt', SEMAINE, [4, 1]).toString()
+    );
+
+    expect(Array.from(relu.ouvertes).sort()).toEqual([1, 4]);
+  });
+
+  it('trie et dédoublonne, pour que la même vue donne la même URL', () => {
+    expect(ouvertesEnTexte([9, 2, 9])).toBe('2,9');
+  });
+
+  it('n’écrit pas de clé quand rien n’est déplié', () => {
+    expect(urlDuPlanning('gantt', SEMAINE).has('plan_ouvertes')).toBe(false);
+  });
+
+  it('écarte ce qui n’est pas un identifiant', () => {
+    expect(Array.from(ouvertesDepuisTexte('3,,abc,-1,0,5'))).toEqual([3, 5]);
+  });
+
+  it('rend un ensemble vide quand la clé est absente', () => {
+    expect(ouvertesDepuisTexte(null).size).toBe(0);
+  });
+});
+
+describe('largeurDeColonne', () => {
+  it('répartit la place disponible entre les colonnes', () => {
+    // Sept colonnes dans 1400 px : 200 px chacune, bien au-dessus du minimum.
+    expect(largeurDeColonne('semaine', 7, 1400)).toBe(200);
+  });
+
+  it('ne descend jamais sous le minimum de l’échelle', () => {
+    // Trente jours dans 600 px feraient 20 px : on garde 34 et on défile.
+    expect(largeurDeColonne('mois', 30, 600)).toBe(34);
+  });
+
+  it('rend le minimum tant que le conteneur n’est pas mesuré', () => {
+    expect(largeurDeColonne('annee', 12, 0)).toBe(74);
+    expect(largeurDeColonne('jour', 1, -200)).toBe(420);
+  });
+
+  it('tolère une grille vide', () => {
+    expect(largeurDeColonne('mois', 0, 1000)).toBe(34);
   });
 });

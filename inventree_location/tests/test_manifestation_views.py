@@ -487,3 +487,62 @@ class TestFenetreDuPlanning:
         )
 
         assert noms == {"À cheval"}
+
+
+@pytest.mark.django_db
+class TestFiltreParClient:
+    """« Rechercher les manifestations d'un client défini » (recette du 11/09).
+
+    Le paramètre est distinct de `search`, qui porte sur le nom de la
+    manifestation : au téléphone, on cherche par client ; dans une liste, on
+    cherche par nom.
+    """
+
+    def _noms(self, factory, user, **params):
+        request = factory.get(MANIF_URL, params)
+        force_authenticate(request, user=user)
+
+        return {
+            ligne["nom"]
+            for ligne in ManifestationListCreateView.as_view()(request).data["results"]
+        }
+
+    @pytest.fixture
+    def deux_clients(self, db, client):
+        from inventree_location.tests.factories import make_manifestation
+
+        autre = Client.objects.create(nom="Évreux", email="evreux@exemple.test")
+        make_manifestation(client=client, nom="Camp de Jambville")
+        make_manifestation(client=autre, nom="Gala d'Évreux")
+
+        return client, autre
+
+    def test_ne_rend_que_les_manifestations_du_client(
+        self, factory, gestionnaire, deux_clients
+    ):
+        jambville, evreux = deux_clients
+
+        assert self._noms(factory, gestionnaire, client=jambville.pk) == {
+            "Camp de Jambville"
+        }
+        assert self._noms(factory, gestionnaire, client=evreux.pk) == {
+            "Gala d'Évreux"
+        }
+
+    def test_sans_le_parametre_tout_sort(
+        self, factory, gestionnaire, deux_clients
+    ):
+        assert self._noms(factory, gestionnaire) == {
+            "Camp de Jambville",
+            "Gala d'Évreux",
+        }
+
+    def test_se_combine_avec_la_recherche_par_nom(
+        self, factory, gestionnaire, deux_clients
+    ):
+        jambville, _ = deux_clients
+
+        assert (
+            self._noms(factory, gestionnaire, client=jambville.pk, search="Gala")
+            == set()
+        )

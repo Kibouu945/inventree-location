@@ -15,7 +15,9 @@ import {
   Box,
   Group,
   Loader,
+  Modal,
   Radio,
+  Select,
   Stack,
   Text,
   TextInput,
@@ -33,12 +35,16 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 
 import type { Manifestation, Page, Prestation } from '../organisation/types';
+import { PrestationCreateModal } from '../reservation/PrestationCreateModal';
+import { ReservationForm } from '../reservation/ReservationForm';
 import type { Reservation } from '../reservation/types';
+import { canWriteOrganisation, canWriteReservations } from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
 
 const MANIFESTATIONS_URL = '/plugin/inventree-location/manifestations/';
 const PRESTATIONS_URL = '/plugin/inventree-location/prestations/';
 const RESERVATIONS_URL = '/plugin/inventree-location/reservations/';
+const CLIENTS_URL = '/plugin/inventree-location/clients/';
 
 /** Teintes des quatre niveaux, dans l'esprit de la maquette. */
 const FOND = {
@@ -116,14 +122,39 @@ function Chevron({ ouvert }: { ouvert: boolean }) {
 }
 
 /**
- * Bouton d'ajout de la maquette, désactivé : la création passe par l'écran
- * « Fiches », qui porte les formulaires. Les brancher ici suppose de les en
- * extraire — lot à part. Visible et inactif, il dit ce qui reste à faire.
+ * Bouton d'ajout de la maquette (F4).
+ *
+ * Il ouvre le formulaire existant plutôt qu'un formulaire de plus : la
+ * création d'une prestation et celle d'un bon vivent déjà dans
+ * `PrestationCreateModal` et `ReservationForm`, tous deux écrits pour être
+ * montés ailleurs. Rien n'est dupliqué — une règle de saisie corrigée l'est
+ * partout à la fois.
+ *
+ * Rendu `null` sans le droit d'écriture : un bouton qu'on ne peut pas suivre
+ * n'apprend rien à qui n'a pas le rôle.
  */
-function Ajouter({ quoi }: { quoi: string }) {
+function Ajouter({
+  quoi,
+  onClick,
+  autorise = true
+}: {
+  quoi: string;
+  onClick: () => void;
+  autorise?: boolean;
+}) {
+  if (!autorise) {
+    return null;
+  }
+
   return (
-    <Tooltip label={`Ajouter ${quoi} — passe par l'écran dédié pour l'instant`}>
-      <ActionIcon variant='light' color='green' size='sm' disabled>
+    <Tooltip label={`Ajouter ${quoi}`}>
+      <ActionIcon
+        variant='light'
+        color='green'
+        size='sm'
+        aria-label={`Ajouter ${quoi}`}
+        onClick={onClick}
+      >
         <IconPlus size={14} />
       </ActionIcon>
     </Tooltip>
@@ -178,6 +209,11 @@ function BonsDeLaPrestation({
   prestation: Prestation;
 }) {
   const [ouverts, setOuverts] = useState<Set<number>>(new Set());
+  // Ajouter un article à un bon, c'est modifier le bon : on ouvre le
+  // formulaire de réservation sur lui, où la liste d'articles se saisit déjà,
+  // avec ses contrôles de stock et de statut.
+  const [bonEdite, setBonEdite] = useState<Reservation | null>(null);
+  const peutEcrire = canWriteReservations(context);
 
   const query = useQuery<Page<Reservation>>(
     {
@@ -255,7 +291,11 @@ function BonsDeLaPrestation({
                     etat={etatRamassage}
                     libelle='Ramassage'
                   />
-                  <Ajouter quoi='un article' />
+                  <Ajouter
+                    quoi='un article'
+                    autorise={peutEcrire}
+                    onClick={() => setBonEdite(bon)}
+                  />
                 </Group>
               </Group>
             </Ligne>
@@ -305,6 +345,29 @@ function BonsDeLaPrestation({
           </Box>
         );
       })}
+
+      <Modal
+        opened={bonEdite !== null}
+        onClose={() => setBonEdite(null)}
+        size='xl'
+        title={`Bon de réservation ${bonEdite?.numero ?? ''}`}
+      >
+        {bonEdite && (
+          <ReservationForm
+            context={context}
+            reservationId={bonEdite.id}
+            onSaved={() => {
+              // Les lignes voyagent dans la charge du bon : c'est la liste des
+              // bons de la prestation qu'il faut relire, pas une liste
+              // d'articles qui n'existe pas.
+              context.queryClient.invalidateQueries({
+                queryKey: ['arbo-reservations', prestation.id]
+              });
+              setBonEdite(null);
+            }}
+          />
+        )}
+      </Modal>
     </>
   );
 }
@@ -318,6 +381,10 @@ function PrestationsDeLaManifestation({
   manifestation: Manifestation;
 }) {
   const [ouvertes, setOuvertes] = useState<Set<number>>(new Set());
+  const [prestationDuBon, setPrestationDuBon] = useState<Prestation | null>(
+    null
+  );
+  const peutEcrire = canWriteReservations(context);
 
   const query = useQuery<Page<Prestation>>(
     {
@@ -380,7 +447,11 @@ function PrestationsDeLaManifestation({
                     </Text>
                   </Group>
                 </UnstyledButton>
-                <Ajouter quoi='une réservation' />
+                <Ajouter
+                  quoi='une réservation'
+                  autorise={peutEcrire}
+                  onClick={() => setPrestationDuBon(prestation)}
+                />
               </Group>
             </Ligne>
 
@@ -390,6 +461,26 @@ function PrestationsDeLaManifestation({
           </Box>
         );
       })}
+
+      <Modal
+        opened={prestationDuBon !== null}
+        onClose={() => setPrestationDuBon(null)}
+        size='xl'
+        title={`Nouveau bon — ${prestationDuBon?.nom ?? ''}`}
+      >
+        {prestationDuBon && (
+          <ReservationForm
+            context={context}
+            prestationId={prestationDuBon.id}
+            onSaved={() => {
+              context.queryClient.invalidateQueries({
+                queryKey: ['arbo-reservations', prestationDuBon.id]
+              });
+              setPrestationDuBon(null);
+            }}
+          />
+        )}
+      </Modal>
     </>
   );
 }
@@ -398,7 +489,11 @@ function PrestationsDeLaManifestation({
 export function Arborescence({ context }: { context: InvenTreePluginContext }) {
   const [recherche, setRecherche] = useState('');
   const [periode, setPeriode] = useState('futur');
+  const [client, setClient] = useState<string | null>(null);
   const [ouvertes, setOuvertes] = useState<Set<number>>(new Set());
+  const [manifestationDeLaPrestation, setManifestationDeLaPrestation] =
+    useState<Manifestation | null>(null);
+  const peutEcrireOrganisation = canWriteOrganisation(context);
 
   const params = useMemo(() => {
     const valeurs: Record<string, string> = {};
@@ -412,15 +507,38 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
       valeurs.periode = periode;
     }
 
-    return valeurs;
-  }, [recherche, periode]);
+    // « Retrouver les manifestations d'un client au téléphone » (09/09). La
+    // recherche texte porte sur le nom de la manifestation : sans ce filtre,
+    // il fallait connaître le nom de l'évènement pour retrouver le client.
+    if (client) {
+      valeurs.client = client;
+    }
 
-  // Clé possédée, préfixée (cf. `urlState`).
+    return valeurs;
+  }, [recherche, periode, client]);
+
+  // Le sélecteur de client se remplit une fois : la liste ne bouge pas au fil
+  // des filtres, et elle est partagée avec les autres écrans qui la lisent.
+  const clientsQuery = useQuery<Page<{ id: number; nom: string }>>(
+    {
+      queryKey: ['clients'],
+      queryFn: async () => {
+        const reponse = await context.api.get(CLIENTS_URL);
+        return reponse.data as Page<{ id: number; nom: string }>;
+      }
+    },
+    context.queryClient
+  );
+
+  // Clés possédées, préfixées (cf. `urlState`).
   const own = new URLSearchParams();
   if (periode !== 'futur') {
     own.set('arbo_periode', periode);
   }
-  syncOwnedParams(ownsKeys(['arbo_periode']), own);
+  if (client) {
+    own.set('arbo_client', client);
+  }
+  syncOwnedParams(ownsKeys(['arbo_periode', 'arbo_client']), own);
 
   const query = useQuery<Page<Manifestation>>(
     {
@@ -435,6 +553,29 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
 
   const manifestations = query.data?.results ?? [];
 
+  /** Une prestation vient de naître : la manifestation la montre aussitôt. */
+  function prestationCreee() {
+    const parente = manifestationDeLaPrestation;
+
+    setManifestationDeLaPrestation(null);
+
+    if (!parente) {
+      return;
+    }
+
+    context.queryClient.invalidateQueries({
+      queryKey: ['arbo-prestations', parente.id]
+    });
+    // Le compteur « N prestations » de la ligne parente vit dans la liste des
+    // manifestations : sans cette seconde invalidation, la prestation
+    // apparaît mais le compteur au-dessus d'elle ment.
+    context.queryClient.invalidateQueries({
+      queryKey: ['arbo-manifestations']
+    });
+    // Et on déplie, pour qu'elle se voie sans clic de plus.
+    setOuvertes((precedent) => new Set(precedent).add(parente.id));
+  }
+
   return (
     <Stack gap='sm'>
       <Title order={4} c={context.theme.primaryColor}>
@@ -448,6 +589,19 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
           value={recherche}
           onChange={(evenement) => setRecherche(evenement.currentTarget.value)}
           w={280}
+        />
+        <Select
+          placeholder='Tous les clients'
+          data={(clientsQuery.data?.results ?? []).map((c) => ({
+            value: String(c.id),
+            label: c.nom
+          }))}
+          value={client}
+          onChange={setClient}
+          clearable
+          searchable
+          w={220}
+          aria-label='Client'
         />
         <Radio.Group value={periode} onChange={setPeriode}>
           <Group gap='md'>
@@ -529,7 +683,13 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
                       </Text>
                     </Group>
                   </UnstyledButton>
-                  <Ajouter quoi='une prestation' />
+                  <Ajouter
+                    quoi='une prestation'
+                    autorise={peutEcrireOrganisation}
+                    onClick={() =>
+                      setManifestationDeLaPrestation(manifestation)
+                    }
+                  />
                 </Group>
               </Ligne>
 
@@ -543,6 +703,15 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
           );
         })}
       </Box>
+
+      <PrestationCreateModal
+        context={context}
+        opened={manifestationDeLaPrestation !== null}
+        manifestationId={manifestationDeLaPrestation?.id ?? null}
+        libelleAction='Créer la prestation'
+        onClose={() => setManifestationDeLaPrestation(null)}
+        onCreated={prestationCreee}
+      />
     </Stack>
   );
 }
