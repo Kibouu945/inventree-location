@@ -831,12 +831,15 @@ class ReservationSerializer(serializers.ModelSerializer):
 
 
 class RamassageSerializer(serializers.ModelSerializer):
-    """Sérialiseur pour SCRUM-89 : liste des ramassages à effectuer."""
-
     prestation_nom = serializers.CharField(source="prestation.nom", read_only=True)
     manifestation_nom = serializers.CharField(
         source="prestation.manifestation.nom",
         read_only=True,
+    )
+    client_nom = serializers.CharField(
+        source="prestation.manifestation.client.nom",
+        read_only=True,
+        default="",
     )
     demandeur_nom = serializers.SerializerMethodField()
     date_ramassage = serializers.DateTimeField(
@@ -847,10 +850,9 @@ class RamassageSerializer(serializers.ModelSerializer):
     nb_objets = serializers.SerializerMethodField()
     quantite_totale = serializers.SerializerMethodField()
     recap_par_vehicule = serializers.SerializerMethodField()
+    lignes = serializers.SerializerMethodField()
 
     class Meta:
-        """Configuration du serializer Ramassage."""
-
         model = Reservation
         fields = [
             "id",
@@ -858,6 +860,7 @@ class RamassageSerializer(serializers.ModelSerializer):
             "prestation",
             "prestation_nom",
             "manifestation_nom",
+            "client_nom",
             "demandeur",
             "demandeur_nom",
             "statut",
@@ -868,18 +871,14 @@ class RamassageSerializer(serializers.ModelSerializer):
             "nb_objets",
             "quantite_totale",
             "recap_par_vehicule",
+            "lignes",
         ]
 
     def get_demandeur_nom(self, obj):
-        """Nom lisible du demandeur."""
-
         return ReservationSerializer._user_label(obj.demandeur)
 
     def get_lieu(self, obj):
-        """Lieu de la prestation, ou None (ORG-02 : un seul lieu, nullable)."""
-
         lieu = obj.prestation.lieu
-
         if lieu is None:
             return None
 
@@ -892,37 +891,43 @@ class RamassageSerializer(serializers.ModelSerializer):
         }
 
     def get_nb_objets(self, obj):
-        """Nombre de lignes à ramasser.
-
-        `len()` sur le prefetch plutôt que `.count()`, qui repartirait en base
-        une fois par ligne de la liste.
-        """
-
         return len(lignes_a_ramasser(obj))
 
     def get_quantite_totale(self, obj):
-        """Quantité totale à ramasser."""
-
         total = 0
-
         for ligne in lignes_a_ramasser(obj):
             total += quantite_attendue_au_retour(ligne)
-
         return total
 
     def get_recap_par_vehicule(self, obj):
-        """Récap quantité totale par véhicule.
-
-        MVP : aucun modèle véhicule n'existe encore.
-        On retourne donc un regroupement "Non attribué".
-        """
-
         return [
             {
                 "vehicule": "Non attribué",
                 "quantite_totale": self.get_quantite_totale(obj),
             }
         ]
+
+    def get_lignes(self, obj):
+        lignes = []
+        for ligne in lignes_a_ramasser(obj):
+            quantites = quantites_du_retour(ligne)
+            lignes.append({
+                "id": ligne.id,
+                "part": ligne.part_id,
+                "part_nom": ligne.part.name,
+                "quantite_demandee": ligne.quantite_demandee,
+                "quantite_livree": ligne.quantite_livree,
+                "quantite_a_ramasser": quantite_attendue_au_retour(ligne),
+                "quantite_retournee": quantites["revenue"],
+                "quantite_ramassee": quantites["ok"],
+                "quantite_sav": quantites["casse"],
+                "quantite_detruite": quantites["detruit"],
+                "quantite_manquante": quantites["manquant"],
+                "facturer_client": facturer_le_client(ligne),
+                "etat_retour": ligne.etat_retour,
+                "commentaire": ligne.commentaire,
+            })
+        return lignes
 
 
 class BonRamassageSerializer(RamassageSerializer):
@@ -1157,23 +1162,24 @@ class LieuSerializer(serializers.ModelSerializer):
 
 
 class DeliveryLigneSerializer(serializers.ModelSerializer):
-    """Ligne d'une livraison, avec le nom de l'article (lecture seule)."""
-
     part_name = serializers.CharField(source="part.name", read_only=True)
     is_virtual = serializers.SerializerMethodField()
 
     class Meta:
-        """Configuration du serializer DeliveryLigne."""
-
         model = LigneReservation
-        fields = ["id", "part", "part_name", "quantite_demandee", "is_virtual"]
+        fields = [
+            "id",
+            "part",
+            "part_name",
+            "quantite_demandee",
+            "quantite_livree",
+            "quantite_retournee",
+            "is_virtual",
+        ]
         read_only_fields = fields
 
     def get_is_virtual(self, obj) -> bool:
-        """Vrai pour un service, que le bon liste à part du matériel."""
-
         rentable = getattr(obj.part, "rentable_info", None)
-
         return bool(rentable and rentable.is_virtual)
 
 
@@ -1214,16 +1220,13 @@ class LivraisonStatusLogSerializer(serializers.ModelSerializer):
 
 
 class DeliverySerializer(serializers.ModelSerializer):
-    """Vue « tournée livreur » d'une réservation validée (US livreur).
-
-    Réutilise `Reservation` en lecture seule, enrichi des informations dont
-    un livreur a besoin pour organiser sa tournée : lieu géolocalisé,
-    contact de l'organisateur, matériel et quantité totale. Sérialiseur
-    dédié (plutôt qu'extension de `ReservationSerializer`) pour ne pas
-    changer la forme du payload consommé par le formulaire de réservation.
-    """
-
     prestation_nom = serializers.CharField(source="prestation.nom", read_only=True)
+    manifestation_nom = serializers.CharField(
+        source="prestation.manifestation.nom", read_only=True, default=""
+    )
+    client_nom = serializers.CharField(
+        source="prestation.manifestation.client.nom", read_only=True, default=""
+    )
     demandeur_nom = serializers.SerializerMethodField()
     lieu_detail = LieuSerializer(source="prestation.lieu", read_only=True)
     organisateur_nom = serializers.SerializerMethodField()
@@ -1235,14 +1238,14 @@ class DeliverySerializer(serializers.ModelSerializer):
     livraison_status_logs = LivraisonStatusLogSerializer(many=True, read_only=True)
 
     class Meta:
-        """Configuration du serializer Delivery."""
-
         model = Reservation
         fields = [
             "id",
             "numero",
             "statut",
             "prestation_nom",
+            "manifestation_nom",
+            "client_nom",
             "demandeur_nom",
             "lieu_detail",
             "organisateur_nom",

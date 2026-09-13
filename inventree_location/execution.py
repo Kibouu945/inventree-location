@@ -346,6 +346,7 @@ def tournee_du_jour(jour, queryset=None) -> dict:
                 "part": ligne.part_id,
                 "part_nom": ligne.part.name,
                 "quantite_demandee": ligne.quantite_demandee,
+                "quantite_livree": ligne.quantite_livree,
                 "quantite_attendue": attendue,
                 "quantite_restante": quantite_restant_a_livrer(ligne),
             })
@@ -366,6 +367,7 @@ def tournee_du_jour(jour, queryset=None) -> dict:
             "etat_livraison": reservation.etat_livraison,
             "prestation": prestation.pk,
             "prestation_nom": prestation.nom,
+            "manifestation_nom": prestation.manifestation.nom if getattr(prestation, "manifestation", None) else "",
             "client_nom": _nom_du_client(prestation),
             "date_retrait_prevue": reservation.date_retrait_prevue,
             "lignes": lignes,
