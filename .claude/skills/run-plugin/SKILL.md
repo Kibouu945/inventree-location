@@ -30,6 +30,45 @@ TOKEN=$(curl -s -u admin:admin123 http://localhost:8000/api/user/token/ \
 
 Endpoints du plugin sous `/plugin/inventree-location/`.
 
+## 1 bis. Après un `make clean`, la stack ne revient PAS seule
+
+`down -v` efface la base, donc tout ce qui vit en base : l'activation du
+plugin, les interrupteurs plugin d'InvenTree, les droits des rôles et les
+dispositions de tableau de bord. L'API répond, les écrans natifs s'affichent,
+et **aucun widget du plugin n'existe** — c'est le symptôme qui a fait conclure
+au client, en août 2026, qu'il avait « InvenTree de base ».
+
+```bash
+make clean && make up                       # attendre l'API (~25 s)
+
+# a) les six interrupteurs plugin + l'activation, en base
+make manage cmd='shell -c "
+from common.models import InvenTreeSetting
+for k in [\"ENABLE_PLUGINS_URL\",\"ENABLE_PLUGINS_NAVIGATION\",\"ENABLE_PLUGINS_APP\",
+          \"ENABLE_PLUGINS_SCHEDULE\",\"ENABLE_PLUGINS_EVENTS\",\"ENABLE_PLUGINS_INTERFACE\"]:
+    InvenTreeSetting.set_setting(k, True, None)
+from plugin.models import PluginConfig
+p = PluginConfig.objects.get(key=\"inventree-location\"); p.active = True; p.save()
+"'
+docker compose restart inventree            # recharge le registre, applique les migrations
+
+# b) les données, les droits, les tableaux de bord
+make manage cmd="seed_demo"
+make manage cmd="provision_role_permissions"   # sinon 403 sur /api/part/ pour TOUS les rôles
+make manage cmd="provision_dashboards"         # sinon le tableau de bord admin est vide
+```
+
+`provision_role_permissions` est celle qu'on oublie, et son absence est
+sournoise : les écrans du plugin fonctionnent, mais la barre de navigation
+native se réduit à « Tableau de bord », le filtre Catégories du catalogue reste
+vide et la colonne Catégorie affiche « — » pour tout le monde. Vérification en
+une ligne :
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Token $TOKEN" \
+  http://localhost:8000/api/part/category/     # 200 attendu, sauf livreur (403 voulu)
+```
+
 ## 2. Déployer un changement — le piège nº1
 
 **Après TOUTE modification, il faut redémarrer le conteneur `inventree`.**
@@ -230,3 +269,19 @@ b.statut = \"livree\"; b.save()
 make manage cmd="projeter_execution"
 make manage cmd="verifier_projection"   # doit dire « Aucune divergence. »
 ```
+
+### `roles.mjs` — un poste par rôle
+
+Se connecte successivement avec les sept comptes de démonstration, compare les
+onglets réellement rendus à ceux déclarés dans `postes/definitions.tsx`, **ouvre
+chaque écran** — un écran qui répond 403 pour un rôle ne se voit qu'en le
+montant —, compte les actions d'écriture offertes et relève barre de navigation
+native et erreurs.
+
+Attendu : six rôles au vert, zéro erreur. `demo_sav` n'a **pas de poste** —
+aucun écran ne lui est déclaré, son widget reste vide. C'est un manque connu,
+pas une panne.
+
+C'est ce scénario qui a rendu visible l'oubli de `provision_role_permissions`
+sur une base fraîche : les sept comptes accumulaient des 403 sur
+`/api/part/category/` sans qu'aucun écran ne paraisse cassé.
