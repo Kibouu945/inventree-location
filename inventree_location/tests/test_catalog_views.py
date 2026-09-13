@@ -17,17 +17,18 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from inventree_location.models import (
-    Groupe,
     LignePrestation,
     LigneReservation,
     Lieu,
-    Manifestation,
     Prestation,
     RentableItem,
     Reservation,
     StatutReservation,
 )
-from inventree_location.tests.factories import mettre_en_stock
+from inventree_location.tests.factories import (
+    make_manifestation,
+    mettre_en_stock,
+)
 from inventree_location.views import (
     CatalogPagination,
     CatalogPartDetailView,
@@ -83,6 +84,96 @@ def parts(db, categorie):
 
 def _names(response):
     return {row["name"] for row in response.data["results"]}
+
+
+class TestCatalogCategoryCascade:
+    """Filtrer sur une catégorie doit ramener ses sous-catégories.
+
+    Recette Tassin du 07/09/2026, remarque 4 : « on aurait gagné en ergonomie
+    et efficacité à reprendre le type de recherche fait pour le catalogue avec
+    les libellés et les catégories, les sous-catégories ». Le filtre était
+    plat : demander « Mobilier » ne rendait que les articles rangés
+    directement dedans, et paraissait donc ne rien trouver dès que
+    l'arborescence était un peu profonde.
+    """
+
+    @pytest.fixture
+    def arbre(self, db):
+        mobilier = PartCategory.objects.create(name="Mobilier")
+        tables = PartCategory.objects.create(name="Tables", parent=mobilier)
+        pliantes = PartCategory.objects.create(name="Pliantes", parent=tables)
+        couchage = PartCategory.objects.create(name="Couchage")
+
+        return {
+            "mobilier": mobilier,
+            "tables": tables,
+            "pliantes": pliantes,
+            "couchage": couchage,
+            "direct": Part.objects.create(name="Buffet", category=mobilier),
+            "enfant": Part.objects.create(name="Table brasserie", category=tables),
+            "petit_enfant": Part.objects.create(
+                name="Table pliante 8 pers", category=pliantes
+            ),
+            "ailleurs": Part.objects.create(name="Tapis de sol", category=couchage),
+        }
+
+    @pytest.mark.django_db
+    def test_categorie_ramene_toute_la_branche(self, factory, user, arbre):
+        request = factory.get(CATALOG_URL, {"categories": str(arbre["mobilier"].pk)})
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert _names(response) == {
+            "Buffet",
+            "Table brasserie",
+            "Table pliante 8 pers",
+        }
+
+    @pytest.mark.django_db
+    def test_sous_categorie_ne_remonte_pas_vers_le_parent(
+        self, factory, user, arbre
+    ):
+        """La cascade descend, elle ne monte pas."""
+
+        request = factory.get(CATALOG_URL, {"categories": str(arbre["tables"].pk)})
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        assert _names(response) == {"Table brasserie", "Table pliante 8 pers"}
+
+    @pytest.mark.django_db
+    def test_categorie_inconnue_ne_rend_rien(self, factory, user, arbre):
+        """Un identifiant absent reste dans le filtre plutôt que d'être ignoré.
+
+        Le laisser tomber élargirait le résultat au lieu de le restreindre :
+        l'utilisateur verrait tout le catalogue en croyant filtrer.
+        """
+
+        request = factory.get(CATALOG_URL, {"categories": "999999"})
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        assert response.data["count"] == 0
+
+    @pytest.mark.django_db
+    def test_plusieurs_branches_sadditionnent(self, factory, user, arbre):
+        request = factory.get(
+            CATALOG_URL,
+            {"categories": f"{arbre['tables'].pk},{arbre['couchage'].pk}"},
+        )
+        force_authenticate(request, user=user)
+
+        response = CatalogPartListView.as_view()(request)
+
+        assert _names(response) == {
+            "Table brasserie",
+            "Table pliante 8 pers",
+            "Tapis de sol",
+        }
 
 
 class TestCatalogRentableFiltering:
@@ -316,13 +407,10 @@ class TestCatalogStockAvailable:
         # Heure locale : cf. la fixture `base` de test_stock.py.
         now = timezone.localtime().replace(hour=8, minute=0, second=0, microsecond=0)
         user = User.objects.create_user(username="carla", password="pwd12345")
-        groupe = Groupe.objects.create(nom="Jambville", code="JAM")
-        manifestation = Manifestation.objects.create(
+        manifestation = make_manifestation(
             nom="Camp",
             date_debut=now,
             date_fin=now + timedelta(days=10),
-            organisateur=user,
-            groupe=groupe,
         )
         lieu = Lieu.objects.create(nom="Terrain")
         return {

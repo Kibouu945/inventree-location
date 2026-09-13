@@ -70,7 +70,6 @@ describe('canWriteReservations', () => {
   it.each([
     ['admin', true],
     ['gestionnaire', true],
-    ['organisateur', true],
     ['magasinier', false],
     ['livreur', false],
     ['sav', false],
@@ -90,7 +89,6 @@ describe('canCheckinReturns', () => {
     ['admin', true],
     ['gestionnaire', false],
     ['magasinier', true],
-    ['organisateur', false],
     ['livreur', false],
     ['sav', false],
     ['lecteur', false]
@@ -105,7 +103,6 @@ describe('canWriteCatalog', () => {
   it.each([
     ['admin', true],
     ['gestionnaire', true],
-    ['organisateur', false],
     ['magasinier', false],
     ['livreur', false],
     ['lecteur', false]
@@ -150,7 +147,6 @@ describe('canManageBackOffice', () => {
     ['gestionnaire', false],
     ['magasinier', false],
     ['livreur', false],
-    ['organisateur', false],
     ['sav', false],
     ['lecteur', false],
     ['acheteur', false]

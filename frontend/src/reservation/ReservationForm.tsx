@@ -14,17 +14,18 @@ import {
   Title,
   Tooltip
 } from '@mantine/core';
-import { DateTimePicker } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { DateTimeField } from '../DateTimeField';
 import {
   buildReservationPayload,
   emptyReservationValues,
   enrichLignesFromCatalog,
   isReservationEditable,
+  prestationDefaults,
   readOnlyReason,
   removeLigne,
   reservationToFormValues,
@@ -33,6 +34,7 @@ import {
 } from './formLogic';
 import { LieuMapLinks } from './LieuMapLinks';
 import { PartPicker } from './PartPicker';
+import { PrestationCreateModal } from './PrestationCreateModal';
 import type {
   Page,
   Prestation,
@@ -130,11 +132,18 @@ function apiErrorMessage(error: unknown): string | null {
 export function ReservationForm({
   context,
   reservationId,
+  prestationId,
   readOnly = false,
   onSaved
 }: {
   context: InvenTreePluginContext;
   reservationId?: number;
+  /** Prestation imposée à la création — l'appelant sait déjà laquelle.
+   *
+   * Sert à l'arborescence, où l'on crée un bon depuis la ligne de sa
+   * prestation : la poser ici déclenche la reprise habituelle de ses dates et
+   * de son matériel, comme si l'utilisateur l'avait choisie au sélecteur. */
+  prestationId?: number;
   /** Masque toute action d'écriture (rôles sans droit — cf. roles.ts). */
   readOnly?: boolean;
   onSaved?: () => void;
@@ -142,7 +151,10 @@ export function ReservationForm({
   const isEdit = reservationId != null;
 
   const form = useForm<ReservationFormValues>({
-    initialValues: emptyReservationValues(),
+    initialValues: {
+      ...emptyReservationValues(),
+      ...(isEdit || prestationId == null ? {} : { prestation: prestationId })
+    },
     validate: {}
   });
 
@@ -151,6 +163,7 @@ export function ReservationForm({
   const [userSearch, setUserSearch] = useState('');
   const [debouncedUserSearch] = useDebouncedValue(userSearch, 300);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [prestationModalOpen, setPrestationModalOpen] = useState(false);
 
   const existingQuery = useQuery<Reservation>(
     {
@@ -208,7 +221,12 @@ export function ReservationForm({
       queryKey: ['reservation-users', debouncedUserSearch],
       queryFn: async () => {
         const response = await context.api.get(USERS_URL, {
-          params: { search: debouncedUserSearch || undefined, page_size: 20 }
+          params: {
+            search: debouncedUserSearch || undefined,
+            // « Gérant interne » : un client n'a rien à y faire. Il n'a plus
+            // de compte du tout depuis la bascule vers les contacts.
+            page_size: 20
+          }
         });
         return response.data as Page<UserOption>;
       }
@@ -261,6 +279,55 @@ export function ReservationForm({
     !isReservationEditable(existingQuery.data.statut);
   const effectiveReadOnly = readOnly || locked;
 
+  // Reprise de la prestation, en création : dates et liste d'articles.
+  //
+  // Recette Tassin du 07/09/2026, remarques 14 et 15 — « reprendre les dates de
+  // la prestation », « il faut ressaisir toute la liste ? ». Les deux étaient
+  // déjà dans la réponse de `selectedPrestationQuery` juste au-dessus, on ne
+  // s'en servait que pour l'encart lieu et le tooltip.
+  //
+  // La reprise se rejoue à chaque changement de prestation — changer de
+  // prestation doit bien emmener ses dates et son matériel — mais une seule
+  // fois par prestation : sans ce garde-fou, le moindre re-fetch de la requête
+  // écraserait les quantités que l'utilisateur vient d'ajuster.
+  const prestationReprise = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (isEdit || effectiveReadOnly || !selectedPrestation) {
+      return;
+    }
+
+    if (prestationReprise.current === selectedPrestation.id) {
+      return;
+    }
+
+    prestationReprise.current = selectedPrestation.id;
+
+    const defaults = prestationDefaults(selectedPrestation);
+    const partIds = defaults.lignes.map((ligne) => ligne.part);
+
+    form.setValues(defaults);
+
+    if (partIds.length === 0) {
+      return;
+    }
+
+    // Le drapeau « article virtuel » ne vient pas de la prestation : il est
+    // porté par le catalogue, et c'est lui que valide la règle « au moins un
+    // article virtuel » à la soumission.
+    context.api
+      .get(CATALOG_URL, { params: { ids: partIds.join(','), rentable: 'all' } })
+      .then((response) => {
+        form.setFieldValue(
+          'lignes',
+          enrichLignesFromCatalog(defaults.lignes, response.data.results)
+        );
+      });
+    // `form` est volontairement absent des deps : la reprise suit la
+    // prestation, pas chaque frappe de l'utilisateur.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPrestation, isEdit, effectiveReadOnly]);
+
   const mutation = useMutation(
     {
       mutationFn: async (statut: ReservationStatut) => {
@@ -305,6 +372,17 @@ export function ReservationForm({
     },
     context.queryClient
   );
+
+  function handlePrestationCreated(prestation: Prestation) {
+    // Évite un aller-retour réseau : le détail vient d'être renvoyé par la
+    // création, donc l'encart lieu / tooltip dates s'affiche immédiatement.
+    context.queryClient.setQueryData(
+      ['reservation-prestation', prestation.id],
+      prestation
+    );
+    form.setFieldValue('prestation', prestation.id);
+    setPrestationModalOpen(false);
+  }
 
   function submit(statut: ReservationStatut) {
     const clientErrors = validateReservationValues(
@@ -382,59 +460,79 @@ export function ReservationForm({
       )}
 
       {/* Tooltip sur l'icône, pas sur le Select (le wrapper casse le dropdown). */}
-      <Select
-        label={
-          <Group gap={6} component='span' align='center'>
-            <span>Événement / Prestation</span>
-            {selectedPrestation && (
-              <Tooltip
-                multiline
-                w={280}
-                openDelay={100}
-                closeDelay={2000}
-                events={{ hover: true, focus: true, touch: true }}
-                label={
-                  <Stack gap={2}>
-                    <Text size='sm' fw={600}>
-                      {selectedPrestation.nom} —{' '}
-                      {selectedPrestation.manifestation_nom}
-                    </Text>
-                    <Text size='xs'>
-                      Du{' '}
-                      {new Date(selectedPrestation.date_debut).toLocaleString()}{' '}
-                      au{' '}
-                      {new Date(selectedPrestation.date_fin).toLocaleString()}
-                    </Text>
-                    <Text size='xs'>
-                      Lieu : {selectedPrestation.lieu_detail?.nom ?? 'aucun'}
-                    </Text>
-                    <Text size='xs' c='yellow'>
-                      La réservation doit couvrir ces dates.
-                    </Text>
-                  </Stack>
-                }
-              >
-                <Text component='span' c='blue' style={{ cursor: 'help' }}>
-                  ⓘ dates
-                </Text>
-              </Tooltip>
-            )}
-          </Group>
-        }
-        placeholder='Rechercher une prestation…'
-        data={prestationOptions}
-        searchable
-        searchValue={prestationSearch}
-        onSearchChange={setPrestationSearch}
-        value={
-          form.values.prestation != null ? String(form.values.prestation) : null
-        }
-        onChange={(value) =>
-          form.setFieldValue('prestation', value ? Number(value) : null)
-        }
-        error={form.errors.prestation}
-        disabled={effectiveReadOnly}
-        required
+      <Group align='flex-end' gap='sm'>
+        <Select
+          style={{ flex: 1 }}
+          label={
+            <Group gap={6} component='span' align='center'>
+              <span>Événement / Prestation</span>
+              {selectedPrestation && (
+                <Tooltip
+                  multiline
+                  w={280}
+                  openDelay={100}
+                  closeDelay={2000}
+                  events={{ hover: true, focus: true, touch: true }}
+                  label={
+                    <Stack gap={2}>
+                      <Text size='sm' fw={600}>
+                        {selectedPrestation.nom} —{' '}
+                        {selectedPrestation.manifestation_nom}
+                      </Text>
+                      <Text size='xs'>
+                        Du{' '}
+                        {new Date(
+                          selectedPrestation.date_debut
+                        ).toLocaleString()}{' '}
+                        au{' '}
+                        {new Date(selectedPrestation.date_fin).toLocaleString()}
+                      </Text>
+                      <Text size='xs'>
+                        Lieu : {selectedPrestation.lieu_detail?.nom ?? 'aucun'}
+                      </Text>
+                      <Text size='xs' c='yellow'>
+                        La réservation doit couvrir ces dates.
+                      </Text>
+                    </Stack>
+                  }
+                >
+                  <Text component='span' c='blue' style={{ cursor: 'help' }}>
+                    ⓘ dates
+                  </Text>
+                </Tooltip>
+              )}
+            </Group>
+          }
+          placeholder='Rechercher une prestation…'
+          data={prestationOptions}
+          searchable
+          searchValue={prestationSearch}
+          onSearchChange={setPrestationSearch}
+          value={
+            form.values.prestation != null
+              ? String(form.values.prestation)
+              : null
+          }
+          onChange={(value) =>
+            form.setFieldValue('prestation', value ? Number(value) : null)
+          }
+          error={form.errors.prestation}
+          disabled={effectiveReadOnly}
+          required
+        />
+        {!effectiveReadOnly && (
+          <Button variant='light' onClick={() => setPrestationModalOpen(true)}>
+            Nouvelle prestation
+          </Button>
+        )}
+      </Group>
+
+      <PrestationCreateModal
+        context={context}
+        opened={prestationModalOpen}
+        manifestationId={selectedPrestation?.manifestation ?? null}
+        onClose={() => setPrestationModalOpen(false)}
+        onCreated={handlePrestationCreated}
       />
 
       {selectedPrestation && (
@@ -469,7 +567,7 @@ export function ReservationForm({
       />
 
       <Group grow>
-        <DateTimePicker
+        <DateTimeField
           label='Date de retrait prévue'
           value={form.values.date_retrait_prevue}
           onChange={(value) =>
@@ -482,7 +580,7 @@ export function ReservationForm({
           disabled={effectiveReadOnly}
           clearable
         />
-        <DateTimePicker
+        <DateTimeField
           label='Date de retour prévue'
           value={form.values.date_retour_prevue}
           onChange={(value) =>

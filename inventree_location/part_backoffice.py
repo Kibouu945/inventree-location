@@ -178,6 +178,14 @@ class PartBackOfficeSerializer(serializers.Serializer):
     # RentableItem
     is_rentable = serializers.BooleanField(required=False, default=True)
     consommable = serializers.BooleanField(required=False, default=False)
+    # Poids unitaire (ADM-02). Nul = inconnu, jamais zéro.
+    poids = serializers.DecimalField(
+        max_digits=8,
+        decimal_places=3,
+        required=False,
+        allow_null=True,
+        min_value=0,
+    )
     seuil_alerte_bas = serializers.IntegerField(
         required=False,
         allow_null=True,
@@ -212,6 +220,7 @@ class PartBackOfficeSerializer(serializers.Serializer):
             "stock_total": get_part_total_stock(part),
             "is_rentable": bool(rentable_item.is_rentable) if rentable_item else False,
             "consommable": bool(rentable_item.consommable) if rentable_item else False,
+            "poids": rentable_item.poids if rentable_item else None,
             "seuil_alerte_bas": rentable_item.seuil_alerte_bas
             if rentable_item
             else None,
@@ -290,6 +299,7 @@ class PartBackOfficeSerializer(serializers.Serializer):
             "is_rentable": validated_data.pop("is_rentable", True),
             "consommable": validated_data.pop("consommable", False),
             "is_virtual": virtual,
+            "poids": validated_data.pop("poids", None),
             "seuil_alerte_bas": validated_data.pop("seuil_alerte_bas", None),
             "seuil_alerte_haut": validated_data.pop("seuil_alerte_haut", None),
             "alertes_desactivees": validated_data.pop("alertes_desactivees", False),
@@ -331,6 +341,7 @@ class PartBackOfficeSerializer(serializers.Serializer):
         rentable_fields = [
             "is_rentable",
             "consommable",
+            "poids",
             "seuil_alerte_bas",
             "seuil_alerte_haut",
             "alertes_desactivees",

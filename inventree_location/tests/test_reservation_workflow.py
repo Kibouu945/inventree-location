@@ -17,8 +17,6 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from inventree_location.models import (
-    Groupe,
-    Manifestation,
     Prestation,
     Reservation,
     ReservationStatusLog,
@@ -29,6 +27,7 @@ from inventree_location.services.workflow_service import (
     transition_reservation_status,
 )
 from inventree_location.views import ReservationTransitionView
+from inventree_location.tests.factories import make_manifestation
 
 User = get_user_model()
 
@@ -54,13 +53,10 @@ def user(db):
 @pytest.fixture
 def prestation(db, user):
     now = timezone.now().replace(microsecond=0)
-    groupe = Groupe.objects.create(nom="Jambville", code="JAM")
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp été 2026",
         date_debut=now,
         date_fin=now + timedelta(days=7),
-        organisateur=user,
-        groupe=groupe,
     )
     return Prestation.objects.create(
         manifestation=manifestation,
@@ -282,24 +278,24 @@ class TestTransitionEndpoint:
 class TestArbitrageRbac:
     """Seuls gestionnaire / admin peuvent valider ou refuser (arbitrage)."""
 
-    def _organisateur(self):
+    def _lecteur(self):
         from django.contrib.auth.models import Group
 
         from inventree_location import roles
 
-        account = User.objects.create_user(username="orga", password="pwd12345")
-        account.groups.add(Group.objects.get(name=roles.ORGANISATEUR))
+        account = User.objects.create_user(username="lecteur", password="pwd12345")
+        account.groups.add(Group.objects.get(name=roles.LECTEUR))
         return account
 
     @pytest.mark.parametrize("cible", ["validee", "refusee"])
-    def test_organisateur_ne_peut_pas_arbitrer(self, factory, make_reservation, cible):
+    def test_un_role_sans_arbitrage_est_refuse(self, factory, make_reservation, cible):
         reservation = make_reservation(StatutReservation.SOUMISE)
         request = factory.patch(
             TRANSITION_URL.format(pk=reservation.pk),
             {"statut": cible},
             format="json",
         )
-        force_authenticate(request, user=self._organisateur())
+        force_authenticate(request, user=self._lecteur())
 
         response = ReservationTransitionView.as_view()(request, pk=reservation.pk)
 

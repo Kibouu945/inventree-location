@@ -14,6 +14,7 @@ export interface CatalogPart {
   consommable: boolean;
   is_virtual: boolean;
   stock_total?: number;
+  poids?: string | null;
   seuil_alerte_bas?: number | null;
   seuil_alerte_haut?: number | null;
 }

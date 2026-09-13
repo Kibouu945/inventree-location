@@ -1,6 +1,7 @@
 """API serializers for the InvenTreeLocation plugin."""
 
 import json
+import logging
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -8,7 +9,6 @@ from urllib.request import Request, urlopen
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -19,8 +19,11 @@ from .conflicts import (
     register_stock_conflict_history,
 )
 from .models import (
-    Groupe,
+    EtatLivraison,
+    Client,
+    Contact,
     LignePrestation,
+    LivraisonStatusLog,
     LigneReservation,
     Lieu,
     Manifestation,
@@ -30,19 +33,24 @@ from .models import (
     RentableItem,
     ReturnIncident,
     ReturnIncidentType,
+    SavTicket,
     StatutManifestation,
     StatutReservation,
+    StatutPrestation,
 )
-from .profiles import user_phone
 from .services.workflow_service import transition_reservation_status
 from .stock import compute_prestation_stock
 from .ramassage import lignes_a_ramasser
 from .retours import (
     appliquer_etat_retour,
     facturer_le_client,
+    quantite_attendue_au_retour,
     quantites_du_retour,
 )
 from .sav import get_real_available_stock
+
+
+logger = logging.getLogger(__name__)
 
 
 # Produit français : on restreint le géocodage à la France pour éviter les
@@ -172,6 +180,12 @@ class LigneReservationSerializer(serializers.ModelSerializer):
     quantite_retour_manquant = serializers.SerializerMethodField()
     quantite_retour_casse = serializers.SerializerMethodField()
 
+    # Pour l'arborescence, qui affiche « Sono YAMAHA / Réf. 1516 ». Suppose la
+    # Part préchargée (`prefetch_related("lignes__part")`), sinon une requête
+    # par ligne.
+    part_name = serializers.CharField(source="part.name", read_only=True)
+    part_noi = serializers.CharField(source="part.IPN", read_only=True)
+
     def _quantites(self, obj):
         """Une seule reconstitution par ligne, mémorisée sur l'instance."""
 
@@ -214,6 +228,8 @@ class LigneReservationSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "part",
+            "part_name",
+            "part_noi",
             "quantite_demandee",
             "quantite_livree",
             "quantite_retournee",
@@ -299,39 +315,71 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+        # Le validateur d'unicité déduit de `incident_unique_par_ligne_et_type`
+        # est écarté au profit de `_refuser_le_doublon` : il passe avant
+        # `validate()` et son message anglais ne nomme pas l'enregistrement
+        # fautif. La contrainte reste le filet en base.
+        validators = []
 
     def validate(self, attrs):
-        """Le cumul des incidents d'une ligne ne peut pas dépasser sa quantité.
+        """Seul le manquant est plafonné par la quantité sortie.
 
-        Le plafond porte sur le cumul, pas sur l'incident isolé : deux
-        signalements de 3 sur une ligne de 3 passaient tous les deux, et la
-        ligne se retrouvait avec 6 unités en incident pour 3 engagées.
+        Le cassé et le détruit ne le sont pas : du matériel circule entre
+        lieux, et douze objets rendus cassés pour dix sortis est un constat
+        possible qu'il faut pouvoir enregistrer (R36). Le manquant, lui, ne
+        peut pas dépasser ce qui est parti — on ne perd pas ce qu'on n'a pas
+        livré. Règle arrêtée en recette le 11/09.
         """
 
         line = attrs.get("line") or getattr(self.instance, "line", None)
 
         if line is not None:
+            type_incident = attrs.get("type") or getattr(self.instance, "type", None)
             qty = attrs.get("qty", getattr(self.instance, "qty", 0))
-            # `quantite_livree` n'est renseignée par aucun endpoint à ce jour :
-            # le plafond retombe alors sur la quantité demandée.
-            max_qty = line.quantite_livree or line.quantite_demandee
 
-            autres = line.incidents.all()
+            if type_incident == ReturnIncidentType.MISSING:
+                max_qty = quantite_attendue_au_retour(line)
 
-            if self.instance is not None:
-                autres = autres.exclude(pk=self.instance.pk)
+                if qty > max_qty:
+                    raise serializers.ValidationError({
+                        "qty": (
+                            f"La quantité manquante ({qty}) dépasse la "
+                            f"quantité sortie ({max_qty}) : on ne peut pas "
+                            "perdre plus que ce qui est parti."
+                        )
+                    })
 
-            deja_signale = autres.aggregate(total=Sum("qty"))["total"] or 0
-
-            if deja_signale + qty > max_qty:
-                raise serializers.ValidationError({
-                    "qty": (
-                        f"La quantité signalée ({deja_signale + qty} au total) "
-                        f"dépasse la quantité disponible ({max_qty})."
-                    )
-                })
+            self._refuser_le_doublon(line, attrs)
 
         return attrs
+
+    def _refuser_le_doublon(self, line, attrs):
+        """Un seul incident par ligne et par nature.
+
+        Le registre porte un total par nature : le geste correct est d'ajuster
+        l'enregistrement existant, pas d'en créer un second. Le message le
+        nomme, là où le validateur automatique de DRF sort un
+        « must make a unique set » en anglais qui ne dit pas lequel.
+        """
+
+        type_incident = attrs.get("type") or getattr(self.instance, "type", None)
+        autres = line.incidents.filter(type=type_incident)
+
+        if self.instance is not None:
+            autres = autres.exclude(pk=self.instance.pk)
+
+        existant = autres.first()
+
+        if existant is None:
+            return
+
+        raise serializers.ValidationError({
+            "type": (
+                f"Un incident « {existant.get_type_display()} » existe déjà sur "
+                f"cette ligne (#{existant.pk}, {existant.qty} unité(s)) : "
+                "modifiez-le au lieu d'en créer un second."
+            )
+        })
 
     def create(self, validated_data):
         """Crée l'incident et met à jour l'état de retour de la ligne."""
@@ -698,7 +746,17 @@ class ReservationSerializer(serializers.ModelSerializer):
         return reservation
 
     def _replace_lignes(self, reservation, lignes_data):
-        """Remplace l'intégralité des lignes de la réservation."""
+        """Remplace l'intégralité des lignes de la réservation.
+
+        La suppression **cascade** sur le registre d'incidents et sur les
+        tickets SAV, y compris les tickets ouverts que le stock réel lit
+        encore. La vue refuse déjà l'édition au-delà de « soumise », mais
+        l'endpoint des incidents accepte n'importe quelle ligne quel que soit
+        le statut du bon : un brouillon peut donc porter un constat, et le
+        perdait sans un mot. D'où le refus explicite.
+        """
+
+        self._refuser_si_le_retour_est_constate(reservation)
 
         reservation.lignes.all().delete()
 
@@ -706,6 +764,34 @@ class ReservationSerializer(serializers.ModelSerializer):
             LigneReservation(reservation=reservation, **ligne_data)
             for ligne_data in lignes_data
         ])
+
+    @staticmethod
+    def _refuser_si_le_retour_est_constate(reservation):
+        """Refuse le remplacement des lignes quand un retour a été constaté."""
+
+        incidents = ReturnIncident.objects.filter(line__reservation=reservation).count()
+        tickets = SavTicket.objects.filter(
+            ligne_reservation__reservation=reservation
+        ).count()
+
+        if not incidents and not tickets:
+            return
+
+        constats = []
+
+        if incidents:
+            constats.append(f"{incidents} incident(s) de retour")
+
+        if tickets:
+            constats.append(f"{tickets} ticket(s) SAV")
+
+        raise serializers.ValidationError({
+            "lignes": (
+                f"Ce bon porte {' et '.join(constats)} : remplacer ses lignes "
+                "les supprimerait. Modifiez la quantité de la ligne concernée, "
+                "ou traitez le retour avant de rouvrir le bon."
+            )
+        })
 
     def _register_conflict_history(self, reservation):
         """Journalise les conflits détectés, qu'ils bloquent ou non (SCRUM-110).
@@ -820,7 +906,7 @@ class RamassageSerializer(serializers.ModelSerializer):
         total = 0
 
         for ligne in lignes_a_ramasser(obj):
-            total += ligne.quantite_livree or ligne.quantite_demandee or 0
+            total += quantite_attendue_au_retour(ligne)
 
         return total
 
@@ -868,7 +954,7 @@ class BonRamassageSerializer(RamassageSerializer):
                 "part_nom": ligne.part.name,
                 "quantite_demandee": ligne.quantite_demandee,
                 "quantite_livree": ligne.quantite_livree,
-                "quantite_a_ramasser": ligne.quantite_livree or ligne.quantite_demandee,
+                "quantite_a_ramasser": quantite_attendue_au_retour(ligne),
                 "quantite_retournee": quantites["revenue"],
                 "quantite_ramassee": quantites["ok"],
                 "quantite_sav": quantites["casse"],
@@ -901,6 +987,7 @@ class RentableItemSerializer(serializers.ModelSerializer):
             "is_virtual",
             "caution",
             "valeur_remplacement",
+            "poids",
             "seuil_alerte_bas",
             "seuil_alerte_haut",
         ]
@@ -989,6 +1076,7 @@ class LieuSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "nom",
+            "description",
             "adresse",
             "latitude",
             "longitude",
@@ -1089,6 +1177,42 @@ class DeliveryLigneSerializer(serializers.ModelSerializer):
         return bool(rentable and rentable.is_virtual)
 
 
+class LivraisonStatusLogSerializer(serializers.ModelSerializer):
+    """Une ligne du journal d'état d'une livraison (US-19)."""
+
+    to_etat_display = serializers.SerializerMethodField()
+    changed_by_nom = serializers.SerializerMethodField()
+
+    class Meta:
+        """Configuration du serializer de journal de livraison."""
+
+        model = LivraisonStatusLog
+        fields = [
+            "id",
+            "from_etat",
+            "to_etat",
+            "to_etat_display",
+            "changed_by_nom",
+            "commentaire",
+            "photo",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_to_etat_display(self, obj):
+        """Libellé lisible du nouvel état ; vide = remise dans le pool."""
+
+        if not obj.to_etat:
+            return "Non assignée"
+
+        return EtatLivraison(obj.to_etat).label
+
+    def get_changed_by_nom(self, obj):
+        """Nom lisible de l'auteur du changement."""
+
+        return _user_label(obj.changed_by)
+
+
 class DeliverySerializer(serializers.ModelSerializer):
     """Vue « tournée livreur » d'une réservation validée (US livreur).
 
@@ -1106,6 +1230,9 @@ class DeliverySerializer(serializers.ModelSerializer):
     organisateur_telephone = serializers.SerializerMethodField()
     lignes = DeliveryLigneSerializer(many=True, read_only=True)
     quantite_totale = serializers.SerializerMethodField()
+    livreur_assigne_nom = serializers.SerializerMethodField()
+    etat_livraison_display = serializers.SerializerMethodField()
+    livraison_status_logs = LivraisonStatusLogSerializer(many=True, read_only=True)
 
     class Meta:
         """Configuration du serializer Delivery."""
@@ -1125,6 +1252,12 @@ class DeliverySerializer(serializers.ModelSerializer):
             "commentaire",
             "lignes",
             "quantite_totale",
+            "livreur_assigne",
+            "livreur_assigne_nom",
+            "date_assignation",
+            "etat_livraison",
+            "etat_livraison_display",
+            "livraison_status_logs",
         ]
         read_only_fields = fields
 
@@ -1133,15 +1266,39 @@ class DeliverySerializer(serializers.ModelSerializer):
 
         return _user_label(obj.demandeur)
 
-    def get_organisateur_nom(self, obj):
-        """Nom lisible de l'organisateur de la manifestation."""
+    def get_livreur_assigne_nom(self, obj):
+        """Nom lisible du livreur qui a pris la livraison, vide sinon."""
 
-        return _user_label(obj.prestation.manifestation.organisateur)
+        return _user_label(obj.livreur_assigne) if obj.livreur_assigne_id else ""
+
+    def get_etat_livraison_display(self, obj):
+        """Libellé de l'état ; vide tant que personne n'a pris la livraison."""
+
+        if not obj.etat_livraison:
+            return ""
+
+        return EtatLivraison(obj.etat_livraison).label
+
+    def get_organisateur_nom(self, obj):
+        """Nom de l'interlocuteur à joindre sur place.
+
+        Les clés `organisateur_*` sont conservées : quatre écrans de livraison
+        les consomment. Seule la source change — le contact référent de la
+        manifestation, à défaut le client lui-même.
+        """
+
+        return _libelle_interlocuteur(obj.prestation.manifestation)
 
     def get_organisateur_telephone(self, obj):
-        """Téléphone de l'organisateur, vide si non renseigné."""
+        """Téléphone de l'interlocuteur, vide si non renseigné."""
 
-        return user_phone(obj.prestation.manifestation.organisateur)
+        manifestation = obj.prestation.manifestation
+        contact = manifestation.contact
+
+        if contact is not None and contact.telephone:
+            return contact.telephone
+
+        return manifestation.client.telephone
 
     def get_quantite_totale(self, obj):
         """Somme des quantités demandées sur les seules lignes physiques.
@@ -1171,6 +1328,7 @@ class CatalogPartSerializer(serializers.Serializer):
     consommable = serializers.SerializerMethodField()
     is_virtual = serializers.SerializerMethodField()
     stock_total = serializers.SerializerMethodField()
+    poids = serializers.SerializerMethodField()
     seuil_alerte_bas = serializers.SerializerMethodField()
     seuil_alerte_haut = serializers.SerializerMethodField()
 
@@ -1283,6 +1441,13 @@ class CatalogPartSerializer(serializers.Serializer):
 
         return get_part_total_stock(obj)
 
+    def get_poids(self, obj):
+        """Poids unitaire, ou `None` s'il n'est pas renseigné."""
+
+        rentable_info = getattr(obj, "rentable_info", None)
+
+        return None if rentable_info is None else rentable_info.poids
+
     def get_seuil_alerte_bas(self, obj):
         """Seuil bas configurable du part (null par défaut)."""
 
@@ -1304,15 +1469,136 @@ class CatalogPartSerializer(serializers.Serializer):
         return rentable_info.seuil_alerte_haut
 
 
-class GroupeSerializer(serializers.ModelSerializer):
-    """Sérialiseur léger d'un groupe scout (sélecteur manifestation)."""
+#: Un bon annulé ou refusé n'engage plus rien : ni volume, ni livraison.
+STATUTS_SANS_ENGAGEMENT = (
+    StatutReservation.ANNULEE,
+    StatutReservation.REFUSEE,
+    StatutReservation.BROUILLON,
+)
+
+#: Bons dont le matériel est physiquement sorti.
+STATUTS_DEJA_SORTIS = (
+    StatutReservation.LIVREE,
+    StatutReservation.RETOURNEE,
+    StatutReservation.CLOTUREE,
+)
+
+
+def _volume_des_bons(reservations):
+    """Volume engagé d'un lot de bons, annulés exclus.
+
+    Repli du sérialiseur quand la vue n'a pas annoté : il sert au détail d'une
+    prestation ou d'une manifestation, jamais à une liste, où il ferait une
+    requête par ligne.
+    """
+
+    return sum(
+        ligne.quantite_demandee
+        for bon in reservations
+        if bon.statut not in STATUTS_SANS_ENGAGEMENT
+        for ligne in bon.lignes.all()
+    )
+
+
+def _etat_des_bons(reservations):
+    """Avancement des livraisons d'un lot de bons : sortis sur engagés.
+
+    Trois nombres plutôt qu'un pourcentage : le planning affiche « 2/5 », et un
+    pourcentage se recalcule côté écran si besoin, l'inverse non.
+    """
+
+    engages = [bon for bon in reservations if bon.statut not in STATUTS_SANS_ENGAGEMENT]
+    livres = sum(1 for bon in engages if bon.statut in STATUTS_DEJA_SORTIS)
+
+    return {
+        "bons": len(engages),
+        "livres": livres,
+        "a_livrer": max(len(engages) - livres, 0),
+    }
+
+
+def _bons_de_la_manifestation(manifestation):
+    """Tous les bons d'une manifestation, quel que soit leur statut."""
+
+    return [
+        bon
+        for prestation in manifestation.prestations.all()
+        for bon in prestation.reservations.all()
+    ]
+
+
+def _etat_annote(obj):
+    """Avancement lu depuis les annotations de la vue, ou `None` si absentes."""
+
+    total = getattr(obj, "bons_engages", None)
+    livres = getattr(obj, "bons_livres", None)
+
+    if total is None or livres is None:
+        return None
+
+    return {"bons": total, "livres": livres, "a_livrer": max(total - livres, 0)}
+
+
+def _libelle_interlocuteur(manifestation):
+    """Contact référent d'une manifestation, à défaut le nom du client."""
+
+    contact = manifestation.contact
+
+    if contact is None:
+        return manifestation.client.nom
+
+    complet = f"{contact.prenom} {contact.nom}".strip()
+
+    return complet or manifestation.client.nom
+
+
+class ClientSerializer(serializers.ModelSerializer):
+    """Client en lecture, pour le sélecteur de manifestation et « mes clients »."""
+
+    gestionnaire_nom = serializers.SerializerMethodField()
 
     class Meta:
-        """Configuration du serializer Groupe."""
+        model = Client
+        fields = [
+            "id",
+            "nom",
+            "adresse",
+            "email",
+            "telephone",
+            "type_client",
+            "siret",
+            "gestionnaire",
+            "gestionnaire_nom",
+            "actif",
+        ]
+        # DRF interdit de reprendre un champ déclaré dans `read_only_fields`.
+        read_only_fields = [nom for nom in fields if nom != "gestionnaire_nom"]
 
-        model = Groupe
-        fields = ["id", "nom", "code", "adresse"]
+    def get_gestionnaire_nom(self, obj) -> str:
+        return _user_label(obj.gestionnaire)
+
+
+class ContactSerializer(serializers.ModelSerializer):
+    """Contact d'un client, en lecture."""
+
+    nom_complet = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Contact
+        fields = [
+            "id",
+            "client",
+            "nom",
+            "prenom",
+            "nom_complet",
+            "email",
+            "telephone",
+            "actif",
+        ]
         read_only_fields = fields
+
+    def get_nom_complet(self, obj):
+        return f"{obj.prenom} {obj.nom}".strip()
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -1361,6 +1647,8 @@ class PrestationSerializer(serializers.ModelSerializer):
     lignes = LignePrestationSerializer(
         source="lignes_prestation", many=True, required=False
     )
+    quantite_totale = serializers.SerializerMethodField()
+    etat_livraison = serializers.SerializerMethodField()
 
     class Meta:
         """Configuration du serializer Prestation."""
@@ -1372,11 +1660,15 @@ class PrestationSerializer(serializers.ModelSerializer):
             "date_debut",
             "date_fin",
             "description",
+            "statut",
+            "modifie_apres_devis",
             "manifestation",
             "manifestation_nom",
             "lieu",
             "lieu_detail",
             "lignes",
+            "quantite_totale",
+            "etat_livraison",
             "created_at",
             "updated_at",
         ]
@@ -1384,9 +1676,33 @@ class PrestationSerializer(serializers.ModelSerializer):
             "id",
             "manifestation_nom",
             "lieu_detail",
+            "quantite_totale",
+            "etat_livraison",
             "created_at",
             "updated_at",
         ]
+
+    def get_quantite_totale(self, obj):
+        """Volume d'objets engagés sur cette prestation, annulés exclus.
+
+        Même mesure que `ManifestationSerializer.quantite_totale`, un cran plus
+        bas : les prestations d'une manifestation totalisent donc exactement sa
+        barre de planning. Prendre ici les lignes de prestation — le
+        prévisionnel — donnerait un autre nombre, et deux mailles qui ne
+        s'additionnent pas.
+        """
+
+        annotee = getattr(obj, "volume_engage", None)
+
+        if annotee is not None:
+            return annotee
+
+        return _volume_des_bons(obj.reservations.all())
+
+    def get_etat_livraison(self, obj):
+        """Avancement des livraisons de la prestation : sortis sur engagés."""
+
+        return _etat_annote(obj) or _etat_des_bons(obj.reservations.all())
 
     def validate(self, attrs):
         """Dates de prestation incluses dans celles de la manifestation."""
@@ -1443,6 +1759,16 @@ class PrestationSerializer(serializers.ModelSerializer):
                 f"(jusqu'au {timezone.localdate(manifestation.date_fin):%d/%m/%Y})."
             )
 
+        # Le lieu reste nullable en base pour autoriser les brouillons, mais une
+        # prestation sans lieu est invisible des tournées : on ne la laisse pas
+        # quitter le brouillon. Avant, un POST sans lieu passait en silence.
+        statut = effective("statut")
+
+        if statut and statut != StatutPrestation.BROUILLON and not effective("lieu"):
+            errors["lieu"] = (
+                "Le lieu est obligatoire dès que la prestation quitte le brouillon."
+            )
+
         if errors:
             raise serializers.ValidationError(errors)
 
@@ -1450,7 +1776,7 @@ class PrestationSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        """Crée une prestation et ses lignes, puis contrôle le stock (STK-01)."""
+        """Crée une prestation et ses lignes, puis signale une pénurie (STK-01)."""
 
         lignes_data = validated_data.pop("lignes_prestation", None)
         prestation = super().create(validated_data)
@@ -1458,13 +1784,13 @@ class PrestationSerializer(serializers.ModelSerializer):
         if lignes_data:
             self._replace_lignes(prestation, lignes_data)
 
-        self._validate_stock(prestation)
+        self._signaler_penurie(prestation)
 
         return prestation
 
     @transaction.atomic
     def update(self, instance, validated_data):
-        """Met à jour une prestation et ses lignes, puis contrôle le stock."""
+        """Met à jour une prestation et ses lignes, puis signale une pénurie."""
 
         lignes_data = validated_data.pop("lignes_prestation", None)
         prestation = super().update(instance, validated_data)
@@ -1472,7 +1798,7 @@ class PrestationSerializer(serializers.ModelSerializer):
         if lignes_data is not None:
             self._replace_lignes(prestation, lignes_data)
 
-        self._validate_stock(prestation)
+        self._signaler_penurie(prestation)
 
         return prestation
 
@@ -1486,34 +1812,73 @@ class PrestationSerializer(serializers.ModelSerializer):
             for ligne_data in lignes_data
         ])
 
-    def _validate_stock(self, prestation):
-        """Bloque la sauvegarde si le stock est insuffisant (STK-01).
+    def _signaler_penurie(self, prestation):
+        """Journalise une pénurie de stock sans refuser l'enregistrement.
 
-        Le calcul est au jour entier ; la ValidationError est levée dans la
-        transaction de create/update, ce qui annule donc la sauvegarde.
+        Ce contrôle levait une `ValidationError` dans la transaction de
+        `create` / `update`, ce qui annulait la sauvegarde. En recette
+        (07/09/2026, remarque 6), le client s'est retrouvé dans une impasse :
+        « un article dépasse le stock disponible, le système bloque alors la
+        réservation et seul annuler est possible. Il ne faut pas bloquer mais
+        alerter. (Voir les Epic E & F) ». Sa prestation était perdue, donc
+        aucune réservation, donc aucune livraison ni ramassage — le cycle
+        complet n'a jamais pu être déroulé.
+
+        Il a raison sur le fond, et le CDC V06 va dans son sens : l'US 3
+        demande « une alerte immédiate dans une table avec tag de couleur », un
+        « message expliquant : disponibles / réservés / manquants » et une
+        « proposition d'alternative », et l'épic F attend des alertes de seuil
+        sur le tableau de bord. Nulle part un refus d'écriture. C'est notre
+        backlog (STK-01, CON-04) qui avait durci la règle en blocage sec.
+
+        Une prestation porte le *prévisionnel* : dire « il me faudra 6 tables »
+        avant de savoir comment les trouver est un usage normal, et le
+        prévisionnel est précisément ce qui permet d'anticiper la tension. Le
+        garde-fou reste là où il protège quelque chose de réel : le passage
+        d'une réservation en statut « validée » refuse toujours une pénurie non
+        forcée (`ReservationSerializer._validate_stock_conflicts_if_needed`).
+
+        La pénurie n'est pas inscrite au registre des conflits ici :
+        `ConflictHistory.reservation` n'est pas nullable, une pénurie purement
+        prévisionnelle n'a donc pas d'entrée à porter. Elle remonte par
+        `PrestationStockPreviewView` (que le formulaire interroge en direct) et
+        entrera au registre dès qu'une réservation la matérialisera.
         """
 
         result = compute_prestation_stock(prestation)
 
-        if result["has_shortage"]:
-            shortages = [line for line in result["lines"] if line["shortage"]]
+        if not result["has_shortage"]:
+            return
 
-            raise serializers.ValidationError({
-                "detail": (
-                    "Stock insuffisant : la prestation ne peut pas être "
-                    "enregistrée en l'état."
-                ),
-                "stock": shortages,
-            })
+        shortages = [line for line in result["lines"] if line["shortage"]]
+
+        logger.warning(
+            "Prestation %s enregistrée avec %s article(s) en pénurie : %s",
+            prestation.pk,
+            len(shortages),
+            ", ".join(
+                f"part {line['part_id']} (manque {line['missing']})"
+                for line in shortages
+            ),
+        )
 
 
 class ManifestationSerializer(serializers.ModelSerializer):
-    """CRUD d'une manifestation (événement)."""
+    """CRUD d'une manifestation (événement).
+
+    Le planning (maquette du CDC) affiche au survol d'une barre le nom du
+    client, son interlocuteur, le volume d'objets engagés et l'avancement des
+    livraisons. Ces quatre informations sont lues, jamais écrites, et calculées
+    par la vue : les agréger ici, manifestation par manifestation, ferait une
+    requête par ligne de planning.
+    """
 
     organisateur_nom = serializers.SerializerMethodField()
-    prestations_count = serializers.IntegerField(
-        source="prestations.count", read_only=True
-    )
+    client_nom = serializers.CharField(source="client.nom", read_only=True)
+    contact_telephone = serializers.SerializerMethodField()
+    quantite_totale = serializers.SerializerMethodField()
+    etat_livraison = serializers.SerializerMethodField()
+    prestations_count = serializers.SerializerMethodField()
     statut_effectif = serializers.CharField(read_only=True)
 
     #: en_cours / terminée sont dérivés des dates, pas posables à la main.
@@ -1535,9 +1900,15 @@ class ManifestationSerializer(serializers.ModelSerializer):
             "date_fin",
             "statut",
             "statut_effectif",
-            "organisateur",
+            "couleur",
+            "pourcent_remise_globale",
+            "client",
+            "client_nom",
+            "contact",
             "organisateur_nom",
-            "groupe",
+            "contact_telephone",
+            "quantite_totale",
+            "etat_livraison",
             "prestations_count",
             "created_at",
             "updated_at",
@@ -1552,12 +1923,52 @@ class ManifestationSerializer(serializers.ModelSerializer):
         ]
 
     def get_organisateur_nom(self, obj):
-        """Nom lisible de l'organisateur."""
+        """Interlocuteur de la manifestation.
 
-        user = obj.organisateur
-        full_name = f"{user.first_name} {user.last_name}".strip()
+        Clé conservée pour ne pas casser les écrans qui la lisent ; la source
+        est le contact référent, à défaut le client.
+        """
 
-        return f"{full_name} ({user.username})" if full_name else user.username
+        return _libelle_interlocuteur(obj)
+
+    def get_prestations_count(self, obj):
+        """Nombre de prestations.
+
+        Lu depuis l'annotation de la vue : `source="prestations.count"`
+        déclenchait un `SELECT COUNT` par manifestation, soit dix requêtes pour
+        dix barres de planning.
+        """
+
+        annotee = getattr(obj, "prestations_total", None)
+
+        return annotee if annotee is not None else obj.prestations.count()
+
+    def get_contact_telephone(self, obj):
+        """Téléphone du contact référent — celui qu'on compose depuis le planning."""
+
+        contact = obj.contact
+
+        return contact.telephone if contact is not None else ""
+
+    def get_quantite_totale(self, obj):
+        """Volume d'objets engagés, annulés exclus.
+
+        Lue depuis l'annotation posée par la vue quand elle existe. Le repli
+        calcule ligne à ligne : il sert au détail d'une manifestation, pas à la
+        liste, où il ferait une requête par ligne.
+        """
+
+        annotee = getattr(obj, "volume_engage", None)
+
+        if annotee is not None:
+            return annotee
+
+        return _volume_des_bons(_bons_de_la_manifestation(obj))
+
+    def get_etat_livraison(self, obj):
+        """Avancement des livraisons : combien de bons sont sortis, sur combien."""
+
+        return _etat_annote(obj) or _etat_des_bons(_bons_de_la_manifestation(obj))
 
     def validate_statut(self, value):
         """Refuse un statut dérivé posé à la main."""

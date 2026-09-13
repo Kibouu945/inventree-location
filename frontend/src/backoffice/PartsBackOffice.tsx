@@ -48,6 +48,7 @@ function emptyForm(): BackOfficePartFormValues {
     virtual: false,
     is_rentable: true,
     consommable: false,
+    poids: null,
     seuil_alerte_bas: null,
     seuil_alerte_haut: null,
     alertes_desactivees: false,
@@ -66,6 +67,7 @@ function formFromPart(part: BackOfficePart): BackOfficePartFormValues {
     virtual: part.virtual,
     is_rentable: part.is_rentable,
     consommable: part.consommable,
+    poids: part.poids,
     seuil_alerte_bas: part.seuil_alerte_bas,
     seuil_alerte_haut: part.seuil_alerte_haut,
     alertes_desactivees: part.alertes_desactivees,
@@ -205,6 +207,7 @@ export function PartsBackOffice({
         virtual: formValues.virtual,
         is_rentable: formValues.is_rentable,
         consommable: formValues.consommable,
+        poids: formValues.poids,
         seuil_alerte_bas: formValues.seuil_alerte_bas,
         seuil_alerte_haut: formValues.seuil_alerte_haut,
         alertes_desactivees: formValues.alertes_desactivees,
@@ -538,12 +541,20 @@ export function PartsBackOffice({
             />
           </Group>
 
+          {/* Recette Tassin du 07/09/2026, remarque 9 : « il ne semble pas
+              possible d'ajouter du stock à un produit suite à un inventaire ».
+              C'est possible, mais il est passé par l'écran natif d'InvenTree,
+              qui n'incrémente que des lignes de stock existantes — sur un
+              article qui n'en a aucune, il affiche « aucun enregistrement ».
+              Le libellé nomme donc explicitement ce cas d'usage. */}
           <NumberInput
-            label='Stock initial à ajouter'
+            label={
+              modalState.part ? 'Entrée de stock' : 'Stock initial à ajouter'
+            }
             min={0}
             description={
               modalState.part
-                ? 'Ajoute une ligne de stock InvenTree si > 0. Le stock existant ne se modifie pas ici.'
+                ? 'Crée une ligne de stock InvenTree si > 0 (entrée d’inventaire, réassort). S’ajoute au stock existant, ne le remplace pas.'
                 : 'Crée le stock initial dans InvenTree si > 0.'
             }
             value={formValues.stock_initial}
@@ -564,6 +575,18 @@ export function PartsBackOffice({
           {/* Les deux seuils n'alimentent une alerte que pour un consommable
               (US-09, CDC V06). Le dire ici évite de saisir une valeur inerte. */}
           <Group grow>
+            <NumberInput
+              label='Poids unitaire (kg)'
+              description='Laisser vide si le poids est inconnu.'
+              min={0}
+              step={0.1}
+              decimalScale={3}
+              value={formValues.poids ?? ''}
+              onChange={(value) =>
+                updateField('poids', value === '' ? null : String(value))
+              }
+            />
+
             <NumberInput
               label='Seuil bas'
               description={

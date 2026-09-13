@@ -4,7 +4,7 @@ Le catalogue matériel (`Part`, `PartCategory`) et l'historique stock
 (`StockItemTracking`) sont fournis nativement par InvenTree — on ne les
 recrée pas ici. Le plugin se limite à 8 tables propres :
 
-1. Groupe — Organisation scoute propriétaire (mono-tenant MVP)
+1. Client — Personne morale ou particulier, et ses Contact
 2. Profile — Extension OneToOne du User Django
 3. RentableItem — Extension OneToOne de `part.Part` (drapeau louable + champs
    location) ; le stock physique reste celui d'InvenTree (`StockItem`)
@@ -17,6 +17,8 @@ recrée pas ici. Le plugin se limite à 8 tables propres :
 
 S'y ajoutent, avec le SAV et les ramassages, les tables du domaine retour.
 """
+
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import IntegrityError, models, transaction
@@ -37,6 +39,33 @@ class StatutManifestation(models.TextChoices):
     ANNULEE = "annulee", _("Annulée")
 
 
+class TypeClient(models.TextChoices):
+    ENTREPRISE = "entreprise", _("Entreprise ou association")
+    PARTICULIER = "particulier", _("Particulier")
+
+
+class StatutPrestation(models.TextChoices):
+    """Avancement d'une prestation.
+
+    Les articles ne sont modifiables qu'en `brouillon` et `planifiee` : un devis
+    accepté fait passer la prestation en `confirmee` et toute modification
+    ultérieure devient une ligne « hors devis » (cf. `EtatLigne`).
+    """
+
+    BROUILLON = "brouillon", _("Brouillon")
+    PLANIFIEE = "planifiee", _("Planifiée")
+    CONFIRMEE = "confirmee", _("Confirmée")
+    LIVREE = "livree", _("Livrée")
+    CLOTUREE = "cloturee", _("Clôturée")
+    ANNULEE = "annulee", _("Annulée")
+
+    @classmethod
+    def modifiables(cls):
+        """Statuts où l'on peut encore ajouter ou retirer des articles."""
+
+        return (cls.BROUILLON, cls.PLANIFIEE)
+
+
 class StatutReservation(models.TextChoices):
     BROUILLON = "brouillon", _("Brouillon")
     SOUMISE = "soumise", _("Soumise")
@@ -46,6 +75,22 @@ class StatutReservation(models.TextChoices):
     LIVREE = "livree", _("Livrée")
     RETOURNEE = "retournee", _("Retournée")
     CLOTUREE = "cloturee", _("Clôturée")
+
+
+class EtatLivraison(models.TextChoices):
+    """Avancement d'une livraison prise en charge par un livreur (US-18/US-19).
+
+    Orthogonal au statut de la réservation : une réservation validée reste
+    « à livrer » tant que personne ne l'a prise, et la chaîne complète est
+    assignée → en cours → livrée (ou problème signalé). La valeur vide, qui
+    n'est pas un choix, dit « personne ne s'en occupe » : c'est l'état du pool
+    commun où tout livreur peut se servir.
+    """
+
+    ASSIGNEE = "assignee", _("Assignée")
+    EN_COURS = "en_cours", _("En cours de livraison")
+    LIVREE = "livree", _("Livrée")
+    PROBLEME = "probleme", _("Problème signalé")
 
 
 class TypeSavTicket(models.TextChoices):
@@ -94,6 +139,39 @@ class ConflictState(models.TextChoices):
     RESOLVED = "resolved", _("Résolu")
 
 
+#: Taux de TVA en vigueur en France (CDC §46). En choix et non en table : ils
+#: changent par la loi, pas par la saisie.
+TAUX_TVA_CHOICES = [
+    (Decimal("20.00"), _("20 % — taux normal")),
+    (Decimal("10.00"), _("10 % — taux intermédiaire")),
+    (Decimal("5.50"), _("5,5 % — taux réduit")),
+    (Decimal("2.10"), _("2,1 % — taux particulier")),
+]
+
+
+class EtatLigne(models.TextChoices):
+    """État d'une ligne de bon vis-à-vis du devis accepté (CDC §45).
+
+    Un devis signé ne verrouille pas le bon : une ligne ajoutée après coup est
+    « hors devis », une retirée est « annulée ». Ce couple rend la facture
+    calculable, et `ANNULEE` est la seule dispense à « livrer le bon en
+    entier ».
+    """
+
+    NORMALE = "normale", _("Au devis")
+    HORS_DEVIS = "hors_devis", _("Hors devis")
+    ANNULEE = "annulee", _("Annulée")
+
+
+class CanalModification(models.TextChoices):
+    """Canal de la demande de modification (CDC §45 : « tél., mail, verbal »)."""
+
+    TELEPHONE = "telephone", _("Téléphone")
+    MAIL = "mail", _("E-mail")
+    VERBAL = "verbal", _("Verbal")
+    COURRIER = "courrier", _("Courrier")
+
+
 # ---------------------------------------------------------------------------
 # Mixin abstrait
 # ---------------------------------------------------------------------------
@@ -118,21 +196,97 @@ class TimestampedModel(models.Model):
 # ---------------------------------------------------------------------------
 
 
-class Groupe(TimestampedModel):
-    """Organisation scoute propriétaire (mono-tenant MVP)."""
+class Client(TimestampedModel):
+    """Personne morale ou particulier qui loue du matériel.
+
+    Anciennement `Groupe`, dont le docstring disait lui-même « organisation
+    propriétaire, mono-tenant » : c'était le tenant, pas le client. Le point du
+    09/09/2026 a tranché — un client est une personne morale, et chaque
+    interlocuteur est un `Contact`.
+
+    `email` est unique mais **nullable** : les clients repris n'en avaient pas,
+    et inventer une adresse mettrait de la fausse donnée en base. NULL ne
+    collisionne pas dans un index unique.
+    """
 
     nom = models.CharField(max_length=120, unique=True, verbose_name=_("nom"))
-    code = models.CharField(max_length=20, unique=True, verbose_name=_("code"))
     adresse = models.TextField(blank=True, default="", verbose_name=_("adresse"))
+    email = models.EmailField(
+        unique=True, null=True, blank=True, verbose_name=_("e-mail")
+    )
+    telephone = models.CharField(
+        max_length=30, blank=True, default="", verbose_name=_("téléphone")
+    )
+    type_client = models.CharField(
+        max_length=20,
+        choices=TypeClient.choices,
+        blank=True,
+        default="",
+        verbose_name=_("type de client"),
+    )
+    siret = models.CharField(
+        max_length=20, blank=True, default="", verbose_name=_("SIRET")
+    )
+    # Le portefeuille : « un gestionnaire client gère un ou plusieurs clients »
+    # (09/09). C'est ce champ qui alimente « la liste de mes clients ».
+    gestionnaire = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="clients_geres",
+        verbose_name=_("gestionnaire référent"),
+    )
+    # On désactive, on ne supprime pas : les manifestations passées doivent
+    # rester lisibles.
+    actif = models.BooleanField(default=True, verbose_name=_("actif"))
 
     class Meta:
         app_label = "inventree_location"
         ordering = ["nom"]
-        verbose_name = _("groupe")
-        verbose_name_plural = _("groupes")
+        verbose_name = _("client")
+        verbose_name_plural = _("clients")
 
     def __str__(self):
         return self.nom
+
+
+class Contact(TimestampedModel):
+    """Personne physique rattachée à un client.
+
+    Sans compte : le client externe n'accède pas à la plateforme, c'est le
+    gestionnaire commercial qui le représente (09/09). `email` est unique
+    globalement et nullable, pour la même raison que sur `Client`.
+    """
+
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.CASCADE,
+        related_name="contacts",
+        verbose_name=_("client"),
+    )
+    nom = models.CharField(max_length=120, verbose_name=_("nom"))
+    prenom = models.CharField(
+        max_length=120, blank=True, default="", verbose_name=_("prénom")
+    )
+    email = models.EmailField(
+        unique=True, null=True, blank=True, verbose_name=_("e-mail")
+    )
+    telephone = models.CharField(
+        max_length=30, blank=True, default="", verbose_name=_("téléphone")
+    )
+    # Un contact qui quitte l'entreprise sort des listes sans disparaître des
+    # devis qu'il a signés.
+    actif = models.BooleanField(default=True, verbose_name=_("actif"))
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["client", "nom", "prenom"]
+        verbose_name = _("contact")
+        verbose_name_plural = _("contacts")
+
+    def __str__(self):
+        return f"{self.prenom} {self.nom}".strip()
 
 
 class Profile(models.Model):
@@ -143,14 +297,6 @@ class Profile(models.Model):
         on_delete=models.CASCADE,
         related_name="location_profile",
         verbose_name=_("utilisateur"),
-    )
-    groupe = models.ForeignKey(
-        Groupe,
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="profiles",
-        verbose_name=_("groupe"),
     )
     telephone = models.CharField(
         max_length=20, blank=True, default="", verbose_name=_("téléphone")
@@ -204,6 +350,15 @@ class RentableItem(TimestampedModel):
         blank=True,
         verbose_name=_("valeur de remplacement"),
     )
+    # Nul et non zéro : « inconnu » n'est pas « 0 kg », qui fausserait toute
+    # somme de chargement de camion. Même doctrine que `caution`.
+    poids = models.DecimalField(
+        max_digits=8,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        verbose_name=_("poids unitaire (kg)"),
+    )
     seuil_alerte_bas = models.PositiveIntegerField(
         null=True, blank=True, verbose_name=_("seuil d'alerte bas")
     )
@@ -214,6 +369,31 @@ class RentableItem(TimestampedModel):
     #: eux-mêmes (CDC V06 : « seuil haut + seuil bas + booléen pour désactiver
     #: les alertes »). Un article dont on connaît les seuils mais qu'on ne veut
     #: pas voir remonter — surplus assumé, article en fin de vie.
+    # Tarification (CDC §46). Deux voies exclusives : grille propre
+    # (`PalierTarif`) ou table partagée (`TableRemise`). `prix_location_ht` est
+    # le prix de base, quand aucun palier ne mord.
+    prix_location_ht = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name=_("prix de location HT"),
+    )
+    taux_tva = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        choices=TAUX_TVA_CHOICES,
+        default=Decimal("20.00"),
+        verbose_name=_("taux de TVA"),
+    )
+    table_remise = models.ForeignKey(
+        "inventree_location.TableRemise",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="articles",
+        verbose_name=_("table de remise"),
+    )
     alertes_desactivees = models.BooleanField(
         default=False,
         verbose_name=_("alertes désactivées"),
@@ -250,17 +430,36 @@ class Manifestation(TimestampedModel):
         default=StatutManifestation.BROUILLON,
         verbose_name=_("statut"),
     )
-    organisateur = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
-        related_name="manifestations_organisees",
-        verbose_name=_("organisateur"),
+    # Couleur d'affichage choisie par le gestionnaire. Le calendrier des
+    # réservations garde ses couleurs par statut (`calendrier.STATUT_COULEURS`) :
+    # celle-ci est destinée au planning au niveau manifestation.
+    couleur = models.CharField(
+        max_length=7,
+        blank=True,
+        default="",
+        verbose_name=_("couleur"),
     )
-    groupe = models.ForeignKey(
-        Groupe,
+    # Remise appliquée au total HT, après les paliers de quantité.
+    pourcent_remise_globale = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("remise globale (%)"),
+    )
+    client = models.ForeignKey(
+        Client,
         on_delete=models.PROTECT,
         related_name="manifestations",
-        verbose_name=_("groupe"),
+        verbose_name=_("client"),
+    )
+    # Le contact référent : celui qu'on appelle sur place, et celui qui signe.
+    contact = models.ForeignKey(
+        "Contact",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="manifestations",
+        verbose_name=_("contact référent"),
     )
 
     class Meta:
@@ -331,6 +530,18 @@ class Prestation(TimestampedModel):
     description = models.TextField(
         blank=True, default="", verbose_name=_("description")
     )
+    statut = models.CharField(
+        max_length=20,
+        choices=StatutPrestation.choices,
+        default=StatutPrestation.BROUILLON,
+        verbose_name=_("statut"),
+    )
+    # Levé dès qu'un article change après acceptation d'un devis. Le détail —
+    # qui, par quel canal, quand — vit dans `ModificationBon`.
+    modifie_apres_devis = models.BooleanField(
+        default=False,
+        verbose_name=_("modifiée après le devis"),
+    )
 
     class Meta:
         app_label = "inventree_location"
@@ -352,6 +563,9 @@ class Lieu(TimestampedModel):
     """
 
     nom = models.CharField(max_length=200, verbose_name=_("nom"))
+    description = models.TextField(
+        blank=True, default="", verbose_name=_("description")
+    )
     adresse = models.TextField(blank=True, default="", verbose_name=_("adresse"))
     latitude = models.DecimalField(
         max_digits=9,
@@ -487,6 +701,27 @@ class Reservation(TimestampedModel):
         verbose_name=_("statut"),
     )
     forced = models.BooleanField(default=False, verbose_name=_("forcée"))
+    # US-18 : les livraisons validées forment un pool commun ; le premier
+    # livreur qui accepte se l'attribue, et peut la relâcher tant qu'il ne l'a
+    # pas commencée.
+    livreur_assigne = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="livraisons_assignees",
+        verbose_name=_("livreur assigné"),
+    )
+    date_assignation = models.DateTimeField(
+        null=True, blank=True, verbose_name=_("date d'assignation")
+    )
+    etat_livraison = models.CharField(
+        max_length=20,
+        choices=EtatLivraison.choices,
+        blank=True,
+        default="",
+        verbose_name=_("état de la livraison"),
+    )
     date_demande = models.DateTimeField(
         default=timezone.now, verbose_name=_("date de demande")
     )
@@ -587,6 +822,13 @@ class LigneReservation(TimestampedModel):
         choices=EtatRetour.choices,
         verbose_name=_("état du retour"),
     )
+    # Voir `EtatLigne`.
+    etat = models.CharField(
+        max_length=20,
+        choices=EtatLigne.choices,
+        default=EtatLigne.NORMALE,
+        verbose_name=_("état vis-à-vis du devis"),
+    )
     commentaire = models.TextField(
         blank=True, default="", verbose_name=_("commentaire")
     )
@@ -614,6 +856,11 @@ class ReturnIncidentType(models.TextChoices):
 
 
 class ReturnIncident(TimestampedModel):
+    # Déclaré explicitement : cette table a été créée en `BigAutoField`
+    # (migration d'origine). Sans cette ligne, `makemigrations` propose de la
+    # rétrograder en `AutoField` à chaque passage.
+    id = models.BigAutoField(primary_key=True)
+
     line = models.ForeignKey(
         LigneReservation,
         on_delete=models.CASCADE,
@@ -657,6 +904,18 @@ class ReturnIncident(TimestampedModel):
         ordering = ["-reported_at"]
         verbose_name = _("incident de retour")
         verbose_name_plural = _("incidents de retour")
+        constraints = [
+            # Le registre porte un total par nature, pas une suite de
+            # signalements : `projeter_incidents` suppose cette unicité depuis
+            # toujours (`filter(...).first()` puis écriture), et tous les
+            # agrégats du stock réel la supposent aussi. Un POST direct sur
+            # l'endpoint pouvait créer un second enregistrement que la
+            # projection ne voyait jamais — invisible, et double compté.
+            models.UniqueConstraint(
+                fields=["line", "type"],
+                name="incident_unique_par_ligne_et_type",
+            )
+        ]
 
     def __str__(self):
         return f"Incident #{self.pk} ({self.type}) — Ligne#{self.line_id}"
@@ -713,6 +972,80 @@ class ReservationStatusLog(TimestampedModel):
         )
 
 
+class LivraisonStatusLog(TimestampedModel):
+    """Journal des changements d'état d'une livraison (US-19).
+
+    Distinct de `ReservationStatusLog`, qui suit le statut métier de la
+    réservation : ici on trace le terrain — qui a pris la livraison, quand elle
+    est partie, et la photo du problème éventuel.
+    """
+
+    # Déclaré explicitement : cette table a été créée en `BigAutoField`
+    # (migration d'origine). Sans cette ligne, `makemigrations` propose de la
+    # rétrograder en `AutoField` à chaque passage.
+    id = models.BigAutoField(primary_key=True)
+
+    reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.CASCADE,
+        related_name="livraison_status_logs",
+        verbose_name=_("réservation"),
+    )
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="livraison_status_changes",
+        verbose_name=_("modifié par"),
+    )
+    # Les deux bornes acceptent la chaîne vide : elle dit « pas d'assignation »,
+    # au départ comme après un relâchement.
+    from_etat = models.CharField(
+        max_length=20,
+        choices=EtatLivraison.choices,
+        blank=True,
+        default="",
+        verbose_name=_("ancien état"),
+    )
+    to_etat = models.CharField(
+        max_length=20,
+        choices=EtatLivraison.choices,
+        blank=True,
+        default="",
+        verbose_name=_("nouvel état"),
+    )
+    commentaire = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("commentaire"),
+    )
+    photo = models.ImageField(
+        upload_to="inventree_location/livraisons/%Y/%m/",
+        null=True,
+        blank=True,
+        verbose_name=_("photo"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-created_at"]
+        verbose_name = _("log d'état de livraison")
+        verbose_name_plural = _("logs d'état de livraison")
+        indexes = [
+            models.Index(
+                fields=["reservation", "created_at"],
+                name="livraison_status_log_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Livraison #{self.reservation_id}: "
+            f"{self.from_etat or '—'} → {self.to_etat or '—'}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # 5. SAV / stock réel
 # ---------------------------------------------------------------------------
@@ -726,6 +1059,11 @@ class SavTicket(TimestampedModel):
     - il peut être réintégré après réparation ;
     - les destructions restent consultables par période.
     """
+
+    # Déclaré explicitement : cette table a été créée en `BigAutoField`
+    # (migration d'origine). Sans cette ligne, `makemigrations` propose de la
+    # rétrograder en `AutoField` à chaque passage.
+    id = models.BigAutoField(primary_key=True)
 
     ligne_reservation = models.ForeignKey(
         LigneReservation,
@@ -822,6 +1160,11 @@ class SavTicket(TimestampedModel):
 class ConflictHistory(TimestampedModel):
     """Historique des conflits détectés (ouverts et résolus)."""
 
+    # Déclaré explicitement : cette table a été créée en `BigAutoField`
+    # (migration d'origine). Sans cette ligne, `makemigrations` propose de la
+    # rétrograder en `AutoField` à chaque passage.
+    id = models.BigAutoField(primary_key=True)
+
     conflict_type = models.CharField(
         max_length=20,
         choices=ConflictType.choices,
@@ -908,3 +1251,633 @@ class ConflictHistory(TimestampedModel):
 
     def __str__(self):
         return f"{self.conflict_type}:{self.reservation_id}:{self.state}"
+
+
+# ---------------------------------------------------------------------------
+# Tarification (CDC V06 § « Le devis est établi […] sur la base d'un tarif
+# unitaire € HT pour chaque objet »)
+# ---------------------------------------------------------------------------
+
+
+class TableRemise(TimestampedModel):
+    """Grille de remises par quantité, partagée par plusieurs objets.
+
+    Seconde des deux voies de tarification du CDC §46 ; `PalierTarif` est la
+    première. Exclusives par objet — règle applicative, elle porte sur
+    l'existence de lignes liées.
+    """
+
+    nom = models.CharField(max_length=120, unique=True, verbose_name=_("nom"))
+    description = models.TextField(
+        blank=True, default="", verbose_name=_("description")
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["nom"]
+        verbose_name = _("table de remise")
+        verbose_name_plural = _("tables de remise")
+
+    def __str__(self):
+        return self.nom
+
+
+class PalierRemise(models.Model):
+    """Un des cinq niveaux d'une `TableRemise` : à partir de N, X % de remise."""
+
+    table = models.ForeignKey(
+        TableRemise,
+        on_delete=models.CASCADE,
+        related_name="paliers",
+        verbose_name=_("table de remise"),
+    )
+    quantite_min = models.PositiveIntegerField(verbose_name=_("quantité minimale"))
+    pourcentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        verbose_name=_("pourcentage de remise"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["table", "quantite_min"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["table", "quantite_min"],
+                name="unique_palier_remise_par_quantite",
+            ),
+        ]
+        verbose_name = _("palier de remise")
+        verbose_name_plural = _("paliers de remise")
+
+    def __str__(self):
+        return f"≥{self.quantite_min} → −{self.pourcentage} %"
+
+
+class PalierTarif(models.Model):
+    """Grille de prix propre à un objet : à partir de N, tel prix unitaire HT.
+
+    Le prix est **absolu**, pas une remise (exemple du CDC §46).
+    """
+
+    rentable_item = models.ForeignKey(
+        RentableItem,
+        on_delete=models.CASCADE,
+        related_name="paliers_tarif",
+        verbose_name=_("article louable"),
+    )
+    quantite_min = models.PositiveIntegerField(verbose_name=_("quantité minimale"))
+    prix_ht = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name=_("prix unitaire HT"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["rentable_item", "quantite_min"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["rentable_item", "quantite_min"],
+                name="unique_palier_tarif_par_quantite",
+            ),
+        ]
+        verbose_name = _("palier de tarif")
+        verbose_name_plural = _("paliers de tarif")
+
+    def __str__(self):
+        return f"≥{self.quantite_min} → {self.prix_ht} € HT"
+
+
+# ---------------------------------------------------------------------------
+# Devis et facturation
+# ---------------------------------------------------------------------------
+
+
+class StatutDevis(models.TextChoices):
+    """Cycle de vie d'un devis.
+
+    Un devis accepté n'a **aucune transition sortante** : c'est une pièce
+    signée. La suite se joue sur les lignes des bons (`EtatLigne`).
+    """
+
+    BROUILLON = "brouillon", _("Brouillon")
+    EMIS = "emis", _("Émis")
+    ACCEPTE = "accepte", _("Accepté")
+    REFUSE = "refuse", _("Refusé")
+    ANNULE = "annule", _("Annulé")
+
+
+class SupportAcceptation(models.TextChoices):
+    """Par quel canal le client a accepté le devis (CDC § acceptation)."""
+
+    EMAIL = "email", _("E-mail")
+    COURRIER = "courrier", _("Courrier")
+    TELEPHONE = "telephone", _("Téléphone")
+    VERBAL = "verbal", _("Verbal")
+    SUR_PLACE = "sur_place", _("Signature sur place")
+
+
+class Devis(TimestampedModel):
+    """Devis rattaché à une **manifestation**, pas à une réservation.
+
+    N↔M vers les bons (CDC §45, §82), d'où le `ManyToMany`. Montants et
+    libellé du signataire **figés à l'émission** : un devis signé ne change pas
+    de total quand le tarif catalogue bouge.
+    """
+
+    manifestation = models.ForeignKey(
+        Manifestation,
+        on_delete=models.PROTECT,
+        related_name="devis",
+        verbose_name=_("manifestation"),
+    )
+    bons = models.ManyToManyField(
+        Reservation,
+        related_name="devis",
+        blank=True,
+        verbose_name=_("bons de réservation"),
+    )
+    numero = models.CharField(
+        max_length=30,
+        unique=True,
+        verbose_name=_("numéro"),
+    )
+    statut = models.CharField(
+        max_length=20,
+        choices=StatutDevis.choices,
+        default=StatutDevis.BROUILLON,
+        verbose_name=_("statut"),
+    )
+    date_emission = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("date d'émission"),
+    )
+    date_acceptation = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("date d'acceptation"),
+    )
+    support_acceptation = models.CharField(
+        max_length=20,
+        choices=SupportAcceptation.choices,
+        blank=True,
+        default="",
+        verbose_name=_("support d'acceptation"),
+    )
+    motif_refus = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("motif du refus"),
+    )
+    # Contact du client **ou** client lui-même. Instantané : si le contact part,
+    # le devis doit toujours dire qui a signé. La FK `signataire_contact`
+    # arrivera avec le modèle `Contact`.
+    signataire_libelle = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        verbose_name=_("signataire"),
+    )
+    montant_ht = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("montant HT"),
+    )
+    montant_tva = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("montant TVA"),
+    )
+    montant_ttc = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("montant TTC"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["statut"], name="devis_statut_idx"),
+            models.Index(fields=["manifestation"], name="devis_manifestation_idx"),
+        ]
+        verbose_name = _("devis")
+        verbose_name_plural = _("devis")
+
+    def __str__(self):
+        return self.numero
+
+
+class LigneDevis(TimestampedModel):
+    """Ligne d'un devis — **instantané figé**, pas une vue sur le catalogue.
+
+    Prix, TVA et remise recopiés à l'émission : un devis se réédite à
+    l'identique six mois plus tard.
+    """
+
+    devis = models.ForeignKey(
+        Devis,
+        on_delete=models.CASCADE,
+        related_name="lignes",
+        verbose_name=_("devis"),
+    )
+    part = models.ForeignKey(
+        "part.Part",
+        on_delete=models.PROTECT,
+        related_name="lignes_devis",
+        verbose_name=_("article"),
+    )
+    quantite = models.PositiveIntegerField(verbose_name=_("quantité"))
+    prix_unitaire_ht = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name=_("prix unitaire HT"),
+    )
+    taux_tva = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        choices=TAUX_TVA_CHOICES,
+        default=Decimal("20.00"),
+        verbose_name=_("taux de TVA"),
+    )
+    remise_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("remise (%)"),
+    )
+    montant_ht = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("montant HT"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["devis", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["devis", "part"],
+                name="unique_ligne_devis_par_article",
+            ),
+        ]
+        verbose_name = _("ligne de devis")
+        verbose_name_plural = _("lignes de devis")
+
+    def __str__(self):
+        return f"{self.devis_id} — part#{self.part_id} ×{self.quantite}"
+
+
+class FactureReservation(TimestampedModel):
+    """Facture, rattachée à **un ou plusieurs** devis (CDC §88).
+
+    Tables et clés étrangères seulement : aucun écran, aucun calcul de montant.
+    """
+
+    numero = models.CharField(
+        max_length=30,
+        unique=True,
+        verbose_name=_("numéro"),
+    )
+    devis = models.ManyToManyField(
+        Devis,
+        related_name="factures",
+        verbose_name=_("devis"),
+    )
+    date_emission = models.DateField(verbose_name=_("date d'émission"))
+    montant_total_ht = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("montant total HT"),
+    )
+    remise_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("remise (%)"),
+    )
+    entierement_regle = models.BooleanField(
+        default=False,
+        verbose_name=_("entièrement réglé"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-date_emission"]
+        verbose_name = _("facture")
+        verbose_name_plural = _("factures")
+
+    def __str__(self):
+        return self.numero
+
+
+# ---------------------------------------------------------------------------
+# Traçabilité des modifications après acceptation d'un devis
+# ---------------------------------------------------------------------------
+
+
+class ModificationBon(TimestampedModel):
+    """Journal des modifications d'objets d'un bon après acceptation d'un devis.
+
+    Le CDC §45 exige quatre informations : personne, message, canal,
+    horodatage. Rattaché au **bon** et non à la ligne : `_replace_lignes`
+    recrée les lignes à chaque édition et effacerait le journal.
+    """
+
+    reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.CASCADE,
+        related_name="modifications",
+        verbose_name=_("bon de réservation"),
+    )
+    part = models.ForeignKey(
+        "part.Part",
+        on_delete=models.PROTECT,
+        related_name="modifications_bon",
+        verbose_name=_("article"),
+    )
+    auteur = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="modifications_bon",
+        verbose_name=_("auteur"),
+    )
+    canal = models.CharField(
+        max_length=20,
+        choices=CanalModification.choices,
+        verbose_name=_("canal de la demande"),
+    )
+    message = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("message à l'origine"),
+    )
+    etat_resultant = models.CharField(
+        max_length=20,
+        choices=EtatLigne.choices,
+        verbose_name=_("état résultant de la ligne"),
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["reservation"], name="modif_bon_resa_idx"),
+        ]
+        verbose_name = _("modification de bon")
+        verbose_name_plural = _("modifications de bon")
+
+    def __str__(self):
+        return f"{self.reservation_id} — part#{self.part_id} → {self.etat_resultant}"
+
+
+# ---------------------------------------------------------------------------
+# 8. Exécution terrain : livraison et ramassage
+# ---------------------------------------------------------------------------
+
+
+class Livraison(TimestampedModel):
+    """Un passage de livraison sur un bon — le `DeliveryTask` du schéma client.
+
+    Rattachée au **bon**, pas au lieu : le lieu est un attribut du passage, pas
+    sa clé (R26). Un bon se livre en une ou plusieurs fois (R23), d'où la
+    séquence ; le regroupement par lieu et par journée que voit le livreur est
+    une vue, calculée à la lecture (R25, R30).
+
+    **Table de projection.** Aucun écran ne l'écrit à ce stade : les colonnes du
+    bon restent la vérité, `projeter_execution` alimente cette table et
+    `verifier_projection` la compare sans rien écrire. Le renversement de la
+    vérité est post-soutenance.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+
+    reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.CASCADE,
+        related_name="livraisons",
+        verbose_name=_("bon de réservation"),
+    )
+    lieu = models.ForeignKey(
+        "Lieu",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="livraisons",
+        verbose_name=_("lieu"),
+    )
+    sequence = models.PositiveSmallIntegerField(
+        default=1,
+        verbose_name=_("numéro de passage"),
+    )
+    date_prevue = models.DateTimeField(
+        null=True, blank=True, verbose_name=_("date et heure prévues")
+    )
+    date_reelle = models.DateTimeField(
+        null=True, blank=True, verbose_name=_("date et heure réelles")
+    )
+    #: Pluriel voulu : le CDC parle de « livreurs assignés » à une tâche.
+    livreurs = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        # `livraisons_assignees` est déjà pris par `Reservation.livreur_assigne`,
+        # qui porte l'assignation à la maille du bon.
+        related_name="passages_de_livraison",
+        verbose_name=_("livreurs assignés"),
+    )
+    commentaire = models.TextField(
+        blank=True, default="", verbose_name=_("commentaire")
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["date_prevue", "sequence"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["reservation", "sequence"],
+                name="livraison_unique_par_bon_et_sequence",
+            )
+        ]
+        verbose_name = _("livraison")
+        verbose_name_plural = _("livraisons")
+
+    def __str__(self):
+        return f"Livraison {self.reservation_id}#{self.sequence}"
+
+
+class LivraisonLigne(TimestampedModel):
+    """Ce qu'un passage a effectivement déposé, ligne par ligne.
+
+    `quantite_rest_a_livrer` ne vit pas ici : c'est un agrégat sur tous les
+    passages du bon, donc un calcul (R27) — la colonne serait la faute que la
+    migration 0021 a corrigée ailleurs.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+
+    livraison = models.ForeignKey(
+        Livraison,
+        on_delete=models.CASCADE,
+        related_name="lignes",
+        verbose_name=_("livraison"),
+    )
+    ligne = models.ForeignKey(
+        LigneReservation,
+        on_delete=models.CASCADE,
+        related_name="livraisons",
+        verbose_name=_("ligne de réservation"),
+    )
+    quantite_livree = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité livrée")
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["livraison", "ligne"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["livraison", "ligne"],
+                name="livraison_ligne_unique",
+            )
+        ]
+        verbose_name = _("ligne de livraison")
+        verbose_name_plural = _("lignes de livraison")
+
+    def __str__(self):
+        return f"{self.livraison_id} — ligne#{self.ligne_id} x{self.quantite_livree}"
+
+
+class Ramassage(TimestampedModel):
+    """Un passage de ramassage sur un bon — le `PickupTask` du schéma client.
+
+    Le livreur compose sa liste en choisissant des **lieux** (R29), mais la
+    maille de stockage reste le bon : c'est ce que dit le schéma du CDC, et
+    c'est ce qui permet à un bon d'être ramassé en plusieurs fois comme à un
+    passage de couvrir plusieurs prestations d'un même lieu (R31) — par
+    regroupement à la lecture, pas par une clé.
+
+    `ramassage_termine` porte le `FullPickup` du CDC : sans lui, ce qui reste
+    sur un lieu non terminé serait déclaré perdu alors qu'un autre passage
+    viendra (R35).
+    """
+
+    id = models.BigAutoField(primary_key=True)
+
+    reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.CASCADE,
+        related_name="ramassages",
+        verbose_name=_("bon de réservation"),
+    )
+    lieu = models.ForeignKey(
+        "Lieu",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="ramassages",
+        verbose_name=_("lieu"),
+    )
+    sequence = models.PositiveSmallIntegerField(
+        default=1,
+        verbose_name=_("numéro de passage"),
+    )
+    date_prevue = models.DateTimeField(
+        null=True, blank=True, verbose_name=_("date et heure prévues")
+    )
+    date_reelle = models.DateTimeField(
+        null=True, blank=True, verbose_name=_("date et heure réelles")
+    )
+    ramassage_termine = models.BooleanField(
+        default=False,
+        verbose_name=_("lieu entièrement ramassé"),
+    )
+    livreurs = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name="passages_de_ramassage",
+        verbose_name=_("livreurs assignés"),
+    )
+    commentaire = models.TextField(
+        blank=True, default="", verbose_name=_("commentaire")
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["date_prevue", "sequence"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["reservation", "sequence"],
+                name="ramassage_unique_par_bon_et_sequence",
+            )
+        ]
+        verbose_name = _("ramassage")
+        verbose_name_plural = _("ramassages")
+
+    def __str__(self):
+        return f"Ramassage {self.reservation_id}#{self.sequence}"
+
+
+class RamassageArticle(TimestampedModel):
+    """Les quatre compteurs d'un passage de ramassage, ligne par ligne.
+
+    Le vocabulaire est celui arrêté avec le client (R32) : récupéré réintègre le
+    stock, cassé part en réparation, détruit et manquant en sortent. « À
+    facturer » est une décision du livreur, indépendante du type (R37).
+
+    Aucun plafond en base : un surplus est légitime, des objets circulent entre
+    lieux (R36). On signale à la saisie, on ne refuse pas.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+
+    ramassage = models.ForeignKey(
+        Ramassage,
+        on_delete=models.CASCADE,
+        related_name="articles",
+        verbose_name=_("ramassage"),
+    )
+    ligne = models.ForeignKey(
+        LigneReservation,
+        on_delete=models.CASCADE,
+        related_name="ramassages",
+        verbose_name=_("ligne de réservation"),
+    )
+    quantite_recuperee = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité récupérée")
+    )
+    quantite_cassee = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité cassée")
+    )
+    quantite_detruite = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité détruite")
+    )
+    quantite_manquante = models.PositiveIntegerField(
+        default=0, verbose_name=_("quantité manquante")
+    )
+    facturer_client = models.BooleanField(
+        default=False, verbose_name=_("facturer au client")
+    )
+
+    class Meta:
+        app_label = "inventree_location"
+        ordering = ["ramassage", "ligne"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["ramassage", "ligne"],
+                name="ramassage_article_unique",
+            )
+        ]
+        verbose_name = _("article ramassé")
+        verbose_name_plural = _("articles ramassés")
+
+    def __str__(self):
+        return f"{self.ramassage_id} — ligne#{self.ligne_id}"

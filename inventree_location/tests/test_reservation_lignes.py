@@ -11,9 +11,7 @@ from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from inventree_location.models import (
-    Groupe,
     LigneReservation,
-    Manifestation,
     Prestation,
     Reservation,
 )
@@ -21,6 +19,7 @@ from inventree_location.views import (
     ReservationDetailView,
     ReservationListCreateView,
 )
+from inventree_location.tests.factories import make_manifestation
 
 from part.models import Part, PartCategory
 
@@ -47,14 +46,11 @@ def user(db):
 
 @pytest.fixture
 def prestation(db, user):
-    groupe = Groupe.objects.create(nom="Jambville", code="JAM")
     now = timezone.now()
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp été 2026",
         date_debut=now,
         date_fin=now + timedelta(days=7),
-        organisateur=user,
-        groupe=groupe,
     )
     return Prestation.objects.create(
         manifestation=manifestation,
@@ -201,3 +197,109 @@ class TestReservationNestedLignes:
         assert response.status_code == status.HTTP_200_OK
         ligne = reservation.lignes.get()
         assert ligne.quantite_demandee == 5
+
+
+class TestProtectionDuRegistreDeRetour:
+    """Éditer les lignes d'un bon qui porte un constat effaçait ce constat.
+
+    `_replace_lignes` supprime toutes les lignes avant de les recréer, et cette
+    suppression **cascade** sur le registre d'incidents et sur les tickets SAV.
+    La vue refuse déjà l'édition au-delà de « soumise », ce qui limite le trou
+    sans le fermer : l'endpoint des incidents accepte n'importe quelle ligne,
+    statut du bon compris, donc un brouillon peut parfaitement porter un
+    incident — et le perdait à la première édition de ses lignes.
+    """
+
+    @pytest.fixture
+    def bon_pointe(self, db, user, prestation, part):
+        from inventree_location.models import ReturnIncident, ReturnIncidentType
+
+        reservation = Reservation.objects.create(
+            prestation=prestation,
+            demandeur=user,
+            date_demande=timezone.now(),
+            statut="brouillon",
+        )
+        ligne = LigneReservation.objects.create(
+            reservation=reservation, part=part, quantite_demandee=3, quantite_livree=3
+        )
+        ReturnIncident.objects.create(
+            line=ligne, type=ReturnIncidentType.MISSING, qty=1, reported_by=user
+        )
+
+        return reservation
+
+    def _remplacer_les_lignes(self, factory, user, reservation, part):
+        payload = {"lignes": [{"part": part.pk, "quantite_demandee": 5}]}
+        request = factory.patch(f"{RESA_URL}{reservation.pk}/", payload, format="json")
+        force_authenticate(request, user=user)
+
+        return ReservationDetailView.as_view()(request, pk=reservation.pk)
+
+    @pytest.mark.django_db
+    def test_le_remplacement_est_refuse(self, factory, user, bon_pointe, part):
+        from inventree_location.models import ReturnIncident
+
+        response = self._remplacer_les_lignes(factory, user, bon_pointe, part)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "incident" in str(response.data["lignes"])
+        # Et surtout : rien n'a été supprimé.
+        assert ReturnIncident.objects.filter(
+            line__reservation=bon_pointe
+        ).count() == 1
+        assert bon_pointe.lignes.get().quantite_demandee == 3
+
+    @pytest.mark.django_db
+    def test_un_ticket_sav_protege_aussi_le_bon(
+        self, factory, user, prestation, part
+    ):
+        from inventree_location.models import (
+            SavTicket,
+            StatutSavTicket,
+            TypeSavTicket,
+        )
+
+        reservation = Reservation.objects.create(
+            prestation=prestation,
+            demandeur=user,
+            date_demande=timezone.now(),
+            statut="brouillon",
+        )
+        ligne = LigneReservation.objects.create(
+            reservation=reservation, part=part, quantite_demandee=3
+        )
+        SavTicket.objects.create(
+            ligne_reservation=ligne,
+            reservation=reservation,
+            part=part,
+            type_ticket=TypeSavTicket.REPARATION,
+            statut=StatutSavTicket.OUVERT,
+            quantite=1,
+        )
+
+        response = self._remplacer_les_lignes(factory, user, reservation, part)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "SAV" in str(response.data["lignes"])
+        assert SavTicket.objects.count() == 1
+
+    @pytest.mark.django_db
+    def test_un_bon_sans_retour_reste_modifiable(
+        self, factory, user, prestation, part
+    ):
+        """Le garde-fou ne ferme que ce qui porte un constat."""
+
+        reservation = Reservation.objects.create(
+            prestation=prestation,
+            demandeur=user,
+            date_demande=timezone.now(),
+        )
+        LigneReservation.objects.create(
+            reservation=reservation, part=part, quantite_demandee=1
+        )
+
+        response = self._remplacer_les_lignes(factory, user, reservation, part)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert reservation.lignes.get().quantite_demandee == 5

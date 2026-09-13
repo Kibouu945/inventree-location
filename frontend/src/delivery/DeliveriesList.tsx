@@ -21,11 +21,12 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
-import { canMarquerLivree } from '../roles';
+import type { Page, Ramassage } from '../ramassage/types';
+import { canMarquerLivree, hasAnyRole, LIVREUR } from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
 import { DeliveryCalendar } from './DeliveryCalendar';
-import { DeliveryMap } from './DeliveryMap';
 import { DeliveryNote } from './DeliveryNote';
+import { DeliveryStatusForm } from './DeliveryStatusForm';
 import {
   buildDeliveryQuery,
   DEFAULT_DELIVERY_FILTERS,
@@ -34,10 +35,15 @@ import {
   parseDeliveryFilters,
   serializeDeliveryFilters
 } from './deliveryParams';
+import { TourneeView } from './TourneeView';
 import type { Delivery } from './types';
 
 const DELIVERIES_URL = '/plugin/inventree-location/deliveries/';
 const LIEUX_URL = '/plugin/inventree-location/lieux/';
+const RAMASSAGES_URL = '/plugin/inventree-location/ramassages/';
+
+/** Plafond de `LieuPagination` côté serveur : au-delà, on le signale. */
+const MAX_RAMASSAGES_TOURNEE = 100;
 
 const STATUT_COLORS: Record<string, string> = {
   validee: 'green',
@@ -52,12 +58,18 @@ const STATUT_OPTIONS = [
 const VIEW_OPTIONS = [
   { value: 'liste', label: 'Liste' },
   { value: 'calendrier', label: 'Calendrier' },
-  { value: 'carte', label: 'Carte' }
+  { value: 'carte', label: 'Tournée' }
 ];
 
 interface LieuOption {
   id: number;
   nom: string;
+}
+
+function apiErrorDetail(error: unknown): string {
+  const data = (error as { response?: { data?: { detail?: string } } })
+    ?.response?.data;
+  return data?.detail ?? 'Action impossible.';
 }
 
 const ownsDeliveryKey = ownsKeys(DELIVERY_URL_KEYS);
@@ -84,6 +96,10 @@ export function DeliveriesList({
 }) {
   const [filters, setFilters] = useState<DeliveryFiltersState>(initialFilters);
   const [noteDelivery, setNoteDelivery] = useState<Delivery | null>(null);
+  const [statusDelivery, setStatusDelivery] = useState<Delivery | null>(null);
+
+  const isLivreur = hasAnyRole(context, [LIVREUR]);
+  const currentUserId = context.user?.userId?.();
 
   useEffect(() => {
     syncUrl(filters);
@@ -101,6 +117,64 @@ export function DeliveriesList({
           paramsSerializer: { indexes: null }
         });
         return response.data as Delivery[];
+      },
+      // Le pool commun (US-18) change sous l'action d'autres livreurs : sans
+      // ça, une livraison relâchée par un livreur reste invisible pour les
+      // autres tant qu'ils ne rechargent pas la page à la main.
+      refetchInterval: 15000,
+      refetchOnWindowFocus: true
+    },
+    context.queryClient
+  );
+
+  const acceptMutation = useMutation(
+    {
+      mutationFn: async (deliveryId: number) => {
+        const response = await context.api.post(
+          `${DELIVERIES_URL}${deliveryId}/accepter/`
+        );
+        return response.data;
+      },
+      onSuccess: () => {
+        context.queryClient.invalidateQueries({ queryKey: ['deliveries'] });
+        notifications.show({
+          title: 'Livraison acceptée',
+          message: 'Cette livraison vous est désormais assignée.',
+          color: 'green'
+        });
+      },
+      onError: (error: unknown) => {
+        // Course perdue (livraison prise entre-temps) : la vue est stale,
+        // on la resynchronise plutôt que de laisser le bouton « Accepter »
+        // réapparaître comme si de rien n'était.
+        context.queryClient.invalidateQueries({ queryKey: ['deliveries'] });
+        notifications.show({
+          title: 'Action impossible',
+          message: apiErrorDetail(error),
+          color: 'red'
+        });
+      }
+    },
+    context.queryClient
+  );
+
+  const releaseMutation = useMutation(
+    {
+      mutationFn: async (deliveryId: number) => {
+        const response = await context.api.delete(
+          `${DELIVERIES_URL}${deliveryId}/accepter/`
+        );
+        return response.data;
+      },
+      onSuccess: () => {
+        context.queryClient.invalidateQueries({ queryKey: ['deliveries'] });
+      },
+      onError: (error: unknown) => {
+        notifications.show({
+          title: 'Action impossible',
+          message: apiErrorDetail(error),
+          color: 'red'
+        });
       }
     },
     context.queryClient
@@ -121,6 +195,10 @@ export function DeliveriesList({
         context.queryClient.invalidateQueries({ queryKey: ['deliveries'] });
         context.queryClient.invalidateQueries({ queryKey: ['reservations'] });
         context.queryClient.invalidateQueries({ queryKey: ['ramassages'] });
+        // Une réservation livrée devient un ramassage à venir.
+        context.queryClient.invalidateQueries({
+          queryKey: ['tournee-ramassages']
+        });
         notifications.show({
           title: 'Livrée',
           message: 'Réservation marquée livrée.',
@@ -152,6 +230,45 @@ export function DeliveriesList({
     },
     context.queryClient
   );
+
+  // La tournée mélange dépose et reprise : les ramassages ne sont chargés que
+  // pour cette vue, et l'API les filtre par nom de lieu là où les livraisons
+  // le font par id — on retombe donc sur un filtrage client par id.
+  const ramassagesQuery = useQuery<Page<Ramassage>>(
+    {
+      queryKey: ['tournee-ramassages', params.date_from, params.date_to],
+      enabled: filters.viewMode === 'carte',
+      queryFn: async () => {
+        const response = await context.api.get(RAMASSAGES_URL, {
+          params: {
+            page_size: MAX_RAMASSAGES_TOURNEE,
+            ...(params.date_from ? { date_from: params.date_from } : {}),
+            ...(params.date_to ? { date_to: params.date_to } : {})
+          }
+        });
+        return response.data as Page<Ramassage>;
+      }
+    },
+    context.queryClient
+  );
+
+  const ramassages = useMemo(() => {
+    const resultats = ramassagesQuery.data?.results ?? [];
+
+    if (filters.lieux.length === 0) {
+      return resultats;
+    }
+
+    const retenus = new Set(filters.lieux);
+
+    return resultats.filter(
+      (ramassage) => ramassage.lieu && retenus.has(ramassage.lieu.id)
+    );
+  }, [ramassagesQuery.data, filters.lieux]);
+
+  const ramassagesTronques =
+    (ramassagesQuery.data?.count ?? 0) >
+    (ramassagesQuery.data?.results.length ?? 0);
 
   const lieuOptions = useMemo(() => {
     const payload = lieuxQuery.data;
@@ -189,16 +306,51 @@ export function DeliveriesList({
       </Group>
 
       <Group align='flex-end' gap='md' wrap='wrap'>
+        {/* Le livreur ouvre son écran sur sa journée, pas sur l'historique
+            complet (revue interne du 07/09/2026). Choisir un horizon efface
+            la période libre, et inversement : les deux répondent à la même
+            question, les cumuler ne voudrait rien dire. */}
+        <Stack gap={4}>
+          <Text size='sm' fw={500}>
+            Quand
+          </Text>
+          <SegmentedControl
+            value={
+              filters.dateRange[0] || filters.dateRange[1]
+                ? ''
+                : filters.horizon
+            }
+            onChange={(value) =>
+              updateFilters({
+                horizon: value as DeliveryFiltersState['horizon'],
+                dateRange: [null, null]
+              })
+            }
+            data={[
+              { label: "Aujourd'hui", value: 'jour' },
+              { label: 'À venir', value: 'avenir' },
+              { label: 'Tout', value: 'tout' }
+            ]}
+          />
+        </Stack>
         <DatePickerInput
           type='range'
-          label='Période'
-          placeholder="Aujourd'hui ou une période"
+          label='Période précise'
+          placeholder='Toute autre période'
           value={filters.dateRange}
           onChange={(value) =>
-            updateFilters({ dateRange: [value[0], value[1]] })
+            updateFilters({
+              dateRange: [value[0], value[1]],
+              // Une période choisie remplace l'horizon plutôt que de s'y
+              // ajouter : sinon « Aujourd'hui » resterait allumé sur une
+              // liste qui montre le mois prochain.
+              horizon:
+                value[0] || value[1] ? 'tout' : DEFAULT_DELIVERY_FILTERS.horizon
+            })
           }
           clearable
-          w={260}
+          valueFormat='DD/MM/YYYY'
+          w={240}
         />
         <MultiSelect
           label='Lieu'
@@ -252,6 +404,30 @@ export function DeliveriesList({
         <Group justify='center' p='xl'>
           <Loader />
         </Group>
+      ) : filters.viewMode === 'carte' ? (
+        <Stack gap='sm'>
+          {ramassagesQuery.isError && (
+            <Alert color='yellow' variant='light'>
+              Les ramassages n'ont pas pu être chargés : la tournée ne montre
+              que les livraisons.
+            </Alert>
+          )}
+
+          {ramassagesTronques && (
+            <Alert color='yellow' variant='light'>
+              Plus de {MAX_RAMASSAGES_TOURNEE} ramassages sur cette période :
+              seuls les {MAX_RAMASSAGES_TOURNEE} premiers sont dans la tournée.
+              Resserrez la période.
+            </Alert>
+          )}
+
+          <TourneeView
+            deliveries={rows}
+            ramassages={ramassages}
+            ordre={filters.ordre}
+            onOrdreChange={(ordre) => updateFilters({ ordre })}
+          />
+        </Stack>
       ) : rows.length === 0 ? (
         <Text c='dimmed'>Aucune livraison sur cette période.</Text>
       ) : filters.viewMode === 'calendrier' ? (
@@ -259,8 +435,6 @@ export function DeliveriesList({
           deliveries={rows}
           onSelectDay={(day) => updateFilters({ dateRange: [day, day] })}
         />
-      ) : filters.viewMode === 'carte' ? (
-        <DeliveryMap deliveries={rows} />
       ) : (
         <Table striped highlightOnHover>
           <Table.Thead>
@@ -272,55 +446,117 @@ export function DeliveriesList({
               <Table.Th>Organisateur</Table.Th>
               <Table.Th>Quantité totale</Table.Th>
               <Table.Th>Statut</Table.Th>
+              <Table.Th>Assignation</Table.Th>
               <Table.Th />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {rows.map((delivery) => (
-              <Table.Tr key={delivery.id}>
-                <Table.Td>{delivery.numero}</Table.Td>
-                <Table.Td>
-                  {delivery.date_retrait_prevue
-                    ? new Date(delivery.date_retrait_prevue).toLocaleString()
-                    : '—'}
-                </Table.Td>
-                <Table.Td>{delivery.prestation_nom || '—'}</Table.Td>
-                <Table.Td>{delivery.lieu_detail?.nom ?? '—'}</Table.Td>
-                <Table.Td>{delivery.organisateur_nom || '—'}</Table.Td>
-                <Table.Td>{delivery.quantite_totale}</Table.Td>
-                <Table.Td>
-                  <Badge color={STATUT_COLORS[delivery.statut] ?? 'gray'}>
-                    {delivery.statut}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>
-                  <Group gap='xs'>
-                    <Button
-                      size='xs'
-                      variant='light'
-                      onClick={() => setNoteDelivery(delivery)}
-                    >
-                      Détails / Imprimer
-                    </Button>
+            {rows.map((delivery) => {
+              const isMine = delivery.livreur_assigne === currentUserId;
 
-                    {peutMarquerLivree && delivery.statut === 'validee' && (
+              return (
+                <Table.Tr key={delivery.id}>
+                  <Table.Td>{delivery.numero}</Table.Td>
+                  <Table.Td>
+                    {delivery.date_retrait_prevue
+                      ? new Date(delivery.date_retrait_prevue).toLocaleString()
+                      : '—'}
+                  </Table.Td>
+                  <Table.Td>{delivery.prestation_nom || '—'}</Table.Td>
+                  <Table.Td>{delivery.lieu_detail?.nom ?? '—'}</Table.Td>
+                  <Table.Td>{delivery.organisateur_nom || '—'}</Table.Td>
+                  <Table.Td>{delivery.quantite_totale}</Table.Td>
+                  <Table.Td>
+                    <Badge color={STATUT_COLORS[delivery.statut] ?? 'gray'}>
+                      {delivery.statut}
+                    </Badge>
+                  </Table.Td>
+                  <Table.Td>
+                    {delivery.livreur_assigne == null ? (
+                      <Text size='sm' c='dimmed'>
+                        Non assignée
+                      </Text>
+                    ) : (
+                      <Stack gap={2}>
+                        <Text size='sm'>
+                          {isMine ? 'Moi' : delivery.livreur_assigne_nom}
+                        </Text>
+                        <Text size='xs' c='dimmed'>
+                          {delivery.etat_livraison_display}
+                        </Text>
+                      </Stack>
+                    )}
+                  </Table.Td>
+                  <Table.Td>
+                    <Group gap='xs' wrap='nowrap'>
+                      {/* Une réservation déjà livrée n'a plus rien à prendre
+                          en charge : sans ce garde, le bouton s'affichait et
+                          le serveur répondait 409. */}
+                      {isLivreur &&
+                        delivery.statut === 'validee' &&
+                        delivery.livreur_assigne == null && (
+                          <Button
+                            size='xs'
+                            loading={
+                              acceptMutation.isPending &&
+                              acceptMutation.variables === delivery.id
+                            }
+                            onClick={() => acceptMutation.mutate(delivery.id)}
+                          >
+                            Accepter
+                          </Button>
+                        )}
+                      {isMine && delivery.etat_livraison === 'assignee' && (
+                        <Button
+                          size='xs'
+                          variant='default'
+                          loading={
+                            releaseMutation.isPending &&
+                            releaseMutation.variables === delivery.id
+                          }
+                          onClick={() => releaseMutation.mutate(delivery.id)}
+                        >
+                          Relâcher
+                        </Button>
+                      )}
+                      {isMine &&
+                        (delivery.etat_livraison === 'assignee' ||
+                          delivery.etat_livraison === 'en_cours') && (
+                          <Button
+                            size='xs'
+                            variant='light'
+                            onClick={() => setStatusDelivery(delivery)}
+                          >
+                            Changer l'état
+                          </Button>
+                        )}
                       <Button
                         size='xs'
-                        variant='outline'
-                        color='green'
-                        loading={
-                          livrerMutation.isPending &&
-                          livrerMutation.variables === delivery.id
-                        }
-                        onClick={() => livrerMutation.mutate(delivery.id)}
+                        variant='light'
+                        onClick={() => setNoteDelivery(delivery)}
                       >
-                        Marquer livrée
+                        Détails / Imprimer
                       </Button>
-                    )}
-                  </Group>
-                </Table.Td>
-              </Table.Tr>
-            ))}
+
+                      {peutMarquerLivree && delivery.statut === 'validee' && (
+                        <Button
+                          size='xs'
+                          variant='outline'
+                          color='green'
+                          loading={
+                            livrerMutation.isPending &&
+                            livrerMutation.variables === delivery.id
+                          }
+                          onClick={() => livrerMutation.mutate(delivery.id)}
+                        >
+                          Marquer livrée
+                        </Button>
+                      )}
+                    </Group>
+                  </Table.Td>
+                </Table.Tr>
+              );
+            })}
           </Table.Tbody>
         </Table>
       )}
@@ -328,6 +564,11 @@ export function DeliveriesList({
       <DeliveryNote
         delivery={noteDelivery}
         onClose={() => setNoteDelivery(null)}
+      />
+      <DeliveryStatusForm
+        context={context}
+        delivery={statusDelivery}
+        onClose={() => setStatusDelivery(null)}
       />
     </Stack>
   );

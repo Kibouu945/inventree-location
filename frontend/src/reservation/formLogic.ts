@@ -6,6 +6,7 @@
  * côté serveur : permissives en brouillon, strictes à la soumission.
  */
 
+import { HEURE_PAR_DEFAUT } from '../DateTimeField';
 import type {
   LigneReservationLine,
   Prestation,
@@ -13,6 +14,14 @@ import type {
   ReservationFormValues,
   ReservationStatut
 } from './types';
+
+/** Formate une date en « JJ/MM », en UTC pour rester stable quel que soit le
+ * fuseau d'exécution (tests compris). */
+function formatDayMonth(date: Date): string {
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  return `${day}/${month}`;
+}
 
 export function emptyReservationValues(): ReservationFormValues {
   return {
@@ -22,6 +31,60 @@ export function emptyReservationValues(): ReservationFormValues {
     date_retour_prevue: null,
     commentaire: '',
     lignes: []
+  };
+}
+
+/** Pose une heure « HH:mm » sur le jour d'une date, sans toucher au jour. */
+function auMemeJourA(date: Date, heure: string): Date {
+  const [h, m] = heure.split(':').map(Number);
+  const resultat = new Date(date);
+  resultat.setHours(h, m ?? 0, 0, 0);
+  return resultat;
+}
+
+/**
+ * Valeurs reprises de la prestation pour une réservation neuve.
+ *
+ * Recette Tassin du 07/09/2026, remarques 14 et 15 : « il serait souhaitable de
+ * reprendre les dates de la prestation et de positionner l'heure à 8h00 par
+ * défaut », et « il faut ressaisir toute la liste ? on devrait pouvoir
+ * récupérer la liste saisie au moment de la prestation ». Les deux
+ * informations étaient déjà sur le fil : `GET /prestations/{id}/` renvoie les
+ * dates *et* les lignes, et le formulaire les jetait.
+ *
+ * L'heure de 8h00 n'est posée que si elle laisse la période couvrir la
+ * prestation — règle RES-07, vérifiée aussi côté serveur
+ * (`ReservationSerializer.validate`) : le retrait ne peut pas être postérieur
+ * au début, ni le retour antérieur à la fin. Sur une prestation saisie à
+ * minuit, 8h00 arriverait trop tard pour le retrait ; on garde alors la date
+ * de la prestation telle quelle plutôt que de proposer une valeur que la
+ * validation refusera. Les prestations créées désormais portent 8h00 par défaut
+ * (voir `DateTimeField`), les deux bornes tombent donc juste d'elles-mêmes.
+ */
+export function prestationDefaults(
+  prestation: Prestation
+): Pick<
+  ReservationFormValues,
+  'date_retrait_prevue' | 'date_retour_prevue' | 'lignes'
+> {
+  const debut = new Date(prestation.date_debut);
+  const fin = new Date(prestation.date_fin);
+
+  const retraitA8h = auMemeJourA(debut, HEURE_PAR_DEFAUT);
+  const retourA8h = auMemeJourA(fin, HEURE_PAR_DEFAUT);
+
+  return {
+    date_retrait_prevue: retraitA8h <= debut ? retraitA8h : debut,
+    date_retour_prevue: retourA8h >= fin ? retourA8h : fin,
+    // `isVirtual` est laissé à faux : c'est `enrichLignesFromCatalog` qui
+    // tranche, une fois le catalogue résolu. La règle « au moins un article
+    // virtuel » reste donc évaluée sur des drapeaux vrais.
+    lignes: (prestation.lignes ?? []).map((ligne) => ({
+      part: ligne.part,
+      partName: ligne.part_name,
+      quantiteDemandee: ligne.quantite,
+      isVirtual: false
+    }))
   };
 }
 
@@ -77,14 +140,20 @@ export function validateReservationValues(
     } else if (prestation) {
       const debut = new Date(prestation.date_debut);
       const fin = new Date(prestation.date_fin);
+      const couvreDebut = retrait <= debut;
+      const couvreFin = retour >= fin;
 
-      if (retrait > debut) {
-        errors.date_retrait_prevue =
-          'La période doit couvrir au moins les dates de la prestation.';
-      }
-      if (retour < fin) {
-        errors.date_retour_prevue =
-          'La période doit couvrir au moins les dates de la prestation.';
+      if (!couvreDebut || !couvreFin) {
+        const message =
+          'La période de réservation doit couvrir les dates du ' +
+          `${formatDayMonth(debut)} au ${formatDayMonth(fin)}.`;
+
+        if (!couvreDebut) {
+          errors.date_retrait_prevue = message;
+        }
+        if (!couvreFin) {
+          errors.date_retour_prevue = message;
+        }
       }
     }
   }

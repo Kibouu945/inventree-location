@@ -8,6 +8,14 @@ export interface Page<T> {
   results: T[];
 }
 
+export type StatutPrestation =
+  | 'brouillon'
+  | 'planifiee'
+  | 'confirmee'
+  | 'livree'
+  | 'cloturee'
+  | 'annulee';
+
 export type StatutManifestation =
   | 'brouillon'
   | 'planifiee'
@@ -25,18 +33,50 @@ export interface Manifestation {
   statut: StatutManifestation | string;
   // Statut réel : en_cours / terminée sont dérivés des dates côté serveur.
   statut_effectif: StatutManifestation | string;
-  organisateur: number;
+  couleur: string;
+  pourcent_remise_globale: string;
+  client: number;
+  /** Nom du client, rendu par le sérialiseur : la liste l'affiche sans second appel. */
+  client_nom: string;
+  contact: number | null;
+  // Clé conservée : la source est le contact référent, à défaut le client.
   organisateur_nom: string;
-  groupe: number;
   prestations_count: number;
   created_at: string;
   updated_at: string;
+}
+
+/** Client (`ClientSerializer`). */
+export interface Client {
+  id: number;
+  nom: string;
+  adresse: string;
+  email: string | null;
+  telephone: string;
+  type_client: string;
+  siret: string;
+  gestionnaire: number | null;
+  gestionnaire_nom: string;
+  actif: boolean;
+}
+
+/** Contact d'un client (`ContactSerializer`). */
+export interface Contact {
+  id: number;
+  client: number;
+  nom: string;
+  prenom: string;
+  nom_complet: string;
+  email: string | null;
+  telephone: string;
+  actif: boolean;
 }
 
 /** Lieu géolocalisé autonome (`LieuSerializer`). */
 export interface Lieu {
   id: number;
   nom: string;
+  description: string;
   adresse: string;
   latitude: string | null;
   longitude: string | null;
@@ -68,6 +108,8 @@ export interface Prestation {
   date_debut: string;
   date_fin: string;
   description: string;
+  statut: StatutPrestation | string;
+  modifie_apres_devis: boolean;
   manifestation: number;
   manifestation_nom: string;
   lieu: number | null;

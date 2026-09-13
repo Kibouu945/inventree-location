@@ -18,6 +18,7 @@ export interface BackOfficePart {
   stock_total: number;
   is_rentable: boolean;
   consommable: boolean;
+  poids: string | null;
   seuil_alerte_bas: number | null;
   seuil_alerte_haut: number | null;
   /** Coupe les alertes de seuil sans effacer les seuils (CDC V06). */
@@ -34,6 +35,7 @@ export interface BackOfficePartFormValues {
   virtual: boolean;
   is_rentable: boolean;
   consommable: boolean;
+  poids: string | null;
   seuil_alerte_bas: number | null;
   seuil_alerte_haut: number | null;
   alertes_desactivees: boolean;

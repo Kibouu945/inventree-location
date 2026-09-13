@@ -57,8 +57,10 @@ class InvenTreeLocation(
         from django.urls import path
 
         from .backoffice import (
-            BackOfficeGroupeDetailView,
-            BackOfficeGroupeListCreateView,
+            BackOfficeClientDetailView,
+            BackOfficeClientListCreateView,
+            BackOfficeContactDetailView,
+            BackOfficeContactListCreateView,
             BackOfficeRoleListView,
             BackOfficeUserDetailView,
             BackOfficeUserListCreateView,
@@ -76,6 +78,8 @@ class InvenTreeLocation(
         )
         from .views import (
             BonRamassageView,
+            DeliveryAccepterView,
+            DeliveryEtatView,
             DeliveryMarquerLivreeView,
             CatalogPartDetailView,
             CatalogPartListView,
@@ -85,7 +89,7 @@ class InvenTreeLocation(
             DeliveryListView,
             ExampleView,
             GeocodeAddressView,
-            GroupeListView,
+            ClientListView,
             LieuDetailView,
             LieuListCreateView,
             ManifestationDetailView,
@@ -97,6 +101,7 @@ class InvenTreeLocation(
             RamassageListView,
             RentableFlagBulkUpdateView,
             RentablePartDetailView,
+            ReservationCalendarView,
             ReservationCheckinView,
             ReservationConflictCheckView,
             ReservationDetailView,
@@ -111,6 +116,7 @@ class InvenTreeLocation(
             ReturnReportPdfView,
             ReturnReportView,
             StockAlertListView,
+            TourneeView,
             UserListView,
         )
 
@@ -191,6 +197,12 @@ class InvenTreeLocation(
                 name="return-report-pdf",
             ),
             path("deliveries/", DeliveryListView.as_view(), name="delivery-list"),
+            path("tournees/", TourneeView.as_view(), name="tournee-du-jour"),
+            path(
+                "reservations/calendar/",
+                ReservationCalendarView.as_view(),
+                name="reservation-calendar",
+            ),
             path(
                 "reservations/<int:pk>/conflicts/",
                 ReservationConflictCheckView.as_view(),
@@ -247,14 +259,24 @@ class InvenTreeLocation(
                 name="backoffice-part-image",
             ),
             path(
-                "backoffice/groupes/",
-                BackOfficeGroupeListCreateView.as_view(),
-                name="backoffice-groupe-list-create",
+                "backoffice/clients/",
+                BackOfficeClientListCreateView.as_view(),
+                name="backoffice-client-list-create",
             ),
             path(
-                "backoffice/groupes/<int:pk>/",
-                BackOfficeGroupeDetailView.as_view(),
-                name="backoffice-groupe-detail",
+                "backoffice/clients/<int:pk>/",
+                BackOfficeClientDetailView.as_view(),
+                name="backoffice-client-detail",
+            ),
+            path(
+                "backoffice/contacts/",
+                BackOfficeContactListCreateView.as_view(),
+                name="backoffice-contact-list-create",
+            ),
+            path(
+                "backoffice/contacts/<int:pk>/",
+                BackOfficeContactDetailView.as_view(),
+                name="backoffice-contact-detail",
             ),
             path(
                 "backoffice/roles/",
@@ -265,6 +287,16 @@ class InvenTreeLocation(
                 "deliveries/<int:pk>/livrer/",
                 DeliveryMarquerLivreeView.as_view(),
                 name="delivery-marquer-livree",
+            ),
+            path(
+                "deliveries/<int:pk>/accepter/",
+                DeliveryAccepterView.as_view(),
+                name="delivery-accepter",
+            ),
+            path(
+                "deliveries/<int:pk>/etat/",
+                DeliveryEtatView.as_view(),
+                name="delivery-etat",
             ),
             path("conflicts/", ConflictsListView.as_view(), name="conflict-list"),
             path(
@@ -288,9 +320,9 @@ class InvenTreeLocation(
                 name="prestation-stock",
             ),
             path(
-                "groupes/",
-                GroupeListView.as_view(),
-                name="groupe-list",
+                "clients/",
+                ClientListView.as_view(),
+                name="client-list",
             ),
             path(
                 "users/",
@@ -439,6 +471,26 @@ class InvenTreeLocation(
                 },
             })
 
+        if visible("inventree-location-calendrier"):
+            items.append({
+                "key": "inventree-location-calendrier",
+                "title": "Calendrier des réservations",
+                "description": (
+                    "Vue mensuelle des réservations en cours et planifiées"
+                ),
+                "icon": "ti:calendar-month:outline",
+                "source": self.plugin_static_file(
+                    "Calendar.js:renderInvenTreeLocationCalendar"
+                ),
+                "options": {
+                    "width": 12,
+                    "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
         if visible("inventree-location-ramassages"):
             items.append({
                 "key": "inventree-location-ramassages",
@@ -451,6 +503,25 @@ class InvenTreeLocation(
                 "options": {
                     "width": 12,
                     "height": 8,
+                },
+                "context": {
+                    "settings": self.get_settings_dict(),
+                },
+            })
+
+        if visible("inventree-location-poste"):
+            items.append({
+                "key": "inventree-location-poste",
+                "title": "Mon poste de travail",
+                "description": ("Accès aux écrans métier, servis en pages plein écran"),
+                "icon": "ti:layout-dashboard:outline",
+                "source": self.plugin_static_file(
+                    "PosteDashboard.js:renderInvenTreeLocationPoste"
+                ),
+                # À garder aligné sur `dashboards.WIDGET_SIZES`.
+                "options": {
+                    "width": 12,
+                    "height": 10,
                 },
                 "context": {
                     "settings": self.get_settings_dict(),

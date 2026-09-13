@@ -9,15 +9,16 @@ from django.contrib.auth.models import Group
 
 from inventree_location import roles
 from inventree_location.models import (
-    Groupe,
     Lieu,
-    Manifestation,
     Prestation,
-    Profile,
     RentableItem,
     Reservation,
 )
 from inventree_location.views import DeliveryListView, DeliveryMarquerLivreeView
+from inventree_location.tests.factories import (
+    make_contact,
+    make_manifestation,
+)
 
 from part.models import Part, PartCategory
 
@@ -46,10 +47,10 @@ def livreur(db):
 
 
 @pytest.fixture
-def organisateur(db):
-    return User.objects.create_user(
-        username="org", password="pwd12345", first_name="Ora", last_name="Nisatrice"
-    )
+def contact(db):
+    """Le contact référent : c'est lui que le bon de livraison imprime."""
+
+    return make_contact(nom="Nisatrice", prenom="Ora", telephone="0102030405")
 
 
 @pytest.fixture
@@ -66,15 +67,14 @@ def part(db):
 
 
 @pytest.fixture
-def manifestation(db, organisateur):
-    groupe = Groupe.objects.create(nom="Groupe A", code="GA")
-    return Manifestation.objects.create(
+def manifestation(db, contact):
+    return make_manifestation(
         nom="Camp",
         date_debut="2026-06-01T00:00:00Z",
         date_fin="2026-06-05T00:00:00Z",
         statut="planifiee",
-        organisateur=organisateur,
-        groupe=groupe,
+        client=contact.client,
+        contact=contact,
     )
 
 
@@ -210,6 +210,52 @@ class TestDeliveryListView:
         assert ids == [in_range.pk]
 
     @pytest.mark.django_db
+    def test_date_to_couvre_la_journee_entiere(self, factory, gestionnaire, prestation, part):
+        """Filtrer sur « le 2 juin » doit montrer la tournée de ce jour-là.
+
+        Une borne au jour est lue comme minuit : un retrait prévu à 8 h 30
+        tombait hors filtre, et l'écran tournée du jour restait vide.
+        """
+
+        du_jour = _make_reservation(
+            prestation,
+            part,
+            statut="validee",
+            date_retrait="2026-06-02T08:30:00Z",
+            date_retour="2026-06-06T00:00:00Z",
+        )
+
+        request = factory.get(
+            "/plugin/inventree-location/deliveries/",
+            {"date_from": "2026-06-02", "date_to": "2026-06-02"},
+        )
+        force_authenticate(request, user=gestionnaire)
+        response = DeliveryListView.as_view()(request)
+
+        assert [row["id"] for row in response.data] == [du_jour.pk]
+
+    @pytest.mark.django_db
+    def test_borne_horodatee_reste_exacte(self, factory, gestionnaire, prestation, part):
+        """Une borne complète garde sa précision à l'heure près."""
+
+        _make_reservation(
+            prestation,
+            part,
+            statut="validee",
+            date_retrait="2026-06-02T08:30:00Z",
+            date_retour="2026-06-06T00:00:00Z",
+        )
+
+        request = factory.get(
+            "/plugin/inventree-location/deliveries/",
+            {"date_to": "2026-06-02T08:00:00Z"},
+        )
+        force_authenticate(request, user=gestionnaire)
+        response = DeliveryListView.as_view()(request)
+
+        assert response.data == []
+
+    @pytest.mark.django_db
     def test_lieu_filter(self, factory, gestionnaire, manifestation, part, lieu):
         other_lieu = Lieu.objects.create(nom="Gymnase", adresse="2 rue du Sport")
         other_prestation = Prestation.objects.create(
@@ -252,10 +298,12 @@ class TestDeliveryListView:
         assert ids == [wanted.pk]
 
     @pytest.mark.django_db
-    def test_organisateur_contact_populated_when_profile_exists(
-        self, factory, gestionnaire, prestation, part, organisateur
+    def test_le_contact_referent_alimente_les_cles_organisateur(
+        self, factory, gestionnaire, prestation, part
     ):
-        Profile.objects.create(user=organisateur, telephone="0102030405")
+        """Les clés `organisateur_*` sont conservées, leur source change : le
+        contact référent de la manifestation."""
+
         reservation = _make_reservation(
             prestation,
             part,
@@ -273,10 +321,13 @@ class TestDeliveryListView:
         assert "Nisatrice" in row["organisateur_nom"]
 
     @pytest.mark.django_db
-    def test_organisateur_telephone_empty_without_profile(
+    def test_sans_contact_on_retombe_sur_le_client(
         self, factory, gestionnaire, prestation, part
     ):
-        # Aucun Profile pour l'organisateur : ne doit pas lever de 500.
+        # `contact` est nullable : on affiche alors le client, sans lever de 500.
+        prestation.manifestation.contact = None
+        prestation.manifestation.save(update_fields=["contact"])
+
         reservation = _make_reservation(
             prestation,
             part,
@@ -291,6 +342,7 @@ class TestDeliveryListView:
 
         assert response.status_code == status.HTTP_200_OK
         row = next(r for r in response.data if r["id"] == reservation.pk)
+        assert row["organisateur_nom"] == prestation.manifestation.client.nom
         assert row["organisateur_telephone"] == ""
 
     @pytest.mark.django_db
@@ -418,10 +470,10 @@ class TestMarquerLivree:
 
     @pytest.mark.django_db
     def test_un_role_sans_droit_est_refuse(self, factory, db, reservation_validee):
-        organisateur = User.objects.create_user(username="orga-x", password="pwd")
-        organisateur.groups.add(Group.objects.get_or_create(name=roles.ORGANISATEUR)[0])
+        lecteur = User.objects.create_user(username="lecteur-x", password="pwd")
+        lecteur.groups.add(Group.objects.get_or_create(name=roles.LECTEUR)[0])
 
-        response = self._post(factory, organisateur, reservation_validee)
+        response = self._post(factory, lecteur, reservation_validee)
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         reservation_validee.refresh_from_db()

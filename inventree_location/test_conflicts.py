@@ -10,12 +10,11 @@ from inventree_location.conflicts import (
     find_conflicting_reservations,
 )
 from inventree_location.models import (
-    Groupe,
     LigneReservation,
-    Manifestation,
     Prestation,
     Reservation,
 )
+from inventree_location.tests.factories import make_manifestation
 
 
 def test_periods_overlap_conflict():
@@ -216,14 +215,11 @@ def conflict_setup(db):
     from part.models import Part
 
     user = get_user_model().objects.create_user(username="bob", password="pwd12345")
-    groupe = Groupe.objects.create(nom="Jambville", code="JAM")
     now = timezone.now().replace(microsecond=0)
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp",
         date_debut=now,
         date_fin=now,
-        organisateur=user,
-        groupe=groupe,
     )
     prestation = Prestation.objects.create(
         manifestation=manifestation, nom="P", date_debut=now, date_fin=now

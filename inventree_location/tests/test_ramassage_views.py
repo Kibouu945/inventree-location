@@ -22,14 +22,13 @@ from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from inventree_location.models import (
-    Groupe,
     Lieu,
-    Manifestation,
     Prestation,
     Reservation,
     StatutReservation,
 )
 from inventree_location.views import BonRamassageView, RamassageListView
+from inventree_location.tests.factories import make_manifestation
 
 User = get_user_model()
 
@@ -64,12 +63,10 @@ def lieu(db):
 
 @pytest.fixture
 def prestation(db, user, lieu):
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp d'été",
         date_debut=timezone.now(),
         date_fin=timezone.now(),
-        organisateur=user,
-        groupe=Groupe.objects.create(nom="Groupe test", code="GT"),
     )
 
     return Prestation.objects.create(
@@ -136,6 +133,16 @@ class TestRamassageList:
 
         assert response.status_code == status.HTTP_200_OK
         assert response.data["count"] == attendu
+
+    def test_date_to_couvre_la_journee_entiere(self, factory, user, reservation):
+        """Un ramassage prévu à 16 h le 10 doit sortir sur un filtre « le 10 »."""
+
+        reservation.date_retour_prevue = "2026-09-10T16:00:00Z"
+        reservation.save(update_fields=["date_retour_prevue"])
+
+        response = _get(factory, user, date_from="2026-09-10", date_to="2026-09-10")
+
+        assert response.data["count"] == 1
 
     def test_sans_date_de_retour_pas_de_ramassage(self, factory, user, reservation):
         reservation.date_retour_prevue = None

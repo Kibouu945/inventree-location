@@ -13,6 +13,7 @@ import {
   TextInput,
   Title
 } from '@mantine/core';
+import { DatePickerInput } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
@@ -23,12 +24,14 @@ import {
   CATALOG_URL_KEYS,
   type CatalogFiltersState,
   DEFAULT_FILTERS,
+  libelleColonneDisponibilite,
   parseFilters,
   serializeFilters,
   totalPages
 } from './catalogParams';
 import { PartKindBadge } from './PartKindBadge';
 import type { CatalogPage } from './types';
+import { useCategoryOptions } from './useCategoryOptions';
 
 const CATALOG_URL = '/plugin/inventree-location/catalog/';
 
@@ -85,21 +88,21 @@ export function CatalogList({ context }: { context: InvenTreePluginContext }) {
 
   const rows = query.data?.results ?? [];
 
-  // Options de catégories dérivées des résultats chargés (MVP).
-  const categoryOptions = useMemo(() => {
-    const seen = new Map<number, string>();
-    for (const part of rows) {
-      if (part.category != null && part.category_name) {
-        seen.set(part.category, part.category_name);
-      }
-    }
-    return Array.from(seen.entries()).map(([id, name]) => ({
-      value: String(id),
-      label: name
-    }));
-  }, [rows]);
+  // Les options venaient des seules lignes de la page courante : la liste
+  // était incomplète, et se réduisait encore à chaque filtrage — un filtre
+  // qui rétrécit à mesure qu'on s'en sert. Elles viennent maintenant de
+  // l'arbre des catégories InvenTree, comme sur les autres écrans.
+  const categoryOptions = useCategoryOptions(context);
 
   const pages = totalPages(query.data?.count ?? 0);
+
+  // L'en-tête dit sur quoi porte le chiffre. « Disponible aujourd'hui » sur
+  // une colonne qui, en réalité, répondait pour la période demandée aurait
+  // été pire que l'ancien libellé.
+  const libelleDisponibilite = useMemo(
+    () => libelleColonneDisponibilite(filters.dateDebut, filters.dateFin),
+    [filters.dateDebut, filters.dateFin]
+  );
 
   function update(patch: Partial<CatalogFiltersState>) {
     // Tout changement de filtre (hors page) réinitialise la pagination.
@@ -149,6 +152,22 @@ export function CatalogList({ context }: { context: InvenTreePluginContext }) {
             { label: 'Tout', value: 'all' }
           ]}
         />
+        {/* « De quoi je dispose du 10 au 14 septembre ? » — la question que
+            le catalogue ne savait pas poser, puisqu'il ne montrait que le
+            disponible du jour (revue interne du 07/09/2026). Vide, le
+            serveur retombe sur aujourd'hui : le comportement d'avant. */}
+        <DatePickerInput
+          type='range'
+          label='Période'
+          placeholder='Aujourd’hui'
+          value={[filters.dateDebut, filters.dateFin]}
+          onChange={([debut, fin]) =>
+            update({ dateDebut: debut, dateFin: fin })
+          }
+          clearable
+          valueFormat='DD/MM/YYYY'
+          w={240}
+        />
       </Group>
 
       {query.isError && (
@@ -175,7 +194,7 @@ export function CatalogList({ context }: { context: InvenTreePluginContext }) {
               {/* La colonne dit la nature de l'article, pas seulement s'il est
                   louable : service, consommable ou matériel. */}
               <Table.Th>Nature</Table.Th>
-              <Table.Th>Disponible aujourd'hui</Table.Th>
+              <Table.Th>{libelleDisponibilite}</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>

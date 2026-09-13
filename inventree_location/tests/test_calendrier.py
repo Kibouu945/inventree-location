@@ -1,0 +1,301 @@
+"""Calendrier mensuel des réservations (DIS-01).
+
+Passe par le routeur réel : c'est FullCalendar qui appelle cet endpoint à
+chaque changement de mois, avec les bornes de la fenêtre affichée.
+"""
+
+from __future__ import annotations
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
+from rest_framework import status
+from rest_framework.authtoken.models import Token
+from rest_framework.test import APIClient
+
+from inventree_location import roles
+from inventree_location.calendrier import STATUT_COULEURS, couleur_statut
+from inventree_location.models import (
+    Lieu,
+    Prestation,
+    Reservation,
+    StatutReservation,
+)
+from inventree_location.tests.factories import make_manifestation
+
+User = get_user_model()
+
+URL = "/plugin/inventree-location/reservations/calendar/"
+
+#: Fenêtre par défaut des tests : le mois des fixtures. Les deux bornes sont
+#: obligatoires côté serveur (le calendrier n'est pas paginé, c'est la période
+#: qui est bornée).
+FENETRE = {"from": "2026-06-01", "to": "2026-06-30"}
+
+pytestmark = [pytest.mark.django_db, pytest.mark.urls("tests.functional_urls")]
+
+
+def client_for(role, username="u"):
+    user = User.objects.create_user(username=username, password="pwd12345")
+
+    if role is not None:
+        user.groups.add(Group.objects.get(name=role))
+
+    client = APIClient()
+    client.credentials(
+        HTTP_AUTHORIZATION=f"Token {Token.objects.create(user=user).key}"
+    )
+
+    return client, user
+
+
+@pytest.fixture
+def prestation(db):
+    manifestation = make_manifestation(
+        nom="Camp d'été",
+        date_debut="2026-06-01T00:00:00Z",
+        date_fin="2026-06-30T00:00:00Z",
+        statut="planifiee",
+    )
+    lieu = Lieu.objects.create(nom="Chalet", adresse="1 rue du Camp")
+
+    return Prestation.objects.create(
+        manifestation=manifestation,
+        nom="Installation",
+        lieu=lieu,
+        date_debut="2026-06-10T00:00:00Z",
+        date_fin="2026-06-12T00:00:00Z",
+    )
+
+
+def _reservation(prestation, *, statut, retrait, retour, demandeur=None):
+    return Reservation.objects.create(
+        prestation=prestation,
+        demandeur=demandeur
+        or User.objects.create_user(
+            username=f"d{Reservation.objects.count()}", password="pwd12345"
+        ),
+        statut=statut,
+        date_retrait_prevue=retrait,
+        date_retour_prevue=retour,
+    )
+
+
+class TestCalendrier:
+    def test_un_evenement_par_reservation(self, prestation):
+        reservation = _reservation(
+            prestation,
+            statut=StatutReservation.VALIDEE,
+            retrait="2026-06-10T08:00:00Z",
+            retour="2026-06-12T18:00:00Z",
+        )
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        response = client.get(URL, FENETRE)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+
+        event = response.data[0]
+        assert event["id"] == str(reservation.pk)
+        assert event["title"] == f"{reservation.numero} — Installation"
+        assert event["start"].startswith("2026-06-10")
+        assert event["end"].startswith("2026-06-12")
+        assert event["color"] == STATUT_COULEURS[StatutReservation.VALIDEE]
+        assert event["extendedProps"]["statut"] == "Validée"
+        assert event["extendedProps"]["statut_code"] == StatutReservation.VALIDEE
+        assert event["extendedProps"]["manifestation"] == "Camp d'été"
+        assert event["extendedProps"]["lieu"] == "Chalet"
+
+    def test_la_fenetre_retient_ce_qui_la_chevauche(self, prestation):
+        dedans = _reservation(
+            prestation,
+            statut=StatutReservation.VALIDEE,
+            retrait="2026-06-10T08:00:00Z",
+            retour="2026-06-12T18:00:00Z",
+        )
+        # Commencée avant la fenêtre mais toujours en cours pendant : elle doit
+        # rester visible, c'est tout l'intérêt d'un calendrier.
+        a_cheval = _reservation(
+            prestation,
+            statut=StatutReservation.LIVREE,
+            retrait="2026-05-25T08:00:00Z",
+            retour="2026-06-03T18:00:00Z",
+        )
+        _reservation(
+            prestation,
+            statut=StatutReservation.VALIDEE,
+            retrait="2026-08-01T08:00:00Z",
+            retour="2026-08-05T18:00:00Z",
+        )
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        response = client.get(URL, FENETRE)
+
+        ids = {event["id"] for event in response.data}
+        assert ids == {str(dedans.pk), str(a_cheval.pk)}
+
+    def test_la_borne_de_fin_couvre_la_journee_entiere(self, prestation):
+        du_jour = _reservation(
+            prestation,
+            statut=StatutReservation.VALIDEE,
+            retrait="2026-06-30T09:00:00Z",
+            retour="2026-07-02T18:00:00Z",
+        )
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        response = client.get(URL, FENETRE)
+
+        assert [event["id"] for event in response.data] == [str(du_jour.pk)]
+
+    def test_un_brouillon_sans_dates_retombe_sur_la_prestation(self, prestation):
+        brouillon = _reservation(
+            prestation,
+            statut=StatutReservation.BROUILLON,
+            retrait=None,
+            retour=None,
+        )
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        response = client.get(URL, FENETRE)
+
+        event = response.data[0]
+        assert event["id"] == str(brouillon.pk)
+        assert event["start"].startswith("2026-06-10")
+        assert event["end"].startswith("2026-06-12")
+
+    def test_les_reservations_archivees_sont_ecartees(self, prestation):
+        archivee = _reservation(
+            prestation,
+            statut=StatutReservation.CLOTUREE,
+            retrait="2026-06-10T08:00:00Z",
+            retour="2026-06-12T18:00:00Z",
+        )
+        archivee.is_archived = True
+        archivee.save(update_fields=["is_archived"])
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        assert client.get(URL, FENETRE).data == []
+
+    def test_le_livreur_ne_voit_que_les_validees(self, prestation):
+        validee = _reservation(
+            prestation,
+            statut=StatutReservation.VALIDEE,
+            retrait="2026-06-10T08:00:00Z",
+            retour="2026-06-12T18:00:00Z",
+        )
+        _reservation(
+            prestation,
+            statut=StatutReservation.BROUILLON,
+            retrait="2026-06-10T08:00:00Z",
+            retour="2026-06-12T18:00:00Z",
+        )
+        client, _ = client_for(roles.LIVREUR, "lucie")
+
+        response = client.get(URL, FENETRE)
+
+        assert [event["id"] for event in response.data] == [str(validee.pk)]
+
+    def test_les_evenements_sont_tries_par_debut(self, prestation):
+        tard = _reservation(
+            prestation,
+            statut=StatutReservation.VALIDEE,
+            retrait="2026-06-20T08:00:00Z",
+            retour="2026-06-22T18:00:00Z",
+        )
+        tot = _reservation(
+            prestation,
+            statut=StatutReservation.VALIDEE,
+            retrait="2026-06-02T08:00:00Z",
+            retour="2026-06-04T18:00:00Z",
+        )
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        response = client.get(URL, FENETRE)
+
+        assert [event["id"] for event in response.data] == [str(tot.pk), str(tard.pk)]
+
+    def test_un_anonyme_est_rejete(self, prestation):
+        assert APIClient().get(URL).status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_un_compte_sans_role_est_interdit(self, prestation):
+        client, _ = client_for(None, "norole")
+
+        assert client.get(URL, FENETRE).status_code == status.HTTP_403_FORBIDDEN
+
+
+class TestFenetre:
+    """Le calendrier n'est pas paginé : c'est la période qui est bornée."""
+
+    def test_les_deux_bornes_sont_obligatoires(self, prestation):
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        for params in ({}, {"from": "2026-06-01"}, {"to": "2026-06-30"}):
+            response = client.get(URL, params)
+
+            assert response.status_code == status.HTTP_400_BAD_REQUEST
+            assert "période" in response.data["detail"]
+
+    def test_une_periode_trop_large_est_refusee(self, prestation):
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        response = client.get(URL, {"from": "2020-01-01", "to": "2030-01-01"})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "trop large" in response.data["detail"]
+
+    def test_la_borne_maximale_passe(self, prestation):
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        # Exactement 92 jours : accepté, un jour de plus ne l'est pas.
+        assert (
+            client.get(URL, {"from": "2026-06-01", "to": "2026-09-01"}).status_code
+            == status.HTTP_200_OK
+        )
+        assert (
+            client.get(URL, {"from": "2026-06-01", "to": "2026-09-02"}).status_code
+            == status.HTTP_400_BAD_REQUEST
+        )
+
+    def test_une_fin_avant_le_debut_est_refusee(self, prestation):
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        response = client.get(URL, {"from": "2026-06-30", "to": "2026-06-01"})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "précède" in response.data["detail"]
+
+    def test_une_borne_illisible_est_refusee(self, prestation):
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        response = client.get(URL, {"from": "juin", "to": "2026-06-30"})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "from" in response.data["detail"]
+
+    def test_les_bornes_horodatees_de_fullcalendar_sont_acceptees(self, prestation):
+        """FullCalendar envoie un ISO complet dès qu'on quitte la vue mois."""
+
+        _reservation(
+            prestation,
+            statut=StatutReservation.VALIDEE,
+            retrait="2026-06-10T08:00:00Z",
+            retour="2026-06-12T18:00:00Z",
+        )
+        client, _ = client_for(roles.GESTIONNAIRE, "gina")
+
+        response = client.get(
+            URL,
+            {"from": "2026-06-01T00:00:00+02:00", "to": "2026-06-30T00:00:00+02:00"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+
+
+class TestPalette:
+    def test_chaque_statut_a_sa_couleur(self):
+        assert set(STATUT_COULEURS) == set(StatutReservation.values)
+
+    def test_un_statut_inconnu_retombe_sur_le_gris(self):
+        assert couleur_statut("inexistant") == "#868e96"

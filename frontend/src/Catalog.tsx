@@ -5,6 +5,7 @@ import {
 } from '@inventreedb/ui';
 
 import { CatalogList } from './catalog/CatalogList';
+import { WidgetScroll } from './WidgetScroll';
 
 /**
  * Fonction appelée par InvenTree pour rendre l'écran catalogue.
@@ -13,5 +14,9 @@ export function renderInvenTreeLocationCatalog(
   context: InvenTreePluginContext
 ) {
   checkPluginVersion(context);
-  return <CatalogList context={context} />;
+  return (
+    <WidgetScroll locale={context.locale}>
+      <CatalogList context={context} />
+    </WidgetScroll>
+  );
 }

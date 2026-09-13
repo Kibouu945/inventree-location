@@ -10,7 +10,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import profiles, roles
-from .models import Groupe, Profile
+from .models import Client, Contact
+from .serializers import _user_label
 
 
 class BackOfficePermission(permissions.BasePermission):
@@ -50,12 +51,12 @@ class BackOfficeRoleSerializer(serializers.Serializer):
 class BackOfficeUserSerializer(serializers.ModelSerializer):
     """Sérialiseur back-office d'un utilisateur Django + rôles plugin."""
 
-    roles = serializers.ListField(
-        child=serializers.ChoiceField(
-            choices=[(role, role) for role in roles.ALL_ROLES]
-        ),
+    # Un acteur interne porte **un** rôle (décision du 09/09/2026), d'où un
+    # champ simple et non une liste.
+    role = serializers.ChoiceField(
+        choices=[(role, role) for role in roles.ALL_ROLES],
         required=False,
-        allow_empty=True,
+        allow_null=True,
     )
     password = serializers.CharField(
         write_only=True,
@@ -67,11 +68,6 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
         max_length=20,
         required=False,
         allow_blank=True,
-    )
-    groupe = serializers.PrimaryKeyRelatedField(
-        queryset=Groupe.objects.all(),
-        required=False,
-        allow_null=True,
     )
 
     class Meta:
@@ -85,10 +81,9 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
             "is_active",
             "is_staff",
             "is_superuser",
-            "roles",
+            "role",
             "password",
             "telephone",
-            "groupe",
         ]
         read_only_fields = [
             "id",
@@ -100,14 +95,14 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
         """Expose les rôles plugin et les champs portés par le `Profile`."""
 
         data = super().to_representation(instance)
-        data["roles"] = sorted(roles.user_roles(instance))
+
+        # Un seul rôle, mais `user_roles` renvoie un ensemble : un groupe Django
+        # hors plugin peut traîner, et un compte neuf n'en a aucun.
+        proprietes = sorted(roles.user_roles(instance))
+        data["role"] = proprietes[0] if proprietes else None
 
         profile = profiles.user_profile(instance)
-        groupe = profile.groupe if profile else None
-
         data["telephone"] = profile.telephone if profile else ""
-        data["groupe"] = groupe.pk if groupe else None
-        data["groupe_nom"] = groupe.nom if groupe else ""
 
         return data
 
@@ -165,15 +160,13 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
                 "is_active": "Vous ne pouvez pas désactiver votre propre compte."
             })
 
-        new_roles = attrs.get("roles")
-
         if (
-            new_roles is not None
-            and roles.ADMIN not in set(new_roles)
+            "role" in self.initial_data
+            and attrs.get("role") != roles.ADMIN
             and roles.ADMIN in roles.user_roles(self.instance)
         ):
             raise serializers.ValidationError({
-                "roles": "Vous ne pouvez pas retirer votre propre rôle admin."
+                "role": "Vous ne pouvez pas retirer votre propre rôle admin."
             })
 
     def _ensure_role_groups(self):
@@ -182,37 +175,38 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
         for role in roles.ALL_ROLES:
             Group.objects.get_or_create(name=role)
 
-    def _apply_roles(self, user, role_names):
-        """Remplace uniquement les groupes métier du plugin.
+    def _apply_role(self, user, role_name):
+        """Pose **le** rôle métier, en conservant les groupes hors plugin.
 
-        Les groupes Django hors plugin sont conservés.
+        L'unicité ne peut pas s'exprimer en base — `auth_user_groups` est un
+        M2M — elle est donc tenue ici : les autres groupes du plugin sont
+        retirés, ceux d'InvenTree ne sont pas touchés.
         """
 
         self._ensure_role_groups()
 
-        role_names = set(role_names or [])
-        existing_non_plugin_groups = user.groups.exclude(name__in=roles.ALL_ROLES)
-        plugin_groups = Group.objects.filter(name__in=role_names)
+        hors_plugin = list(user.groups.exclude(name__in=roles.ALL_ROLES))
+        metier = list(Group.objects.filter(name=role_name)) if role_name else []
 
-        user.groups.set(list(existing_non_plugin_groups) + list(plugin_groups))
+        user.groups.set(hors_plugin + metier)
 
     def _pop_profile_fields(self, validated_data):
         """Sort les champs portés par le `Profile`, pas par le `User`.
 
         Seules les clés effectivement envoyées sont retenues : un PATCH partiel
-        ne doit pas réinitialiser le téléphone ou le groupe.
+        ne doit pas réinitialiser le téléphone.
         """
 
         return {
             name: validated_data.pop(name)
-            for name in ("telephone", "groupe")
+            for name in ("telephone",)
             if name in validated_data
         }
 
     def create(self, validated_data):
         """Crée un utilisateur, son profil et lui affecte ses rôles."""
 
-        role_names = validated_data.pop("roles", [])
+        role_name = validated_data.pop("role", None)
         password = validated_data.pop("password", "")
         profile_fields = self._pop_profile_fields(validated_data)
 
@@ -221,7 +215,7 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
             **validated_data,
         )
 
-        self._apply_roles(user, role_names)
+        self._apply_role(user, role_name)
         profiles.update_user_profile(user, profile_fields)
 
         return user
@@ -229,7 +223,7 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         """Met à jour l'utilisateur, son profil, son état actif et ses rôles."""
 
-        role_names = validated_data.pop("roles", None)
+        role_name = validated_data.pop("role", None)
         password = validated_data.pop("password", None)
         profile_fields = self._pop_profile_fields(validated_data)
 
@@ -241,8 +235,8 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
 
         instance.save()
 
-        if role_names is not None:
-            self._apply_roles(instance, role_names)
+        if "role" in self.initial_data:
+            self._apply_role(instance, role_name)
 
         profiles.update_user_profile(instance, profile_fields)
 
@@ -261,7 +255,7 @@ class BackOfficeUserListCreateView(generics.ListCreateAPIView):
 
         queryset = (
             get_user_model()
-            .objects.select_related("location_profile__groupe")
+            .objects.select_related("location_profile")
             .prefetch_related("groups")
             .all()
             .order_by("username")
@@ -287,73 +281,153 @@ class BackOfficeUserDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = BackOfficeUserSerializer
     queryset = (
         get_user_model()
-        .objects.select_related("location_profile__groupe")
+        .objects.select_related("location_profile")
         .prefetch_related("groups")
         .all()
     )
 
 
-class BackOfficeGroupeSerializer(serializers.ModelSerializer):
-    """Sérialiseur CRUD d'un groupe scout, réservé au back-office.
+class BackOfficeClientSerializer(serializers.ModelSerializer):
+    """CRUD d'un client, réservé au back-office.
 
-    Distinct de `GroupeSerializer`, qui reste en lecture seule pour le
+    Distinct de `ClientSerializer`, qui reste en lecture seule pour le
     sélecteur de manifestation.
     """
 
-    membres = serializers.SerializerMethodField()
+    contacts = serializers.SerializerMethodField()
+    gestionnaire_nom = serializers.SerializerMethodField()
 
     class Meta:
-        model = Groupe
-        fields = ["id", "nom", "code", "adresse", "membres"]
+        model = Client
+        fields = [
+            "id",
+            "nom",
+            "adresse",
+            "email",
+            "telephone",
+            "type_client",
+            "siret",
+            "gestionnaire",
+            "gestionnaire_nom",
+            "actif",
+            "contacts",
+        ]
 
-    def get_membres(self, obj) -> int:
-        """Nombre d'utilisateurs rattachés au groupe.
+    def get_contacts(self, obj) -> int:
+        """Nombre de contacts.
 
-        Compté depuis `Profile`, jamais via la relation inverse `Groupe.profiles`
-        : le chargeur de plugins importe `models` deux fois et le nom inverse
-        n'est pas rattaché au `Groupe` vu d'ici. Une requête par ligne, sur une
-        liste de groupes qui tient en une page.
+        Compté depuis `Contact`, jamais via la relation inverse
+        `Client.contacts` : le chargeur de plugins importe `models` deux fois et
+        le nom inverse n'est pas rattaché au `Client` vu d'ici.
         """
 
-        return Profile.objects.filter(groupe=obj.pk).count()
+        return Contact.objects.filter(client=obj.pk).count()
+
+    def get_gestionnaire_nom(self, obj) -> str:
+        """Nom du gestionnaire référent, pour l'afficher sans second appel."""
+
+        return _user_label(obj.gestionnaire)
 
 
-class BackOfficeGroupeListCreateView(generics.ListCreateAPIView):
-    """Liste et création des groupes depuis le back-office."""
+class BackOfficeClientListCreateView(generics.ListCreateAPIView):
+    """Liste et création des clients."""
 
     permission_classes = [BackOfficePermission]
-    serializer_class = BackOfficeGroupeSerializer
+    serializer_class = BackOfficeClientSerializer
     pagination_class = BackOfficePagination
 
     def get_queryset(self):
-        """Retourne les groupes filtrables par recherche."""
-
-        queryset = Groupe.objects.all().order_by("nom")
+        queryset = Client.objects.all().order_by("nom")
 
         search = self.request.query_params.get("search", "").strip()
 
         if search:
             queryset = queryset.filter(
-                Q(nom__icontains=search) | Q(code__icontains=search)
+                Q(nom__icontains=search) | Q(email__icontains=search)
             )
 
         return queryset
 
 
-class BackOfficeGroupeDetailView(generics.RetrieveUpdateAPIView):
-    """Lecture / modification d'un groupe depuis le back-office.
+class BackOfficeClientDetailView(generics.RetrieveUpdateAPIView):
+    """Lecture / modification d'un client.
 
-    Pas de suppression : `Profile.groupe` et `Manifestation.groupe` sont en
-    `PROTECT`, un groupe déjà utilisé ne peut pas disparaître.
+    Pas de suppression : `Manifestation.client` est en `PROTECT`, et un client
+    se désactive (`actif`) — question d'historique.
     """
 
     permission_classes = [BackOfficePermission]
-    serializer_class = BackOfficeGroupeSerializer
+    serializer_class = BackOfficeClientSerializer
 
     def get_queryset(self):
         """Évalué par requête : un queryset de classe casserait l'import."""
 
-        return Groupe.objects.all()
+        return Client.objects.all()
+
+
+class BackOfficeContactSerializer(serializers.ModelSerializer):
+    """CRUD d'un contact.
+
+    `client_nom` est là pour la liste tous clients confondus : sans lui, un
+    contact ne s'affiche que par l'identifiant numérique de son client.
+    """
+
+    client_nom = serializers.CharField(source="client.nom", read_only=True)
+
+    class Meta:
+        model = Contact
+        fields = [
+            "id",
+            "client",
+            "client_nom",
+            "nom",
+            "prenom",
+            "email",
+            "telephone",
+            "actif",
+        ]
+
+
+class BackOfficeContactListCreateView(generics.ListCreateAPIView):
+    """Liste et création des contacts, filtrables par client."""
+
+    permission_classes = [BackOfficePermission]
+    serializer_class = BackOfficeContactSerializer
+    pagination_class = BackOfficePagination
+
+    def get_queryset(self):
+        queryset = Contact.objects.select_related("client").order_by(
+            "client", "nom", "prenom"
+        )
+
+        client = self.request.query_params.get("client")
+
+        if client:
+            queryset = queryset.filter(client_id=client)
+
+        search = self.request.query_params.get("search", "").strip()
+
+        if search:
+            queryset = queryset.filter(
+                Q(nom__icontains=search)
+                | Q(prenom__icontains=search)
+                | Q(email__icontains=search)
+            )
+
+        return queryset
+
+
+class BackOfficeContactDetailView(generics.RetrieveUpdateAPIView):
+    """Lecture / modification d'un contact.
+
+    Pas de suppression : un contact qui a signé un devis se désactive.
+    """
+
+    permission_classes = [BackOfficePermission]
+    serializer_class = BackOfficeContactSerializer
+
+    def get_queryset(self):
+        return Contact.objects.select_related("client")
 
 
 class BackOfficeRoleListView(APIView):
@@ -367,7 +441,6 @@ class BackOfficeRoleListView(APIView):
         roles.MAGASINIER: "Magasinier",
         roles.LIVREUR: "Livreur",
         roles.SAV: "SAV",
-        roles.ORGANISATEUR: "Organisateur",
         roles.LECTEUR: "Lecteur",
         roles.ACHETEUR: "Acheteur",
     }

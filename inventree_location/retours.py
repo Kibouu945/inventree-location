@@ -62,6 +62,22 @@ CHAMPS_CHECKIN = (
 )
 
 
+def quantite_attendue_au_retour(ligne) -> int:
+    """Combien d'unités doivent revenir de cette ligne.
+
+    Quatre endroits écrivaient `quantite_livree or quantite_demandee`, chacun
+    pour une raison différente : le plafond du registre d'incidents, celui de la
+    saisie de ramassage, la quantité à ramasser du bon et le total de la tournée.
+
+    Le repli sur `quantite_demandee` n'est pas une précaution : `quantite_livree`
+    n'est alimentée par aucun endpoint à ce jour et vaut donc 0 partout. Le jour
+    où elle le sera, la règle changera de comportement en production — d'où un
+    seul endroit à corriger, et un test qui distingue les deux valeurs.
+    """
+
+    return ligne.quantite_livree or ligne.quantite_demandee or 0
+
+
 def quantites_depuis_payload(payload, champs):
     """Traduit un payload d'écran en {type d'incident: quantité}."""
 

@@ -11,7 +11,7 @@ SAV arriveront avec leurs endpoints aux sprints suivants) :
 |---------------|--------------------|-----------------------------------|
 | Catalogue     | tous les rôles     | admin, gestionnaire               |
 | Lieux         | tous les rôles     | admin, gestionnaire               |
-| Réservations  | tous les rôles     | admin, gestionnaire, organisateur |
+| Réservations  | tous les rôles     | admin, gestionnaire               |
 | Livraisons    | tous les rôles     | admin, gestionnaire               |
 """
 
@@ -56,21 +56,21 @@ class LieuPermission(RoleBasedPermission):
 
 
 class ReservationPermission(RoleBasedPermission):
-    """Lecture pour tous ; écriture pour admin / gestionnaire / organisateur."""
+    """Lecture pour tous ; écriture pour admin / gestionnaire."""
 
-    write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR)
+    write_roles = (roles.ADMIN, roles.GESTIONNAIRE)
 
 
 class ManifestationPermission(RoleBasedPermission):
-    """Lecture pour tous ; gestion pour admin / gestionnaire / organisateur."""
+    """Lecture pour tous ; gestion pour admin / gestionnaire."""
 
-    write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR)
+    write_roles = (roles.ADMIN, roles.GESTIONNAIRE)
 
 
 class PrestationPermission(RoleBasedPermission):
-    """Lecture pour tous ; gestion pour admin / gestionnaire / organisateur."""
+    """Lecture pour tous ; gestion pour admin / gestionnaire."""
 
-    write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.ORGANISATEUR)
+    write_roles = (roles.ADMIN, roles.GESTIONNAIRE)
 
 
 class DeliveryPermission(RoleBasedPermission):
@@ -85,6 +85,18 @@ class MarquerLivreePermission(RoleBasedPermission):
     Écriture volontairement étroite, distincte de `ReservationPermission` :
     ouvrir cette dernière au livreur lui donnerait aussi la validation, le
     refus et l'annulation d'une réservation.
+    """
+
+    write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.LIVREUR)
+
+
+class DeliveryAssignationPermission(RoleBasedPermission):
+    """Prendre, relâcher et faire avancer une livraison : le livreur, plus
+    l'encadrement qui doit pouvoir dépanner une tournée en cours.
+
+    Même périmètre que `MarquerLivreePermission`, dont elle reste distincte :
+    marquer livré est une transition de statut métier, s'attribuer une livraison
+    n'en est pas une.
     """
 
     write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.LIVREUR)

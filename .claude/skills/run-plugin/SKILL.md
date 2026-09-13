@@ -30,6 +30,45 @@ TOKEN=$(curl -s -u admin:admin123 http://localhost:8000/api/user/token/ \
 
 Endpoints du plugin sous `/plugin/inventree-location/`.
 
+## 1 bis. Après un `make clean`, la stack ne revient PAS seule
+
+`down -v` efface la base, donc tout ce qui vit en base : l'activation du
+plugin, les interrupteurs plugin d'InvenTree, les droits des rôles et les
+dispositions de tableau de bord. L'API répond, les écrans natifs s'affichent,
+et **aucun widget du plugin n'existe** — c'est le symptôme qui a fait conclure
+au client, en août 2026, qu'il avait « InvenTree de base ».
+
+```bash
+make clean && make up                       # attendre l'API (~25 s)
+
+# a) les six interrupteurs plugin + l'activation, en base
+make manage cmd='shell -c "
+from common.models import InvenTreeSetting
+for k in [\"ENABLE_PLUGINS_URL\",\"ENABLE_PLUGINS_NAVIGATION\",\"ENABLE_PLUGINS_APP\",
+          \"ENABLE_PLUGINS_SCHEDULE\",\"ENABLE_PLUGINS_EVENTS\",\"ENABLE_PLUGINS_INTERFACE\"]:
+    InvenTreeSetting.set_setting(k, True, None)
+from plugin.models import PluginConfig
+p = PluginConfig.objects.get(key=\"inventree-location\"); p.active = True; p.save()
+"'
+docker compose restart inventree            # recharge le registre, applique les migrations
+
+# b) les données, les droits, les tableaux de bord
+make manage cmd="seed_demo"
+make manage cmd="provision_role_permissions"   # sinon 403 sur /api/part/ pour TOUS les rôles
+make manage cmd="provision_dashboards"         # sinon le tableau de bord admin est vide
+```
+
+`provision_role_permissions` est celle qu'on oublie, et son absence est
+sournoise : les écrans du plugin fonctionnent, mais la barre de navigation
+native se réduit à « Tableau de bord », le filtre Catégories du catalogue reste
+vide et la colonne Catégorie affiche « — » pour tout le monde. Vérification en
+une ligne :
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Token $TOKEN" \
+  http://localhost:8000/api/part/category/     # 200 attendu, sauf livreur (403 voulu)
+```
+
 ## 2. Déployer un changement — le piège nº1
 
 **Après TOUTE modification, il faut redémarrer le conteneur `inventree`.**
@@ -163,3 +202,86 @@ Passer par l'API (`POST /api/user/` exige `username`, `password`, `first_name`,
 `last_name`, `email`) : ajouter un groupe en shell Django échoue tant que le
 `profile` InvenTree n'existe pas (signal
 `validate_primary_group_on_group_change`).
+## 8. Les deux scénarios de bout en bout
+
+`driver.mjs` sert à écrire un cas ; ces deux-là sont écrits et rejouables.
+
+```bash
+mkdir -p /tmp/plugin-e2e && cd /tmp/plugin-e2e   # playwright doit résoudre ici
+npm install playwright                            # les navigateurs sont déjà posés
+cp ~/hetic/InvenTreeLocation/.claude/skills/run-plugin/{driver,nominal,alternatifs}.mjs .
+
+node nominal.mjs           # silencieux, ~2 min
+LENT=1 node nominal.mjs    # fenêtre visible et ralentie, pour une démonstration
+node alternatifs.mjs
+```
+
+### `nominal.mjs` — la chaîne complète
+
+Client → contact → manifestation → prestation → bon → validation → livraison →
+ramassage → retour, en neuf étapes indépendantes : une étape qui casse
+n'empêche pas les suivantes de s'exécuter, et chacune se conclut par une
+capture en cas d'échec. Le bilan final dit laquelle est tombée.
+
+**Trois règles font échouer une saisie improvisée**, et ce n'est pas un bug :
+
+1. **Le gérant interne est obligatoire** sur un bon — « Le demandeur est
+   obligatoire » au moment de soumettre.
+2. **Un article virtuel est obligatoire à la soumission**, en plus du matériel.
+3. **L'écran Livraisons s'ouvre sur la tournée du jour** (`horizon: 'jour'`) :
+   une manifestation datée de la semaine prochaine n'y apparaît pas. Le
+   scénario date donc sa manifestation sur *aujourd'hui*.
+
+Deux pièges d'automatisation, payés une fois chacun : `Échap` ferme la
+**modale** Mantine et pas seulement le calendrier — fermer un `DateTimePicker`
+en cliquant le titre de la modale ; et les jours du calendrier portent un
+`aria-label` complet (« 20 septembre 2026 »), donc se ciblent par
+`button.mantine-DateTimePicker-day` et leur texte.
+
+### `alternatifs.mjs` — ce qui doit être refusé, toléré ou masqué
+
+| Cas | Attendu |
+|---|---|
+| A — ramassage en surplus, à l'écran | accepté (R36) ; **échoue aujourd'hui** |
+| B — le même surplus, côté serveur | accepté, HTTP 200 |
+| C — manquant supérieur au sorti | refusé, HTTP 400 |
+| D — poste lecteur | aucun bouton d'ajout, pas de back-office |
+| E — conflits de stock | l'écran liste le conflit |
+| F — manifestation dont la fin précède le début | refusé, HTTP 400 |
+
+**Les cas B et C écrivent** sur un bon livré : ils le passent en `retournee`
+avec des quantités de test. Remettre en état après coup, sinon la base de
+démonstration ment :
+
+```bash
+make manage cmd="shell -c '
+from inventree_location.models import Reservation, ReturnIncident
+from inventree_location import models as m
+b = Reservation.objects.get(numero=\"RES-2026-0003\")
+for l in b.lignes.all():
+    l.quantite_ramassee = l.quantite_sav = l.quantite_detruite = 0
+    l.quantite_manquante = l.quantite_retournee = 0
+    l.save()
+ReturnIncident.objects.filter(line__reservation=b).delete()
+m.Ramassage.objects.filter(reservation=b).delete()
+b.statut = \"livree\"; b.save()
+'"
+make manage cmd="projeter_execution"
+make manage cmd="verifier_projection"   # doit dire « Aucune divergence. »
+```
+
+### `roles.mjs` — un poste par rôle
+
+Se connecte successivement avec les sept comptes de démonstration, compare les
+onglets réellement rendus à ceux déclarés dans `postes/definitions.tsx`, **ouvre
+chaque écran** — un écran qui répond 403 pour un rôle ne se voit qu'en le
+montant —, compte les actions d'écriture offertes et relève barre de navigation
+native et erreurs.
+
+Attendu : six rôles au vert, zéro erreur. `demo_sav` n'a **pas de poste** —
+aucun écran ne lui est déclaré, son widget reste vide. C'est un manque connu,
+pas une panne.
+
+C'est ce scénario qui a rendu visible l'oubli de `provision_role_permissions`
+sur une base fraîche : les sept comptes accumulaient des 403 sur
+`/api/part/category/` sans qu'aucun écran ne paraisse cassé.

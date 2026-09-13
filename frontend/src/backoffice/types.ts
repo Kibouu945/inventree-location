@@ -1,4 +1,4 @@
-/** Types de l'API back-office : utilisateurs, rôles et groupes. */
+/** Types de l'API back-office : utilisateurs, rôles, clients et contacts. */
 
 /** Réponse paginée DRF, commune aux listes back-office. */
 export interface Page<T> {
@@ -22,11 +22,9 @@ export interface BackOfficeUser {
   is_active: boolean;
   is_staff: boolean;
   is_superuser: boolean;
-  roles: string[];
+  role: string | null;
   /** Porté par le `Profile`, imprimé sur le bon de livraison. */
   telephone: string;
-  groupe: number | null;
-  groupe_nom: string;
 }
 
 export interface BackOfficeUserFormValues {
@@ -36,22 +34,49 @@ export interface BackOfficeUserFormValues {
   email: string;
   password: string;
   is_active: boolean;
-  roles: string[];
+  role: string | null;
   telephone: string;
-  /** `Select` Mantine travaille en chaîne : converti en entier à l'envoi. */
-  groupe: string | null;
 }
 
-export interface BackOfficeGroupe {
+export interface BackOfficeClient {
   id: number;
   nom: string;
-  code: string;
   adresse: string;
-  membres: number;
+  email: string | null;
+  telephone: string;
+  type_client: string;
+  siret: string;
+  gestionnaire: number | null;
+  gestionnaire_nom: string;
+  actif: boolean;
+  contacts: number;
 }
 
-export interface BackOfficeGroupeFormValues {
+export interface BackOfficeClientFormValues {
   nom: string;
-  code: string;
   adresse: string;
+  email: string;
+  telephone: string;
+  type_client: string;
+  siret: string;
+  actif: boolean;
+}
+
+export interface BackOfficeContact {
+  id: number;
+  client: number;
+  client_nom: string;
+  nom: string;
+  prenom: string;
+  email: string | null;
+  telephone: string;
+  actif: boolean;
+}
+
+export interface BackOfficeContactFormValues {
+  nom: string;
+  prenom: string;
+  email: string;
+  telephone: string;
+  actif: boolean;
 }

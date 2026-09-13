@@ -29,9 +29,7 @@ from stock.models import StockItem
 
 from inventree_location import roles
 from inventree_location.models import (
-    Groupe,
     LigneReservation,
-    Manifestation,
     Prestation,
     RentableItem,
     Reservation,
@@ -51,6 +49,7 @@ from inventree_location.sav import (
     get_real_available_stock,
     get_unavailable_stock_quantity,
 )
+from inventree_location.tests.factories import make_manifestation
 
 User = get_user_model()
 
@@ -95,14 +94,11 @@ def part(db):
 
 @pytest.fixture
 def reservation(db, magasinier):
-    groupe = Groupe.objects.create(nom="Jambville", code="JAM")
     now = timezone.now()
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp été 2026",
         date_debut=now,
         date_fin=now + timedelta(days=7),
-        organisateur=magasinier,
-        groupe=groupe,
     )
     prestation = Prestation.objects.create(
         manifestation=manifestation,
@@ -369,28 +365,43 @@ class TestSaisieRetour:
         assert ticket.closed_at is not None
 
     @pytest.mark.django_db
-    def test_somme_superieure_a_la_quantite_livree_refusee(
+    def test_un_surplus_au_ramassage_est_accepte(
         self, factory, magasinier, reservation, ligne
     ):
+        """Sept objets rendus pour six sortis : on signale, on ne refuse pas.
+
+        Du matériel circule d'un lieu à l'autre (R36). Refuser la saisie
+        empêcherait le livreur de déclarer le contenu réel de son camion, et
+        c'est un écart qui doit se voir dans les chiffres, pas disparaître dans
+        un 400.
+        """
+
         response = _patch_retour(
             factory,
             magasinier,
             reservation,
-            {
-                "lignes": [
-                    {
-                        "ligne": ligne.pk,
-                        "quantite_ramassee": 6,
-                        "quantite_manquante": 1,
-                    }
-                ]
-            },
+            {"lignes": [{"ligne": ligne.pk, "quantite_ramassee": 7}]},
         )
 
         ligne.refresh_from_db()
 
+        assert response.status_code == status.HTTP_200_OK
+        assert quantites_du_retour(ligne)["ok"] == 7
+
+    def test_plus_de_manquants_que_de_sortis_est_refuse(
+        self, factory, magasinier, reservation, ligne
+    ):
+        """On ne perd pas ce qui n'est pas parti — le seul plafond qui reste."""
+
+        response = _patch_retour(
+            factory,
+            magasinier,
+            reservation,
+            {"lignes": [{"ligne": ligne.pk, "quantite_manquante": 7}]},
+        )
+
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert quantites_du_retour(ligne)["ok"] == 0
+        assert "manquante" in str(response.data).lower()
 
     @pytest.mark.django_db
     def test_ligne_dune_autre_reservation_refusee(
@@ -1040,3 +1051,107 @@ class TestVocabulaireUnifieEtatRetour:
         ligne.refresh_from_db()
 
         assert ligne.etat_retour == "casse"
+
+
+class TestQuantiteAttendueAuRetour:
+    """La règle « ce qui doit revenir », et l'angle mort qu'elle recouvre.
+
+    Les sept fixtures de retour du dépôt posent toutes `quantite_livree ==
+    quantite_demandee` : l'expression `quantite_livree or quantite_demandee`
+    n'y est donc jamais discriminante, et l'alimenter changerait le
+    comportement en production sans un seul test rouge. Ces trois cas la
+    distinguent.
+    """
+
+    @pytest.fixture
+    def ligne_partiellement_livree(self, db, reservation, part):
+        return LigneReservation.objects.create(
+            reservation=reservation,
+            part=part,
+            quantite_demandee=6,
+            quantite_livree=4,
+        )
+
+    @pytest.mark.django_db
+    def test_la_quantite_livree_prime_sur_la_demandee(
+        self, ligne_partiellement_livree
+    ):
+        from inventree_location.retours import quantite_attendue_au_retour
+
+        assert quantite_attendue_au_retour(ligne_partiellement_livree) == 4
+
+    @pytest.mark.django_db
+    def test_sans_livraison_renseignee_la_demandee_fait_foi(self, ligne):
+        from inventree_location.retours import quantite_attendue_au_retour
+
+        ligne.quantite_livree = 0
+        ligne.save(update_fields=["quantite_livree"])
+
+        assert quantite_attendue_au_retour(ligne) == 6
+
+    @pytest.mark.django_db
+    def test_ramasser_plus_que_livre_est_accepte(
+        self, factory, magasinier, reservation, ligne_partiellement_livree
+    ):
+        """Six demandées, quatre livrées, cinq récupérées : accepté.
+
+        Ce test affirmait l'inverse jusqu'à la recette du 11/09 — il figeait un
+        plafond que la règle R36 interdit depuis le début.
+        """
+
+        response = _patch_retour(
+            factory,
+            magasinier,
+            reservation,
+            {
+                "lignes": [
+                    {
+                        "ligne": ligne_partiellement_livree.pk,
+                        "quantite_ramassee": 5,
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_le_manquant_reste_plafonne_par_ce_qui_est_sorti(
+        self, factory, magasinier, reservation, ligne_partiellement_livree
+    ):
+        """Quatre livrées : cinq manquants est incohérent, donc refusé."""
+
+        response = _patch_retour(
+            factory,
+            magasinier,
+            reservation,
+            {
+                "lignes": [
+                    {
+                        "ligne": ligne_partiellement_livree.pk,
+                        "quantite_manquante": 5,
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.django_db
+    def test_ramasser_ce_qui_a_ete_livre_passe(
+        self, factory, magasinier, reservation, ligne_partiellement_livree
+    ):
+        response = _patch_retour(
+            factory,
+            magasinier,
+            reservation,
+            {
+                "lignes": [
+                    {
+                        "ligne": ligne_partiellement_livree.pk,
+                        "quantite_ramassee": 4,
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == status.HTTP_200_OK

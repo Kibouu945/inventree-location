@@ -2,6 +2,8 @@ import type { InvenTreePluginContext } from '@inventreedb/ui';
 import { Alert, Button, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 
+import { LocaleFrame } from './LocaleFrame';
+
 function PluginSettingsDisplay({
   context: _context
 }: {
@@ -31,5 +33,9 @@ function PluginSettingsDisplay({
 }
 
 export function renderPluginSettings(context: InvenTreePluginContext) {
-  return <PluginSettingsDisplay context={context} />;
+  return (
+    <LocaleFrame locale={context.locale}>
+      <PluginSettingsDisplay context={context} />
+    </LocaleFrame>
+  );
 }

@@ -15,19 +15,20 @@ import {
   TextInput,
   Title
 } from '@mantine/core';
-import { DateTimePicker } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { optionsDeContacts } from '../backoffice/contactLogic';
+import { DateTimeField } from '../DateTimeField';
 
 import { canWriteOrganisation } from '../roles';
 import { apiErrorMessage, type Manifestation, type Page } from './types';
 
 const MANIFESTATIONS_URL = '/plugin/inventree-location/manifestations/';
-const GROUPES_URL = '/plugin/inventree-location/groupes/';
-const USERS_URL = '/plugin/inventree-location/users/';
+const CLIENTS_URL = '/plugin/inventree-location/clients/';
+const CONTACTS_URL = '/plugin/inventree-location/backoffice/contacts/';
 
 // en_cours / terminée sont dérivés des dates côté serveur, pas posables ici.
 const STATUT_OPTIONS = [
@@ -48,8 +49,8 @@ interface FormValues {
   nom: string;
   description: string;
   statut: string;
-  organisateur: string | null;
-  groupe: string | null;
+  client: string | null;
+  contact: string | null;
   date_debut: Date | null;
   date_fin: Date | null;
 }
@@ -59,8 +60,8 @@ function emptyValues(): FormValues {
     nom: '',
     description: '',
     statut: 'brouillon',
-    organisateur: null,
-    groupe: null,
+    client: null,
+    contact: null,
     date_debut: null,
     date_fin: null
   };
@@ -75,6 +76,7 @@ export function ManifestationsTab({
 
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
+  const [clientFiltre, setClientFiltre] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
 
@@ -82,42 +84,59 @@ export function ManifestationsTab({
 
   const listQuery = useQuery<Manifestation[] | Page<Manifestation>>(
     {
-      queryKey: ['manifestations', debouncedSearch],
+      queryKey: ['manifestations', debouncedSearch, clientFiltre],
       queryFn: async () => {
-        const response = await context.api.get(MANIFESTATIONS_URL, {
-          params: debouncedSearch ? { search: debouncedSearch } : {}
-        });
+        // Deux filtres distincts : au téléphone on cherche par client, dans
+        // une liste on cherche par nom. Les envoyer ensemble les cumule.
+        const params: Record<string, string> = {};
+
+        if (debouncedSearch) {
+          params.search = debouncedSearch;
+        }
+
+        if (clientFiltre) {
+          params.client = clientFiltre;
+        }
+
+        const response = await context.api.get(MANIFESTATIONS_URL, { params });
         return response.data;
       }
     },
     context.queryClient
   );
 
-  const groupesQuery = useQuery<{
+  const clientsQuery = useQuery<{
     results: Array<{ id: number; nom: string }>;
   }>(
     {
-      queryKey: ['groupes'],
+      queryKey: ['clients'],
       queryFn: async () => {
-        const response = await context.api.get(GROUPES_URL);
+        const response = await context.api.get(CLIENTS_URL);
         return response.data;
       }
     },
     context.queryClient
   );
 
-  const usersQuery = useQuery<{
+  // Les contacts du client choisi seulement : la liste complète mélangerait
+  // les interlocuteurs de tous les clients.
+  const clientChoisi = form.values.client;
+
+  const contactsQuery = useQuery<{
     results: Array<{
       id: number;
-      username: string;
-      first_name: string;
-      last_name: string;
+      nom: string;
+      prenom: string;
+      actif: boolean;
     }>;
   }>(
     {
-      queryKey: ['users-organisateur'],
+      queryKey: ['contacts', clientChoisi],
+      enabled: Boolean(clientChoisi),
       queryFn: async () => {
-        const response = await context.api.get(USERS_URL);
+        const response = await context.api.get(CONTACTS_URL, {
+          params: { client: clientChoisi }
+        });
         return response.data;
       }
     },
@@ -128,18 +147,15 @@ export function ManifestationsTab({
     ? listQuery.data
     : (listQuery.data?.results ?? []);
 
-  const groupeOptions = (groupesQuery.data?.results ?? []).map((g) => ({
-    value: String(g.id),
-    label: g.nom
+  const clientOptions = (clientsQuery.data?.results ?? []).map((c) => ({
+    value: String(c.id),
+    label: c.nom
   }));
 
-  const userOptions = (usersQuery.data?.results ?? []).map((u) => {
-    const fullName = `${u.first_name} ${u.last_name}`.trim();
-    return {
-      value: String(u.id),
-      label: fullName ? `${fullName} (${u.username})` : u.username
-    };
-  });
+  const contactOptions = optionsDeContacts(
+    contactsQuery.data?.results ?? [],
+    form.values.contact
+  );
 
   const mutation = useMutation(
     {
@@ -148,10 +164,8 @@ export function ManifestationsTab({
           nom: values.nom,
           description: values.description,
           statut: values.statut,
-          organisateur: values.organisateur
-            ? Number(values.organisateur)
-            : null,
-          groupe: values.groupe ? Number(values.groupe) : null,
+          client: values.client ? Number(values.client) : null,
+          contact: values.contact ? Number(values.contact) : null,
           date_debut: values.date_debut?.toISOString(),
           date_fin: values.date_fin?.toISOString()
         };
@@ -201,8 +215,8 @@ export function ManifestationsTab({
       nom: manifestation.nom,
       description: manifestation.description,
       statut: manifestation.statut,
-      organisateur: String(manifestation.organisateur),
-      groupe: String(manifestation.groupe),
+      client: String(manifestation.client),
+      contact: manifestation.contact ? String(manifestation.contact) : null,
       date_debut: new Date(manifestation.date_debut),
       date_fin: new Date(manifestation.date_fin)
     });
@@ -218,13 +232,26 @@ export function ManifestationsTab({
         )}
       </Group>
 
-      <TextInput
-        label='Recherche'
-        placeholder='Nom de la manifestation…'
-        value={search}
-        onChange={(event) => setSearch(event.currentTarget.value)}
-        w={280}
-      />
+      <Group align='flex-end' gap='md'>
+        <TextInput
+          label='Recherche'
+          placeholder='Nom de la manifestation…'
+          value={search}
+          onChange={(event) => setSearch(event.currentTarget.value)}
+          w={280}
+        />
+
+        <Select
+          label='Client'
+          placeholder='Tous les clients'
+          data={clientOptions}
+          value={clientFiltre}
+          onChange={setClientFiltre}
+          clearable
+          searchable
+          w={280}
+        />
+      </Group>
 
       {listQuery.isError && (
         <Alert color='red' title='Erreur'>
@@ -243,6 +270,7 @@ export function ManifestationsTab({
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Nom</Table.Th>
+              <Table.Th>Client</Table.Th>
               <Table.Th>Début</Table.Th>
               <Table.Th>Fin</Table.Th>
               <Table.Th>Statut</Table.Th>
@@ -257,6 +285,7 @@ export function ManifestationsTab({
                 onClick={() => canWrite && openEdit(manifestation)}
               >
                 <Table.Td>{manifestation.nom}</Table.Td>
+                <Table.Td>{manifestation.client_nom || '—'}</Table.Td>
                 <Table.Td>
                   {new Date(manifestation.date_debut).toLocaleDateString()}
                 </Table.Td>
@@ -301,7 +330,7 @@ export function ManifestationsTab({
               {...form.getInputProps('description')}
             />
             <Group grow>
-              <DateTimePicker
+              <DateTimeField
                 label='Date de début'
                 required
                 value={form.values.date_debut}
@@ -312,7 +341,7 @@ export function ManifestationsTab({
                   )
                 }
               />
-              <DateTimePicker
+              <DateTimeField
                 label='Date de fin'
                 required
                 value={form.values.date_fin}
@@ -323,17 +352,22 @@ export function ManifestationsTab({
             </Group>
             <Group grow>
               <Select
-                label='Organisateur'
+                label='Client'
                 required
-                data={userOptions}
+                data={clientOptions}
                 searchable
-                {...form.getInputProps('organisateur')}
+                {...form.getInputProps('client')}
               />
               <Select
-                label='Groupe'
-                required
-                data={groupeOptions}
-                {...form.getInputProps('groupe')}
+                label='Contact référent'
+                description={
+                  clientChoisi ? undefined : "Choisir d'abord un client"
+                }
+                data={contactOptions}
+                disabled={!clientChoisi}
+                clearable
+                searchable
+                {...form.getInputProps('contact')}
               />
             </Group>
             <Select

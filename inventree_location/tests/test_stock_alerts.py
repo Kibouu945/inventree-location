@@ -9,14 +9,15 @@ from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from inventree_location.models import (
-    Groupe,
     Lieu,
-    Manifestation,
     Prestation,
     RentableItem,
     Reservation,
 )
-from inventree_location.tests.factories import mettre_en_stock
+from inventree_location.tests.factories import (
+    make_manifestation,
+    mettre_en_stock,
+)
 from inventree_location.views import StockAlertListView
 
 from part.models import Part, PartCategory
@@ -44,17 +45,13 @@ def manager(db):
 def alert_setup(db):
     now = timezone.now().replace(minute=0, second=0, microsecond=0)
 
-    group = Groupe.objects.create(nom="G-ALERT", code="GA")
-    organizer = User.objects.create_user(username="org-alert", password="pwd")
     requester = User.objects.create_user(username="requester-alert", password="pwd")
 
-    manifestation = Manifestation.objects.create(
+    manifestation = make_manifestation(
         nom="Camp alertes",
         date_debut=now,
         date_fin=now + timedelta(days=5),
         statut="planifiee",
-        organisateur=organizer,
-        groupe=group,
     )
     # ORG-01/ORG-02 : le lieu est autonome et c'est la prestation qui le
     # référence (Prestation.lieu), plus l'inverse.
@@ -182,12 +179,38 @@ def test_virtual_article_never_raises_a_stock_alert(manager, alert_setup):
     assert service.pk not in part_ids
 
 
-def test_seuils_ignores_sur_un_article_non_consommable(manager, alert_setup):
-    """Les deux seuils appartiennent au consommable (US-09, CDC V06).
+def _types_de_seuil(response, part_id):
+    """Types d'alerte de seuil remontés pour un article donné."""
 
-    Le back-office laisse saisir des seuils sur n'importe quel article : sans
-    cette garde, un seuil haut posé sur du matériel louable déclenchait une
-    alerte de réapprovisionnement dénuée de sens.
+    return [
+        raison["type"]
+        for alerte in response.data["alerts"]
+        if alerte["part_id"] == part_id
+        for raison in alerte["reasons"]
+        if raison["type"] in {"low_threshold", "high_threshold"}
+    ]
+
+
+def _alertes(manager):
+    factory = APIRequestFactory()
+    request = factory.get("/plugin/inventree-location/alerts/stock/")
+    force_authenticate(request, user=manager)
+
+    return StockAlertListView.as_view()(request)
+
+
+def test_seuil_bas_alerte_meme_sur_un_article_non_consommable(manager, alert_setup):
+    """Le seuil bas ne dépend plus du drapeau consommable.
+
+    Recette Tassin du 07/09/2026, remarque 11 : « le stock minimum de ce
+    produit est = 5, il y a 1 seul produit en stock pourtant on ne retrouve
+    pas ce produit dans la liste des alertes de stock ». L'article était du
+    matériel, pas un consommable, et la condition l'écartait — alors que le
+    CDC V06 (épic F, US 9) demande une alerte « lorsqu'un stock disponible
+    futur < seuil critique », sans distinguer la nature de l'objet.
+
+    Le seuil haut, lui, reste réservé au consommable : posé sur du matériel
+    louable, il déclenche une alerte de réapprovisionnement dénuée de sens.
     """
 
     materiel = Part.objects.create(name="Tente 4 places")
@@ -199,17 +222,81 @@ def test_seuils_ignores_sur_un_article_non_consommable(manager, alert_setup):
         seuil_alerte_haut=1,
     )
 
-    factory = APIRequestFactory()
-    request = factory.get("/plugin/inventree-location/alerts/stock/")
-    force_authenticate(request, user=manager)
+    assert _types_de_seuil(_alertes(manager), materiel.pk) == ["low_threshold"]
 
-    response = StockAlertListView.as_view()(request)
 
-    seuils = [
-        raison["type"]
+def test_seuil_bas_retombe_sur_le_stock_minimum_dinventree(manager, alert_setup):
+    """Sans seuil de plugin, `Part.minimum_stock` fait foi.
+
+    Le client avait renseigné le champ natif d'InvenTree, que le plugin ne
+    lisait pas : deux champs pour une même notion, un seul consulté.
+    """
+
+    materiel = Part.objects.create(name="Trousse de secours", minimum_stock=5)
+    RentableItem.objects.create(
+        part=materiel,
+        is_rentable=True,
+        consommable=False,
+        seuil_alerte_bas=None,
+        seuil_alerte_haut=None,
+    )
+
+    response = _alertes(manager)
+
+    assert _types_de_seuil(response, materiel.pk) == ["low_threshold"]
+
+    message = next(
+        raison["message"]
         for alerte in response.data["alerts"]
         if alerte["part_id"] == materiel.pk
         for raison in alerte["reasons"]
-        if raison["type"] in {"low_threshold", "high_threshold"}
-    ]
-    assert seuils == []
+        if raison["type"] == "low_threshold"
+    )
+    # Le message dit d'où vient le seuil : sans quoi personne ne saurait
+    # lequel des deux champs corriger.
+    assert "stock minimum InvenTree" in message
+
+
+def test_stock_minimum_a_zero_nest_pas_un_seuil(manager, alert_setup):
+    """`minimum_stock` vaut 0 par défaut : ce n'est pas une consigne.
+
+    Le prendre pour un seuil mettrait en alerte tout article à stock nul,
+    c'est-à-dire l'essentiel d'une base fraîchement importée.
+    """
+
+    materiel = Part.objects.create(name="Barrière Vauban", minimum_stock=0)
+    RentableItem.objects.create(
+        part=materiel,
+        is_rentable=True,
+        consommable=False,
+        seuil_alerte_bas=None,
+        seuil_alerte_haut=None,
+    )
+
+    assert _types_de_seuil(_alertes(manager), materiel.pk) == []
+
+
+def test_seuil_du_plugin_prime_sur_celui_dinventree(manager, alert_setup):
+    """Le champ du plugin garde la priorité quand les deux sont posés."""
+
+    materiel = Part.objects.create(name="Table brasserie", minimum_stock=999)
+    RentableItem.objects.create(
+        part=materiel,
+        is_rentable=True,
+        consommable=False,
+        seuil_alerte_bas=0,
+        seuil_alerte_haut=None,
+    )
+
+    # Stock total nul, seuil de plugin à 0 : la condition `<=` est remplie, on
+    # vérifie donc que c'est bien 0 (et non 999) qui a servi.
+    message = next(
+        raison["message"]
+        for alerte in _alertes(manager).data["alerts"]
+        if alerte["part_id"] == materiel.pk
+        for raison in alerte["reasons"]
+        if raison["type"] == "low_threshold"
+    )
+
+    assert "seuil bas fixé à 0" in message
+    assert "InvenTree" not in message

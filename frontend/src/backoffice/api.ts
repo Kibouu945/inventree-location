@@ -4,7 +4,8 @@ const BASE = '/plugin/inventree-location/backoffice';
 
 export const USERS_URL = `${BASE}/users/`;
 export const ROLES_URL = `${BASE}/roles/`;
-export const GROUPES_URL = `${BASE}/groupes/`;
+export const CLIENTS_URL = `${BASE}/clients/`;
+export const CONTACTS_URL = `${BASE}/contacts/`;
 export const PARTS_URL = `${BASE}/parts/`;
 
 /**

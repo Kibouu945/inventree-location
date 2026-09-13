@@ -10,7 +10,8 @@ from django.utils import timezone
 from part.models import Part
 
 from inventree_location.models import (
-    Groupe,
+    Client,
+    Contact,
     Lieu,
     LigneReservation,
     Manifestation,
@@ -36,8 +37,8 @@ def user(db):
 
 
 @pytest.fixture
-def groupe(db):
-    return Groupe.objects.create(nom="Jambville", code="JAM")
+def client(db):
+    return Client.objects.create(nom="Jambville", email="jambville@exemple.test")
 
 
 @pytest.fixture
@@ -46,14 +47,13 @@ def part(db):
 
 
 @pytest.fixture
-def manifestation(user, groupe):
+def manifestation(user, client):
     now = timezone.now()
     return Manifestation.objects.create(
         nom="Camp été 2026",
         date_debut=now,
         date_fin=now + timedelta(days=7),
-        organisateur=user,
-        groupe=groupe,
+        client=client,
     )
 
 
@@ -90,28 +90,63 @@ def _get_on_delete(model, field_name):
 
 
 # ---------------------------------------------------------------------------
-# Groupe
+# Client et Contact
 # ---------------------------------------------------------------------------
 
 
-class TestGroupe:
-    def test_creation(self, groupe):
-        assert groupe.pk is not None
-        assert groupe.nom == "Jambville"
-        assert groupe.code == "JAM"
+class TestClient:
+    def test_creation(self, client):
+        assert client.pk is not None
+        assert client.nom == "Jambville"
+        assert client.actif is True
 
-    def test_str(self, groupe):
-        assert str(groupe) == "Jambville"
-
-    @pytest.mark.django_db
-    def test_nom_unique(self, groupe):
-        with pytest.raises(IntegrityError), transaction.atomic():
-            Groupe.objects.create(nom="Jambville", code="OTHER")
+    def test_str(self, client):
+        assert str(client) == "Jambville"
 
     @pytest.mark.django_db
-    def test_code_unique(self, groupe):
+    def test_nom_unique(self, client):
         with pytest.raises(IntegrityError), transaction.atomic():
-            Groupe.objects.create(nom="Autre", code="JAM")
+            Client.objects.create(nom="Jambville", email="autre@exemple.test")
+
+    @pytest.mark.django_db
+    def test_email_unique(self, client):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            Client.objects.create(nom="Autre", email="jambville@exemple.test")
+
+    @pytest.mark.django_db
+    def test_plusieurs_clients_sans_email(self, client):
+        """L'index unique tolère les NULL : les clients repris n'ont pas d'adresse,
+        et en inventer une mettrait de la fausse donnée en base."""
+
+        Client.objects.create(nom="Sans adresse 1")
+        Client.objects.create(nom="Sans adresse 2")
+
+        assert Client.objects.filter(email=None).count() == 2
+
+
+class TestContact:
+    @pytest.mark.django_db
+    def test_creation(self, client):
+        contact = Contact.objects.create(
+            client=client, nom="Durand", prenom="Paul", telephone="0611223344"
+        )
+
+        assert str(contact) == "Paul Durand"
+        assert contact.actif is True
+
+    @pytest.mark.django_db
+    def test_email_unique_globalement(self, client):
+        """Un même interlocuteur ne peut pas avoir deux fiches sous la même
+        adresse, même chez deux clients différents."""
+
+        autre = Client.objects.create(nom="Autre client")
+        Contact.objects.create(client=client, nom="Durand", email="p@exemple.test")
+
+        with pytest.raises(IntegrityError), transaction.atomic():
+            Contact.objects.create(client=autre, nom="Durand", email="p@exemple.test")
+
+    def test_on_delete_client_cascade(self):
+        assert _get_on_delete(Contact, "client") == models.CASCADE
 
 
 # ---------------------------------------------------------------------------
@@ -121,12 +156,11 @@ class TestGroupe:
 
 class TestProfile:
     @pytest.mark.django_db
-    def test_creation(self, user, groupe):
-        profile = Profile.objects.create(
-            user=user, groupe=groupe, telephone="0612345678"
-        )
+    def test_creation(self, user):
+        profile = Profile.objects.create(user=user, telephone="0612345678")
+
         assert profile.pk is not None
-        assert profile.groupe == groupe
+        assert profile.telephone == "0612345678"
 
     @pytest.mark.django_db
     def test_str_with_full_name(self):
@@ -149,8 +183,11 @@ class TestProfile:
     def test_on_delete_user_cascade(self):
         assert _get_on_delete(Profile, "user") == models.CASCADE
 
-    def test_on_delete_groupe_protect(self):
-        assert _get_on_delete(Profile, "groupe") == models.PROTECT
+    def test_aucun_rattachement_a_un_client(self):
+        """Un acteur interne n'appartient à aucun client (09/09) : le champ a
+        été supprimé, il ne doit pas revenir."""
+
+        assert not hasattr(Profile, "groupe")
 
 
 # ---------------------------------------------------------------------------
@@ -202,11 +239,17 @@ class TestManifestation:
     def test_str(self, manifestation):
         assert str(manifestation) == "Camp été 2026"
 
-    def test_on_delete_organisateur_protect(self):
-        assert _get_on_delete(Manifestation, "organisateur") == models.PROTECT
+    def test_on_delete_client_protect(self):
+        assert _get_on_delete(Manifestation, "client") == models.PROTECT
 
-    def test_on_delete_groupe_protect(self):
-        assert _get_on_delete(Manifestation, "groupe") == models.PROTECT
+    def test_on_delete_contact_protect(self):
+        assert _get_on_delete(Manifestation, "contact") == models.PROTECT
+
+    def test_plus_d_organisateur(self):
+        """Remplacé par le contact référent : le client externe n'a pas de
+        compte."""
+
+        assert not hasattr(Manifestation, "organisateur")
 
     def test_statut_effectif_brouillon_reste_brouillon(self, manifestation):
         # brouillon est explicite : les dates ne le font pas progresser.
@@ -214,54 +257,50 @@ class TestManifestation:
         assert manifestation.statut_effectif == StatutManifestation.BROUILLON
         assert manifestation.accepte_nouvelles_prestations is True
 
-    def test_statut_effectif_planifiee_avant_debut(self, user, groupe):
+    def test_statut_effectif_planifiee_avant_debut(self, user, client):
         now = timezone.now()
         manif = Manifestation.objects.create(
             nom="Futur camp",
             date_debut=now + timedelta(days=2),
             date_fin=now + timedelta(days=5),
             statut=StatutManifestation.PLANIFIEE,
-            organisateur=user,
-            groupe=groupe,
+            client=client,
         )
         assert manif.statut_effectif == StatutManifestation.PLANIFIEE
         assert manif.accepte_nouvelles_prestations is True
 
-    def test_statut_effectif_en_cours_par_dates(self, user, groupe):
+    def test_statut_effectif_en_cours_par_dates(self, user, client):
         now = timezone.now()
         manif = Manifestation.objects.create(
             nom="Camp en cours",
             date_debut=now - timedelta(hours=1),
             date_fin=now + timedelta(days=2),
             statut=StatutManifestation.PLANIFIEE,
-            organisateur=user,
-            groupe=groupe,
+            client=client,
         )
         assert manif.statut_effectif == StatutManifestation.EN_COURS
         assert manif.accepte_nouvelles_prestations is False
 
-    def test_statut_effectif_terminee_par_dates(self, user, groupe):
+    def test_statut_effectif_terminee_par_dates(self, user, client):
         now = timezone.now()
         manif = Manifestation.objects.create(
             nom="Camp passé",
             date_debut=now - timedelta(days=5),
             date_fin=now - timedelta(days=1),
             statut=StatutManifestation.PLANIFIEE,
-            organisateur=user,
-            groupe=groupe,
+            client=client,
         )
         assert manif.statut_effectif == StatutManifestation.TERMINEE
         assert manif.accepte_nouvelles_prestations is False
 
-    def test_statut_effectif_annulee_ignore_les_dates(self, user, groupe):
+    def test_statut_effectif_annulee_ignore_les_dates(self, user, client):
         now = timezone.now()
         manif = Manifestation.objects.create(
             nom="Camp annulé",
             date_debut=now - timedelta(hours=1),
             date_fin=now + timedelta(days=2),
             statut=StatutManifestation.ANNULEE,
-            organisateur=user,
-            groupe=groupe,
+            client=client,
         )
         # annulée prime sur la dérivation temporelle.
         assert manif.statut_effectif == StatutManifestation.ANNULEE
@@ -464,14 +503,14 @@ class TestLigneReservation:
 
 
 class TestTimestamped:
-    def test_groupe_has_timestamps(self, groupe):
-        assert groupe.created_at is not None
-        assert groupe.updated_at is not None
+    def test_client_has_timestamps(self, client):
+        assert client.created_at is not None
+        assert client.updated_at is not None
 
     @pytest.mark.django_db
-    def test_updated_at_changes(self, groupe):
-        old_updated = groupe.updated_at
-        groupe.nom = "Nouveau nom"
-        groupe.save()
-        groupe.refresh_from_db()
-        assert groupe.updated_at > old_updated
+    def test_updated_at_changes(self, client):
+        old_updated = client.updated_at
+        client.nom = "Nouveau nom"
+        client.save()
+        client.refresh_from_db()
+        assert client.updated_at > old_updated

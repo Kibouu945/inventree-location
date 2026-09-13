@@ -10,13 +10,15 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.mail import send_mail
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Count, OuterRef, Q, Subquery, Sum
+from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import LimitOffsetPagination, PageNumberPagination
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -33,7 +35,7 @@ from .models import (
     ConflictHistory,
     ConflictState,
     ConflictType,
-    Groupe,
+    Client,
     Lieu,
     LigneReservation,
     Manifestation,
@@ -44,9 +46,18 @@ from .models import (
     ReturnIncidentType,
     StatutReservation,
 )
+from .calendrier import FenetreInvalide, bornes_fenetre, evenements_calendrier
+from .execution import tournee_du_jour
+from .livraison import (
+    LivraisonRefusee,
+    accepter_livraison,
+    changer_etat_livraison,
+    relacher_livraison,
+)
 from .ramassage import lignes_a_ramasser
 from .permissions import (
     CatalogPermission,
+    DeliveryAssignationPermission,
     DeliveryPermission,
     LieuPermission,
     ManifestationPermission,
@@ -65,10 +76,12 @@ from .retours import (
     quantites_du_retour,
 )
 from .serializers import (
+    STATUTS_DEJA_SORTIS,
+    STATUTS_SANS_ENGAGEMENT,
     CatalogPartSerializer,
     DeliverySerializer,
     ExampleSerializer,
-    GroupeSerializer,
+    ClientSerializer,
     LieuSerializer,
     ManifestationSerializer,
     PrestationRetourSerializer,
@@ -121,6 +134,26 @@ def _parse_csv_int_values(values):
             parsed.append(candidate)
 
     return parsed
+
+
+def _borne_journee(champ, valeur, sens):
+    """Filtre de borne temporelle, comparé au jour entier si la borne est un jour.
+
+    Une borne fournie au jour (`2026-09-10`) est lue comme minuit : filtrer une
+    tournée sur « le 10 » excluait alors toutes les livraisons de ce jour-là,
+    dont le retrait est prévu à 8 h 30. On compare donc à la date, dans le
+    fuseau du serveur, conformément à la règle transverse « tout se calcule au
+    jour entier ». Une borne horodatée complète reste comparée telle quelle.
+    """
+
+    valeur = valeur.strip()
+
+    # `parse_datetime` accepte aussi une date seule : c'est l'absence d'heure
+    # qui distingue « toute la journée » d'un instant précis.
+    if ":" not in valeur and parse_date(valeur) is not None:
+        return {f"{champ}__date__{sens}": valeur}
+
+    return {f"{champ}__{sens}": valeur}
 
 
 class ExampleView(APIView):
@@ -271,6 +304,13 @@ class ReservationListCreateView(generics.ListCreateAPIView):
         if roles.sees_only_deliverable_reservations(self.request.user):
             queryset = queryset.filter(statut=StatutReservation.VALIDEE)
 
+        # Symétrique du filtre `manifestation` des prestations : l'arborescence
+        # charge les bons au dépliage.
+        prestation_id = self.request.query_params.get("prestation")
+
+        if prestation_id:
+            queryset = queryset.filter(prestation_id=prestation_id)
+
         statuts = self.request.query_params.getlist("statut")
 
         if statuts:
@@ -289,10 +329,14 @@ class ReservationListCreateView(generics.ListCreateAPIView):
         date_to = self.request.query_params.get("date_to")
 
         if date_from:
-            queryset = queryset.filter(date_retour_prevue__gte=date_from)
+            queryset = queryset.filter(
+                **_borne_journee("date_retour_prevue", date_from, "gte")
+            )
 
         if date_to:
-            queryset = queryset.filter(date_retrait_prevue__lte=date_to)
+            queryset = queryset.filter(
+                **_borne_journee("date_retrait_prevue", date_to, "lte")
+            )
 
         search = self.request.query_params.get("search")
 
@@ -306,6 +350,45 @@ class ReservationListCreateView(generics.ListCreateAPIView):
             )
 
         return queryset
+
+
+class ReservationCalendarView(APIView):
+    """Évènements du calendrier mensuel des réservations (DIS-01).
+
+    Paramètres `from` / `to` : la fenêtre affichée, tous deux obligatoires,
+    envoyés par FullCalendar à chaque changement de mois. Bornes comparées au
+    jour entier, comme les listes filtrables (cf. `_borne_journee`).
+
+    La réponse n'est pas paginée — un calendrier doit montrer tout ce qui
+    chevauche la période — donc c'est la période elle-même qui est bornée
+    (cf. `calendrier.bornes_fenetre`).
+    """
+
+    permission_classes = [ReservationPermission]
+
+    def get(self, request, *args, **kwargs):
+        """Retourne les réservations de la fenêtre, au format FullCalendar."""
+
+        try:
+            debut, fin = bornes_fenetre(
+                request.query_params.get("from"),
+                request.query_params.get("to"),
+            )
+
+            # Une réservation est affichée dès qu'elle chevauche la fenêtre :
+            # celle qui a commencé le mois dernier et court toujours reste
+            # visible.
+            evenements = evenements_calendrier(
+                request.user,
+                debut={"fin_calendrier__date__gte": debut},
+                fin={"debut_calendrier__date__lte": fin},
+            )
+        except FenetreInvalide as refus:
+            return Response(
+                {"detail": refus.detail}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        return Response(evenements, status=status.HTTP_200_OK)
 
 
 class DeliveryMarquerLivreeView(APIView):
@@ -354,6 +437,137 @@ class DeliveryMarquerLivreeView(APIView):
         )
 
 
+def _refus_livraison(refus):
+    """Traduit un refus métier de livraison en réponse HTTP."""
+
+    return Response({"detail": refus.detail}, status=refus.status_code)
+
+
+class DeliveryAccepterView(APIView):
+    """Pool commun des livraisons (US-18) : prendre en charge, ou relâcher.
+
+    `POST` s'attribue une livraison libre, `DELETE` la remet à disposition.
+    Deux verbes sur la même URL plutôt que deux endpoints : c'est la même
+    ressource — l'assignation de cette livraison — qu'on crée puis qu'on
+    supprime.
+    """
+
+    permission_classes = [DeliveryAssignationPermission]
+    serializer_class = DeliverySerializer
+
+    def post(self, request, pk, *args, **kwargs):
+        """S'attribue la livraison si elle est encore libre."""
+
+        try:
+            reservation = accepter_livraison(pk, request.user)
+        except LivraisonRefusee as refus:
+            return _refus_livraison(refus)
+
+        return Response(DeliverySerializer(reservation).data, status=status.HTTP_200_OK)
+
+    def delete(self, request, pk, *args, **kwargs):
+        """Remet la livraison dans le pool commun."""
+
+        try:
+            reservation = relacher_livraison(pk, request.user)
+        except LivraisonRefusee as refus:
+            return _refus_livraison(refus)
+
+        return Response(DeliverySerializer(reservation).data, status=status.HTTP_200_OK)
+
+
+class DeliveryEtatView(APIView):
+    """Progression d'une livraison assignée (US-19) : en route, livrée, problème.
+
+    Accepte du multipart : le livreur peut joindre une photo au constat, et
+    l'écran envoie donc un `FormData` plutôt que du JSON.
+    """
+
+    permission_classes = [DeliveryAssignationPermission]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    serializer_class = DeliverySerializer
+
+    def patch(self, request, pk, *args, **kwargs):
+        """Applique le changement d'état demandé."""
+
+        etat = str(request.data.get("etat") or "").strip()
+        commentaire = str(request.data.get("commentaire") or "")
+
+        try:
+            reservation = changer_etat_livraison(
+                pk,
+                etat,
+                request.user,
+                commentaire=commentaire,
+                photo=request.FILES.get("photo"),
+            )
+        except LivraisonRefusee as refus:
+            return _refus_livraison(refus)
+
+        return Response(DeliverySerializer(reservation).data, status=status.HTTP_200_OK)
+
+
+class TourneeView(APIView):
+    """Tournée d'une journée : les arrêts par lieu, plus le récapitulatif global.
+
+    `?date=AAAA-MM-JJ`, la journée du jour par défaut. La journée est celle du
+    fuseau de l'application, jamais `dt.date()` sur de l'UTC.
+
+    Deux maille différentes dans une seule réponse, et c'est le point : le
+    livreur organise ses arrêts lieu par lieu, mais charge son véhicule sur le
+    total tous lieux confondus (R25). Les quantités d'un arrêt somment la
+    journée sur ce lieu, parce que des objets circulent d'un lieu à l'autre
+    (R30) — règle d'affichage, la maille de stockage reste le bon.
+
+    Lecture seule : rien n'écrit ici, ni dans les tables d'exécution ni sur les
+    bons.
+    """
+
+    permission_classes = [DeliveryPermission]
+
+    def get(self, request):
+        parametre = request.query_params.get("date")
+
+        if parametre:
+            jour = parse_date(parametre)
+
+            if jour is None:
+                raise ValidationError({"date": "Date illisible : AAAA-MM-JJ attendu."})
+        else:
+            jour = timezone.localdate()
+
+        bons = Reservation.objects.select_related(
+            "prestation__lieu",
+            "prestation__manifestation__client",
+        ).prefetch_related("lignes__part", "lignes__livraisons")
+
+        # Un livreur pur ne voit que ce qui est à livrer, comme sur sa liste.
+        if roles.sees_only_deliverable_reservations(request.user):
+            bons = bons.filter(statut=StatutReservation.VALIDEE)
+
+        tournee = tournee_du_jour(jour, bons)
+
+        return Response(
+            {
+                "date": tournee["date"],
+                "arrets": [
+                    {
+                        **arret,
+                        "lieu": (
+                            LieuSerializer(arret["lieu"]).data
+                            if arret["lieu"] is not None
+                            else None
+                        ),
+                    }
+                    for arret in tournee["arrets"]
+                ],
+                "recap_total": tournee["recap_total"],
+                "quantite_totale": tournee["quantite_totale"],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class DeliveryListView(generics.ListAPIView):
     """Tournée livreur : réservations à livrer / livrées, enrichies (US livreur).
 
@@ -382,9 +596,14 @@ class DeliveryListView(generics.ListAPIView):
                 "prestation",
                 "prestation__lieu",
                 "prestation__manifestation",
-                "prestation__manifestation__organisateur",
+                "prestation__manifestation__contact",
+                "prestation__manifestation__client",
+                "livreur_assigne",
             )
-            .prefetch_related("lignes__part__rentable_info")
+            .prefetch_related(
+                "lignes__part__rentable_info",
+                "livraison_status_logs__changed_by",
+            )
             .all()
             .order_by("date_retrait_prevue")
         )
@@ -400,10 +619,14 @@ class DeliveryListView(generics.ListAPIView):
         date_to = self.request.query_params.get("date_to")
 
         if date_from:
-            queryset = queryset.filter(date_retour_prevue__gte=date_from)
+            queryset = queryset.filter(
+                **_borne_journee("date_retour_prevue", date_from, "gte")
+            )
 
         if date_to:
-            queryset = queryset.filter(date_retrait_prevue__lte=date_to)
+            queryset = queryset.filter(
+                **_borne_journee("date_retrait_prevue", date_to, "lte")
+            )
 
         lieux = _parse_csv_int_values(self.request.query_params.getlist("lieu"))
 
@@ -510,10 +733,14 @@ class RamassageListView(generics.ListAPIView):
             queryset = queryset.filter(statut__in=statuts)
 
         if date_from:
-            queryset = queryset.filter(date_retour_prevue__gte=date_from)
+            queryset = queryset.filter(
+                **_borne_journee("date_retour_prevue", date_from, "gte")
+            )
 
         if date_to:
-            queryset = queryset.filter(date_retour_prevue__lte=date_to)
+            queryset = queryset.filter(
+                **_borne_journee("date_retour_prevue", date_to, "lte")
+            )
 
         if lieu:
             queryset = queryset.filter(
@@ -1700,7 +1927,7 @@ class StockAlertListView(APIView):
             # louable (InvenTree) et ce qu'il en reste de libre aujourd'hui.
             stock_total = get_part_total_stock(part, rentable_item=rentable)
             stock_available = availability.get(part.pk, stock_total)
-            low = rentable.seuil_alerte_bas
+            low, low_source = self._seuil_bas(rentable, part)
             high = rentable.seuil_alerte_haut
 
             part_reasons = []
@@ -1708,12 +1935,23 @@ class StockAlertListView(APIView):
             # Les seuils portent sur ce qu'on possède, pas sur ce qui est libre
             # à l'instant : réapprovisionner se décide sur le parc, pas sur le
             # calendrier des réservations.
-            if rentable.consommable and low is not None and stock_total <= low:
+            #
+            # Le seuil bas n'est plus réservé aux consommables. En recette
+            # (07/09/2026, remarque 11), le client signale : « le stock minimum
+            # de ce produit est = 5, il y a 1 seul produit en stock pourtant on
+            # ne retrouve pas ce produit dans la liste des alertes de stock ».
+            # Deux pièges se cumulaient. D'abord la condition `consommable` :
+            # une trousse de secours à 1 exemplaire sur 5 attendus ne
+            # déclenchait rien parce qu'elle n'était pas cochée consommable —
+            # or « je veux consulter une alerte lorsqu'un stock disponible
+            # futur < seuil critique » (CDC V06, épic F, US 9) ne parle pas de
+            # consommables. Ensuite la source du seuil : voir `_seuil_bas`.
+            if low is not None and stock_total <= low:
                 part_reasons.append({
                     "type": "low_threshold",
                     "message": (
                         f"Stock trop bas : {stock_total} en stock, "
-                        f"seuil bas fixé à {low}"
+                        f"seuil bas fixé à {low}{low_source}"
                     ),
                 })
 
@@ -1768,6 +2006,44 @@ class StockAlertListView(APIView):
         alerts.sort(key=lambda item: item["part_name"].lower())
 
         return alerts
+
+    def _seuil_bas(self, rentable, part):
+        """Seuil bas applicable, et d'où il vient.
+
+        Le plugin ne lisait que `RentableItem.seuil_alerte_bas` et ignorait
+        `Part.minimum_stock`, le champ natif d'InvenTree — que le client avait
+        justement renseigné (recette du 07/09/2026, remarque 11 : « le stock
+        minimum de ce produit est = 5 »). Deux champs pour une même notion,
+        dont un seul était lu : l'utilisateur remplissait celui que l'interface
+        d'InvenTree lui montrait, et rien ne se passait.
+
+        Le champ du plugin garde la priorité — il est explicitement posé pour
+        la location, et le CDC V06 en attend deux (haut et bas) là où InvenTree
+        n'en offre qu'un. `minimum_stock` sert de repli : mieux vaut une alerte
+        fondée sur le champ natif que pas d'alerte du tout. La provenance est
+        rendue avec la valeur pour que le message dise où corriger le seuil.
+        """
+
+        if rentable.seuil_alerte_bas is not None:
+            return rentable.seuil_alerte_bas, ""
+
+        minimum = getattr(part, "minimum_stock", None)
+
+        if minimum is None:
+            return None, ""
+
+        try:
+            minimum = int(minimum)
+        except (TypeError, ValueError):
+            return None, ""
+
+        # `minimum_stock` vaut 0 par défaut chez InvenTree : le prendre pour un
+        # seuil mettrait en alerte tout article à stock nul, sans que personne
+        # n'ait rien demandé.
+        if minimum <= 0:
+            return None, ""
+
+        return minimum, " (stock minimum InvenTree)"
 
     def _projected_tension(
         self, part_id, total_stock, now, manifestation_id=None, lieu_id=None
@@ -1939,7 +2215,9 @@ class CatalogPartListView(APIView):
         category_ids = self._parse_category_ids(category, categories)
 
         if category_ids:
-            queryset = queryset.filter(category_id__in=category_ids)
+            queryset = queryset.filter(
+                category_id__in=self._with_descendants(category_ids)
+            )
 
         active_value = self._parse_boolean(active)
 
@@ -1988,6 +2266,54 @@ class CatalogPartListView(APIView):
                 category_ids.append(int(value))
 
         return category_ids
+
+    def _with_descendants(self, category_ids):
+        """Étend une liste de catégories à leurs sous-catégories.
+
+        Filtrer sur « Mobilier » ne rendait que les articles rangés
+        directement dans « Mobilier », pas ceux de ses sous-catégories : sur
+        une arborescence un peu profonde, le filtre paraissait ne rien
+        trouver. Le client demandait explicitement une recherche « avec les
+        libellés et les catégories, les sous-catégories » (recette du
+        07/09/2026, remarque 4).
+
+        `PartCategory` est un arbre MPTT : `get_descendants(include_self=True)`
+        donne la branche entière en une requête. Si le modèle n'est pas
+        disponible (tests avec une app `part` factice), on retombe sur le
+        filtre plat plutôt que d'échouer.
+        """
+
+        try:
+            from part.models import PartCategory
+        except ImportError:
+            return category_ids
+
+        racines = PartCategory.objects.filter(pk__in=category_ids)
+
+        try:
+            # MPTT sait descendre tout un ensemble de nœuds en une requête
+            # (`TreeQuerySet.get_descendants`). C'est la voie normale.
+            branche = racines.get_descendants(include_self=True)
+        except AttributeError:
+            # Manager sans l'extension queryset : on descend nœud par nœud.
+            try:
+                branche = PartCategory.objects.none()
+
+                for racine in racines:
+                    branche = branche | racine.get_descendants(include_self=True)
+            except (AttributeError, TypeError):
+                # Modèle sans arbre du tout : le filtre plat reste correct,
+                # juste moins large.
+                return category_ids
+
+        try:
+            ids = list(branche.values_list("pk", flat=True))
+        except (AttributeError, TypeError):
+            return category_ids
+
+        # Une catégorie demandée mais absente en base doit rester dans le
+        # filtre : elle ne rendra rien, ce qui est le résultat attendu.
+        return sorted(set(ids) | set(category_ids))
 
     def _parse_boolean(self, value):
         """Parse boolean query parameter."""
@@ -2208,6 +2534,51 @@ class RentablePartDetailView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+#: Chemin du niveau agrégé, vu depuis `LigneReservation` puis depuis `Reservation`.
+#:
+#: Le planning se lit à deux mailles — la manifestation pour la barre, la
+#: prestation pour ses sous-lignes. Les deux se comptent avec la **même**
+#: requête au chemin près : c'est ce qui garantit que les sous-lignes d'une
+#: barre totalisent la barre, au lieu de mesurer deux choses différentes.
+DEPUIS_LIGNE = {
+    "manifestation": "reservation__prestation__manifestation",
+    "prestation": "reservation__prestation",
+}
+DEPUIS_BON = {
+    "manifestation": "prestation__manifestation",
+    "prestation": "prestation",
+}
+
+
+def _volume_engage_par(maille):
+    """Somme des quantités demandées sous une maille donnée, annulés exclus."""
+
+    champ = DEPUIS_LIGNE[maille]
+
+    return (
+        LigneReservation.objects.filter(**{champ: OuterRef("pk")})
+        .exclude(reservation__statut__in=STATUTS_SANS_ENGAGEMENT)
+        .values(champ)
+        .annotate(total=Sum("quantite_demandee"))
+        .values("total")[:1]
+    )
+
+
+def _bons_par(maille, *, sortis=False):
+    """Nombre de bons sous une maille — tous, ou seulement ceux sortis."""
+
+    champ = DEPUIS_BON[maille]
+
+    queryset = Reservation.objects.filter(**{champ: OuterRef("pk")}).exclude(
+        statut__in=STATUTS_SANS_ENGAGEMENT
+    )
+
+    if sortis:
+        queryset = queryset.filter(statut__in=STATUTS_DEJA_SORTIS)
+
+    return queryset.values(champ).annotate(total=Count("id")).values("total")[:1]
+
+
 class ManifestationListCreateView(generics.ListCreateAPIView):
     """CRUD manifestation — collection (ORG-01)."""
 
@@ -2216,11 +2587,29 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
     pagination_class = LieuPagination
 
     def get_queryset(self):
-        """Retourne les manifestations, filtrées par statut et recherche."""
+        """Manifestations, filtrées par statut, recherche et période.
+
+        Les trois agrégats du planning — volume engagé, bons engagés, bons
+        sortis — sont posés par sous-requête et non par `annotate(Sum(...))`
+        enchaînés : deux agrégations sur deux jointures dans la même requête se
+        multiplient l'une l'autre, et le volume ressortirait multiplié par le
+        nombre de bons. Chaque sous-requête compte dans son coin.
+        """
 
         queryset = (
-            Manifestation.objects.select_related("organisateur", "groupe")
-            .all()
+            Manifestation.objects.select_related("client", "contact")
+            .annotate(
+                volume_engage=Coalesce(
+                    Subquery(_volume_engage_par("manifestation")), 0
+                ),
+                bons_engages=Coalesce(Subquery(_bons_par("manifestation")), 0),
+                bons_livres=Coalesce(
+                    Subquery(_bons_par("manifestation", sortis=True)), 0
+                ),
+                # `distinct` obligatoire : ce `Count` joint, là où les trois
+                # autres agrégats sont des sous-requêtes.
+                prestations_total=Count("prestations", distinct=True),
+            )
             .order_by("-date_debut")
         )
 
@@ -2229,10 +2618,43 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
         if statuts:
             queryset = queryset.filter(statut__in=statuts)
 
+        # « Rechercher les manifestations d'un client défini » (recette du
+        # 11/09). La recherche texte porte sur le nom de la manifestation, pas
+        # sur celui du client : deux besoins distincts, deux paramètres.
+        client_id = self.request.query_params.get("client")
+
+        if client_id:
+            queryset = queryset.filter(client_id=client_id)
+
         search = self.request.query_params.get("search")
 
         if search:
             queryset = queryset.filter(nom__icontains=search)
+
+        # Filtre Futur / Passé / Tout de la maquette. Découpage sur la date de
+        # **fin** : une manifestation en cours a encore ses ramassages devant
+        # elle. `localdate()` et non `today()` — serveur en UTC, métier à Paris.
+        periode = self.request.query_params.get("periode")
+
+        if periode in {"futur", "passe"}:
+            aujourdhui = timezone.localdate()
+
+            if periode == "futur":
+                queryset = queryset.filter(date_fin__date__gte=aujourdhui)
+            else:
+                queryset = queryset.filter(date_fin__date__lt=aujourdhui)
+
+        # Fenêtre du planning : on veut ce qui **chevauche** la période, pas ce
+        # qui y tient entièrement. Une manifestation commencée le mois dernier
+        # et qui court encore doit apparaître sur la semaine affichée.
+        depuis = self.request.query_params.get("from")
+        jusqua = self.request.query_params.get("to")
+
+        if depuis:
+            queryset = queryset.filter(**_borne_journee("date_fin", depuis, "gte"))
+
+        if jusqua:
+            queryset = queryset.filter(**_borne_journee("date_debut", jusqua, "lte"))
 
         return queryset
 
@@ -2242,7 +2664,7 @@ class ManifestationDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     permission_classes = [ManifestationPermission]
     serializer_class = ManifestationSerializer
-    queryset = Manifestation.objects.select_related("organisateur", "groupe")
+    queryset = Manifestation.objects.select_related("client", "contact")
 
 
 def _prestation_queryset():
@@ -2261,6 +2683,9 @@ class PrestationListCreateView(generics.ListCreateAPIView):
     Paramètres de filtre :
     - manifestation : filtre exact sur la manifestation parente.
     - search        : recherche sur le nom de la prestation ou de sa manifestation.
+    - from / to     : fenêtre du planning, au **chevauchement** comme pour les
+      manifestations — une prestation commencée avant la fenêtre et qui court
+      encore doit apparaître dans la semaine affichée.
     """
 
     permission_classes = [PrestationPermission]
@@ -2268,14 +2693,37 @@ class PrestationListCreateView(generics.ListCreateAPIView):
     pagination_class = LieuPagination
 
     def get_queryset(self):
-        """Retourne les prestations, filtrées par manifestation et recherche."""
+        """Retourne les prestations, filtrées par manifestation, fenêtre et recherche.
 
-        queryset = _prestation_queryset().order_by("-date_debut")
+        Les agrégats sont posés par sous-requête, avec la mécanique et les
+        raisons de `ManifestationListCreateView` : deux `Sum` sur deux
+        jointures se multiplieraient, et le planning déplié demande ces
+        nombres pour chaque sous-ligne d'un coup.
+        """
+
+        queryset = (
+            _prestation_queryset()
+            .annotate(
+                volume_engage=Coalesce(Subquery(_volume_engage_par("prestation")), 0),
+                bons_engages=Coalesce(Subquery(_bons_par("prestation")), 0),
+                bons_livres=Coalesce(Subquery(_bons_par("prestation", sortis=True)), 0),
+            )
+            .order_by("-date_debut")
+        )
 
         manifestation_id = self.request.query_params.get("manifestation")
 
         if manifestation_id:
             queryset = queryset.filter(manifestation_id=manifestation_id)
+
+        depuis = self.request.query_params.get("from")
+        jusqua = self.request.query_params.get("to")
+
+        if depuis:
+            queryset = queryset.filter(**_borne_journee("date_fin", depuis, "gte"))
+
+        if jusqua:
+            queryset = queryset.filter(**_borne_journee("date_debut", jusqua, "lte"))
 
         search = self.request.query_params.get("search")
 
@@ -2370,33 +2818,48 @@ class PrestationStockPreviewView(APIView):
         return Response(result, status=response_status)
 
 
-class GroupeListView(generics.ListAPIView):
-    """Liste des groupes scouts (lecture seule), pour le sélecteur manifestation."""
+class ClientListView(generics.ListAPIView):
+    """Liste des clients (lecture seule) : sélecteur de manifestation et « mes clients »."""
 
     permission_classes = [RoleBasedPermission]
-    serializer_class = GroupeSerializer
+    serializer_class = ClientSerializer
     pagination_class = CatalogPagination
 
     def get_queryset(self):
-        """Retourne les groupes, filtrés par recherche texte."""
+        """Retourne les clients, filtrés par recherche texte et par gestionnaire.
 
-        queryset = Groupe.objects.all().order_by("nom")
+        `gestionnaire=me` sert l'écran d'accueil du gestionnaire, qui doit
+        retrouver ses clients pendant un appel téléphonique sans connaître son
+        propre identifiant. Une valeur inconnue est ignorée, pas refusée : un
+        400 sur un écran de liste serait pire.
+        """
+
+        queryset = Client.objects.select_related("gestionnaire").order_by("nom")
 
         search = self.request.query_params.get("search")
 
         if search:
             queryset = queryset.filter(
-                Q(nom__icontains=search) | Q(code__icontains=search)
+                Q(nom__icontains=search) | Q(email__icontains=search)
             )
+
+        gestionnaire = self.request.query_params.get("gestionnaire")
+
+        if gestionnaire == "me":
+            queryset = queryset.filter(gestionnaire=self.request.user)
+        elif gestionnaire and gestionnaire.isdigit():
+            queryset = queryset.filter(gestionnaire_id=int(gestionnaire))
 
         return queryset
 
 
 class UserListView(generics.ListAPIView):
-    """Liste des utilisateurs actifs (lecture seule), pour le sélecteur demandeur.
+    """Liste des utilisateurs actifs (lecture seule), pour les sélecteurs.
 
-    Paramètre de filtre :
-    - search : recherche sur username, prénom, nom ou email.
+    Paramètres de filtre :
+    - search : recherche sur username, prénom, nom ou email ;
+    - roles : ne garder que les comptes portant l'un de ces rôles (CSV) ;
+    - exclude_roles : écarter les comptes portant l'un de ces rôles (CSV).
     """
 
     permission_classes = [RoleBasedPermission]
@@ -2404,7 +2867,7 @@ class UserListView(generics.ListAPIView):
     pagination_class = CatalogPagination
 
     def get_queryset(self):
-        """Retourne les utilisateurs actifs, filtrés par recherche texte."""
+        """Retourne les utilisateurs actifs, filtrés par recherche et rôle."""
 
         queryset = get_user_model().objects.filter(is_active=True).order_by("username")
 
@@ -2418,4 +2881,38 @@ class UserListView(generics.ListAPIView):
                 | Q(email__icontains=search)
             )
 
-        return queryset
+        # Filtres de rôle. Revue interne du 07/09/2026 : « dans le champ gérant
+        # interne, ne pas afficher le client (l'organisateur) ». Le sélecteur
+        # servait la même liste à tout le monde, si bien qu'on pouvait désigner
+        # un client comme responsable interne d'une réservation. Le CDC V06
+        # sépare pourtant nettement les deux : l'organisateur est le client qui
+        # commande et signe les devis (persona 1), le gestionnaire est celui qui
+        # les traite (persona 2) — et la matrice RACI n'a même pas de colonne
+        # « organisateur », signe qu'il n'agit pas dans l'outil.
+        roles_demandes = self._roles_param("roles")
+        roles_exclus = self._roles_param("exclude_roles")
+
+        if roles_demandes:
+            queryset = queryset.filter(groups__name__in=roles_demandes)
+
+        if roles_exclus:
+            queryset = queryset.exclude(groups__name__in=roles_exclus)
+
+        # Un compte cumulant deux rôles demandés serait sinon rendu deux fois.
+        return queryset.distinct() if (roles_demandes or roles_exclus) else queryset
+
+    def _roles_param(self, name):
+        """Lit une liste de rôles en CSV, en ignorant les noms inconnus.
+
+        Un rôle inexistant est du bruit, pas une erreur : le filtrer
+        silencieusement vaut mieux qu'un 400 sur un sélecteur d'interface.
+        """
+
+        raw = self.request.query_params.get(name)
+
+        if not raw:
+            return []
+
+        demandes = {valeur.strip() for valeur in str(raw).split(",") if valeur.strip()}
+
+        return sorted(demandes & set(roles.ALL_ROLES))

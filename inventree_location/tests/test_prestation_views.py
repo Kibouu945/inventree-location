@@ -2,7 +2,7 @@
 
 Couvre le CRUD prestation, le rattachement à un lieu unique géolocalisé, la
 liste d'articles + quantités imbriquée, la validation des dates dans la
-manifestation et le blocage sur stock insuffisant.
+manifestation et l'alerte (non bloquante) sur stock insuffisant.
 """
 
 from __future__ import annotations
@@ -15,15 +15,17 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from inventree_location.tests.factories import mettre_en_stock
+from inventree_location.tests.factories import (
+    make_manifestation,
+    mettre_en_stock,
+)
 from inventree_location.models import (
-    Groupe,
     LignePrestation,
     Lieu,
-    Manifestation,
     Prestation,
     RentableItem,
     StatutManifestation,
+    StatutReservation,
 )
 from inventree_location.views import (
     PrestationDetailView,
@@ -54,13 +56,10 @@ def user(db):
 @pytest.fixture
 def manifestation(db, user):
     now = timezone.now().replace(microsecond=0)
-    groupe = Groupe.objects.create(nom="Jambville", code="JAM")
-    return Manifestation.objects.create(
+    return make_manifestation(
         nom="Camp été 2026",
         date_debut=now,
         date_fin=now + timedelta(days=7),
-        organisateur=user,
-        groupe=groupe,
     )
 
 
@@ -216,9 +215,21 @@ class TestPrestationCreate:
         assert "manifestation" in response.data
         assert not Prestation.objects.filter(nom="Trop tard").exists()
 
-    def test_insufficient_stock_blocks_creation(
+    def test_insufficient_stock_alerte_mais_nenregistre_pas_moins(
         self, factory, user, manifestation, lieu
     ):
+        """Une pénurie de stock alerte, elle ne refuse plus l'enregistrement.
+
+        Recette Tassin du 07/09/2026, remarque 6 : « le système bloque alors la
+        réservation et seul annuler est possible. Il ne faut pas bloquer mais
+        alerter. (Voir les Epic E & F) ». Une prestation porte le prévisionnel ;
+        le refus d'écriture laissait l'utilisateur sans issue et cassait le
+        cycle réservation → livraison → ramassage dès la première étape.
+
+        Le garde-fou n'a pas disparu, il a changé de place : voir
+        `TestReservationStockConflict` pour le refus au passage en « validée ».
+        """
+
         part = _make_part("Chaise", stock=3)
         payload = {
             "manifestation": manifestation.pk,
@@ -232,9 +243,49 @@ class TestPrestationCreate:
         force_authenticate(request, user=user)
         response = PrestationListCreateView.as_view()(request)
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "stock" in response.data
-        assert not Prestation.objects.filter(nom="Trop de chaises").exists()
+        assert response.status_code == status.HTTP_201_CREATED
+
+        prestation = Prestation.objects.get(nom="Trop de chaises")
+        ligne = prestation.lignes_prestation.get()
+
+        # La ligne est conservée telle que saisie : on n'écrête pas
+        # silencieusement une quantité que l'utilisateur a voulue.
+        assert ligne.part_id == part.pk
+        assert ligne.quantite == 5
+
+    def test_penurie_reste_visible_sur_le_previsionnel(
+        self, factory, user, manifestation, lieu
+    ):
+        """Ne plus bloquer ne veut pas dire ne plus signaler.
+
+        L'écran interroge `stock-preview` en direct : la pénurie doit y
+        ressortir, avec la quantité manquante, sans quoi « alerter » se
+        réduirait à « laisser passer ».
+        """
+
+        from inventree_location.stock import compute_prestation_stock
+
+        part = _make_part("Chaise", stock=3)
+        payload = {
+            "manifestation": manifestation.pk,
+            "lieu": lieu.pk,
+            "nom": "Trop de chaises",
+            "date_debut": manifestation.date_debut.isoformat(),
+            "date_fin": (manifestation.date_debut + timedelta(hours=2)).isoformat(),
+            "lignes": [{"part": part.pk, "quantite": 5}],
+        }
+        request = factory.post(PRESTATIONS_URL, payload, format="json")
+        force_authenticate(request, user=user)
+        PrestationListCreateView.as_view()(request)
+
+        result = compute_prestation_stock(Prestation.objects.get(nom="Trop de chaises"))
+
+        assert result["has_shortage"] is True
+        assert [
+            (line["part_id"], line["missing"])
+            for line in result["lines"]
+            if line["shortage"]
+        ] == [(part.pk, 2)]
 
 
 @pytest.mark.django_db
@@ -258,3 +309,208 @@ class TestPrestationDetail:
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
         assert not Prestation.objects.filter(pk=prestation.pk).exists()
+
+
+@pytest.mark.django_db
+class TestChampsDuPlanningPrestation:
+    """Le planning déplié : chaque prestation porte son volume et son avancement.
+
+    C'est la même mesure qu'à la maille manifestation, un cran plus bas. Elle
+    est calculée par la vue et non par le sérialiseur, pour la même raison :
+    agréger prestation par prestation ferait une requête par sous-ligne.
+    """
+
+    def _liste(self, factory, user, **params):
+        request = factory.get(PRESTATIONS_URL, params)
+        force_authenticate(request, user=user)
+
+        return PrestationListCreateView.as_view()(request)
+
+    def _bons(self, prestation, user, statuts, *, quantite=3):
+        """Un bon par statut donné sur la prestation, `quantite` objets chacun."""
+
+        from inventree_location.tests.factories import (
+            make_ligne,
+            make_part,
+            make_reservation,
+        )
+
+        part = make_part(rentable=True)
+
+        for statut in statuts:
+            bon = make_reservation(
+                prestation=prestation, demandeur=user, statut=statut
+            )
+            make_ligne(reservation=bon, part=part, quantite_demandee=quantite)
+
+    def test_le_volume_somme_les_bons_engages(
+        self, factory, user, prestation
+    ):
+        self._bons(
+            prestation,
+            user,
+            [
+                StatutReservation.VALIDEE,
+                StatutReservation.LIVREE,
+                StatutReservation.ANNULEE,  # n'engage plus rien
+                StatutReservation.BROUILLON,  # pas encore engagé
+            ],
+        )
+
+        row = self._liste(factory, user).data["results"][0]
+
+        assert row["quantite_totale"] == 6
+        assert row["etat_livraison"] == {"bons": 2, "livres": 1, "a_livrer": 1}
+
+    def test_une_prestation_sans_bon_rend_zero(self, factory, user, prestation):
+        row = self._liste(factory, user).data["results"][0]
+
+        assert row["quantite_totale"] == 0
+        assert row["etat_livraison"] == {"bons": 0, "livres": 0, "a_livrer": 0}
+
+    def test_les_prestations_totalisent_leur_manifestation(
+        self, factory, user, manifestation, prestation
+    ):
+        """Le point de la maille dépliée : les sous-lignes font la barre.
+
+        Deux mesures différentes — le prévisionnel de la prestation d'un côté,
+        les bons de l'autre — donneraient un planning où le détail contredit
+        l'ensemble.
+        """
+
+        from inventree_location.tests.factories import make_prestation
+        from inventree_location.views import ManifestationListCreateView
+
+        autre = make_prestation(
+            manifestation=manifestation,
+            nom="Démontage",
+            date_debut=manifestation.date_debut + timedelta(days=1),
+            date_fin=manifestation.date_debut + timedelta(days=1, hours=3),
+        )
+        self._bons(prestation, user, [StatutReservation.VALIDEE])
+        self._bons(autre, user, [StatutReservation.LIVREE, StatutReservation.LIVREE])
+
+        prestations = self._liste(
+            factory, user, manifestation=manifestation.pk
+        ).data["results"]
+
+        requete = factory.get("/plugin/inventree-location/manifestations/")
+        force_authenticate(requete, user=user)
+        barre = ManifestationListCreateView.as_view()(requete).data["results"][0]
+
+        assert sum(row["quantite_totale"] for row in prestations) == (
+            barre["quantite_totale"]
+        )
+        assert sum(row["etat_livraison"]["bons"] for row in prestations) == (
+            barre["etat_livraison"]["bons"]
+        )
+        assert sum(row["etat_livraison"]["livres"] for row in prestations) == (
+            barre["etat_livraison"]["livres"]
+        )
+
+    def test_le_detail_retombe_sur_le_calcul_ligne_a_ligne(
+        self, factory, user, prestation
+    ):
+        """Sans annotation — le détail n'en pose pas —, le repli doit rendre
+        la même chose que la liste."""
+
+        self._bons(prestation, user, [StatutReservation.LIVREE])
+
+        request = factory.get(f"{PRESTATIONS_URL}{prestation.pk}/")
+        force_authenticate(request, user=user)
+        response = PrestationDetailView.as_view()(request, pk=prestation.pk)
+
+        assert response.data["quantite_totale"] == 3
+        assert response.data["etat_livraison"] == {
+            "bons": 1,
+            "livres": 1,
+            "a_livrer": 0,
+        }
+
+    def test_la_liste_ne_fait_pas_une_requete_par_prestation(
+        self, factory, user, manifestation, django_assert_max_num_queries
+    ):
+        from inventree_location.tests.factories import make_prestation
+
+        for index in range(10):
+            presta = make_prestation(
+                manifestation=manifestation,
+                nom=f"Prestation {index}",
+                date_debut=manifestation.date_debut,
+                date_fin=manifestation.date_debut + timedelta(hours=2),
+            )
+            self._bons(
+                presta, user, [StatutReservation.VALIDEE, StatutReservation.LIVREE]
+            )
+
+        with django_assert_max_num_queries(6):
+            response = self._liste(factory, user)
+
+        assert len(response.data["results"]) == 10
+        assert all(row["quantite_totale"] == 6 for row in response.data["results"])
+
+
+@pytest.mark.django_db
+class TestFenetreDuPlanningPrestation:
+    """`from` / `to` : ce qui **chevauche** la fenêtre, pas ce qui y tient.
+
+    Même règle qu'à la maille manifestation : une prestation commencée la
+    semaine dernière et qui court encore doit apparaître dans la semaine
+    affichée, sinon le planning perd ce qui est en cours.
+    """
+
+    def _noms(self, factory, user, **params):
+        request = factory.get(PRESTATIONS_URL, params)
+        force_authenticate(request, user=user)
+
+        return {
+            row["nom"] for row in PrestationListCreateView.as_view()(request).data["results"]
+        }
+
+    @pytest.fixture
+    def trois_prestations(self, manifestation):
+        """Trois prestations ancrées à midi, heure de Paris.
+
+        À midi et pas à `now()` : le serveur compare au **jour** dans le fuseau
+        métier, et une fixture créée à 22 h UTC tombe déjà le lendemain à
+        Paris — le test mesurerait alors le décalage, pas la règle.
+        """
+
+        from inventree_location.tests.factories import make_prestation
+
+        debut = timezone.localtime(manifestation.date_debut).replace(
+            hour=12, minute=0, second=0, microsecond=0
+        )
+
+        for nom, decalage, duree in [
+            ("Avant", timedelta(days=0), timedelta(hours=2)),
+            ("Pendant", timedelta(days=3), timedelta(hours=2)),
+            ("Chevauchante", timedelta(days=1), timedelta(days=4)),
+        ]:
+            make_prestation(
+                manifestation=manifestation,
+                nom=nom,
+                date_debut=debut + decalage,
+                date_fin=debut + decalage + duree,
+            )
+
+        return debut
+
+    def test_la_fenetre_garde_ce_qui_chevauche(
+        self, factory, user, trois_prestations
+    ):
+        debut = trois_prestations
+        jour = timezone.localtime(debut + timedelta(days=3)).date().isoformat()
+
+        assert self._noms(factory, user, **{"from": jour, "to": jour}) == {
+            "Pendant",
+            "Chevauchante",
+        }
+
+    def test_la_fenetre_exclut_ce_qui_est_entierement_dehors(
+        self, factory, user, trois_prestations
+    ):
+        debut = trois_prestations
+        jour = timezone.localtime(debut + timedelta(days=6)).date().isoformat()
+
+        assert self._noms(factory, user, **{"from": jour, "to": jour}) == set()

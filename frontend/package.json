@@ -11,6 +11,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@fullcalendar/core": "6.1.21",
+    "@fullcalendar/daygrid": "6.1.21",
+    "@fullcalendar/react": "6.1.19",
     "@inventreedb/ui": "latest",
     "@mantine/core": "^8.3.18",
     "@mantine/dates": "^8.3.18",
@@ -18,6 +21,7 @@
     "@mantine/hooks": "^8.3.18",
     "@mantine/modals": "^8.3.18",
     "@mantine/notifications": "^8.3.18",
+    "@tabler/icons-react": "^3.44.0",
     "leaflet": "^1.9.4",
     "react": ">= 19.1.2",
     "react-dom": ">= 19.1.2",

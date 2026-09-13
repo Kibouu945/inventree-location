@@ -7,7 +7,6 @@ import {
   Group,
   Loader,
   Modal,
-  MultiSelect,
   Pagination,
   PasswordInput,
   Select,
@@ -20,16 +19,9 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import {
-  GROUPES_URL,
-  listParams,
-  pageCount,
-  ROLES_URL,
-  USERS_URL
-} from './api';
+import { listParams, pageCount, ROLES_URL, USERS_URL } from './api';
 import { apiErrorMessage } from './apiError';
 import type {
-  BackOfficeGroupe,
   BackOfficeRole,
   BackOfficeUser,
   BackOfficeUserFormValues,
@@ -50,9 +42,8 @@ function emptyForm(): BackOfficeUserFormValues {
     email: '',
     password: '',
     is_active: true,
-    roles: [],
-    telephone: '',
-    groupe: null
+    role: null,
+    telephone: ''
   };
 }
 
@@ -64,9 +55,8 @@ function formFromUser(user: BackOfficeUser): BackOfficeUserFormValues {
     email: user.email ?? '',
     password: '',
     is_active: user.is_active,
-    roles: user.roles ?? [],
-    telephone: user.telephone ?? '',
-    groupe: user.groupe === null ? null : String(user.groupe)
+    role: user.role,
+    telephone: user.telephone ?? ''
   };
 }
 
@@ -116,30 +106,9 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
     context.queryClient
   );
 
-  // Liste complète, non paginée à l'usage : le sélecteur doit proposer tous
-  // les groupes, pas seulement les vingt premiers.
-  const groupesQuery = useQuery<Page<BackOfficeGroupe>>(
-    {
-      queryKey: ['backoffice-groupes-options'],
-      queryFn: async () => {
-        const response = await context.api.get(GROUPES_URL, {
-          params: { page_size: '100' }
-        });
-
-        return response.data;
-      }
-    },
-    context.queryClient
-  );
-
   const roleOptions = (rolesQuery.data ?? []).map((role) => ({
     value: role.name,
     label: role.label
-  }));
-
-  const groupeOptions = (groupesQuery.data?.results ?? []).map((groupe) => ({
-    value: String(groupe.id),
-    label: `${groupe.nom} (${groupe.code})`
   }));
 
   const rows = usersQuery.data?.results ?? [];
@@ -189,9 +158,8 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
         last_name: formValues.last_name.trim(),
         email: formValues.email.trim(),
         is_active: formValues.is_active,
-        roles: formValues.roles,
-        telephone: formValues.telephone.trim(),
-        groupe: formValues.groupe ? Number(formValues.groupe) : null
+        role: formValues.role,
+        telephone: formValues.telephone.trim()
       };
 
       if (formValues.password.trim()) {
@@ -204,11 +172,6 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
         await context.api.post(USERS_URL, payload);
       }
 
-      // Le rattachement à un groupe change son nombre de membres, affiché
-      // dans l'autre onglet.
-      await context.queryClient.invalidateQueries({
-        queryKey: ['backoffice-groupes']
-      });
       await usersQuery.refetch();
       closeModal();
     } catch (error: unknown) {
@@ -280,8 +243,7 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
             <Table.Tr>
               <Table.Th>Utilisateur</Table.Th>
               <Table.Th>Contact</Table.Th>
-              <Table.Th>Groupe</Table.Th>
-              <Table.Th>Rôles</Table.Th>
+              <Table.Th>Rôle</Table.Th>
               <Table.Th>État</Table.Th>
               <Table.Th>Actions</Table.Th>
             </Table.Tr>
@@ -308,22 +270,16 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
                   </Stack>
                 </Table.Td>
 
-                <Table.Td>{user.groupe_nom || '—'}</Table.Td>
-
                 <Table.Td>
-                  <Group gap='xs'>
-                    {user.roles.length === 0 ? (
-                      <Text size='sm' c='dimmed'>
-                        Aucun rôle
-                      </Text>
-                    ) : (
-                      user.roles.map((role) => (
-                        <Badge key={role} variant='light'>
-                          {roleLabel(role, rolesQuery.data ?? [])}
-                        </Badge>
-                      ))
-                    )}
-                  </Group>
+                  {user.role ? (
+                    <Badge variant='light'>
+                      {roleLabel(user.role, rolesQuery.data ?? [])}
+                    </Badge>
+                  ) : (
+                    <Text size='sm' c='dimmed'>
+                      Aucun rôle
+                    </Text>
+                  )}
                 </Table.Td>
 
                 <Table.Td>
@@ -434,16 +390,6 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
             />
           </Group>
 
-          <Select
-            label='Groupe'
-            placeholder='Aucun groupe'
-            data={groupeOptions}
-            value={formValues.groupe}
-            onChange={(value) => updateField('groupe', value)}
-            clearable
-            searchable
-          />
-
           <PasswordInput
             label={modalState.user ? 'Nouveau mot de passe' : 'Mot de passe'}
             description={
@@ -458,13 +404,15 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
             }
           />
 
-          <MultiSelect
-            label='Rôles'
-            placeholder='Sélectionner un ou plusieurs rôles'
+          <Select
+            label='Rôle'
+            placeholder='Sélectionner un rôle'
+            description='Un acteur interne porte un seul rôle.'
             data={roleOptions}
-            value={formValues.roles}
-            onChange={(value) => updateField('roles', value)}
+            value={formValues.role}
+            onChange={(value) => updateField('role', value)}
             clearable
+            searchable
           />
 
           <Checkbox

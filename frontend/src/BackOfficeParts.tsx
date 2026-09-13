@@ -5,6 +5,7 @@ import {
 } from '@inventreedb/ui';
 
 import { PartsBackOffice } from './backoffice/PartsBackOffice';
+import { WidgetScroll } from './WidgetScroll';
 
 /**
  * Fonction appelée par InvenTree pour rendre le back-office Parts.
@@ -13,5 +14,9 @@ export function renderInvenTreeLocationBackOfficeParts(
   context: InvenTreePluginContext
 ) {
   checkPluginVersion(context);
-  return <PartsBackOffice context={context} />;
+  return (
+    <WidgetScroll locale={context.locale}>
+      <PartsBackOffice context={context} />
+    </WidgetScroll>
+  );
 }

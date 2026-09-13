@@ -4,10 +4,15 @@ import {
 } from '@inventreedb/ui';
 
 import { ConflictsList } from './conflicts/ConflictsList';
+import { WidgetScroll } from './WidgetScroll';
 
 export function renderInvenTreeLocationConflicts(
   context: InvenTreePluginContext
 ) {
   checkPluginVersion(context);
-  return <ConflictsList context={context} />;
+  return (
+    <WidgetScroll locale={context.locale}>
+      <ConflictsList context={context} />
+    </WidgetScroll>
+  );
 }

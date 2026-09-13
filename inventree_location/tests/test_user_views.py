@@ -61,3 +61,96 @@ class TestUserListView:
         force_authenticate(request, user=user)
         response = UserListView.as_view()(request)
         assert len(response.data["results"]) == 0
+
+
+def _avec_role(username, role):
+    """Crée un compte actif portant un rôle du plugin."""
+
+    from django.contrib.auth.models import Group
+
+    compte = User.objects.create_user(username=username, password="pwd12345")
+    compte.groups.add(Group.objects.get(name=role))
+
+    return compte
+
+
+@pytest.mark.django_db
+class TestUserListRoleFilters:
+    """Filtres de rôle du sélecteur d'utilisateurs.
+
+    Revue interne du 07/09/2026 : « dans le champ gérant interne, ne pas
+    afficher le client ». Le sélecteur servait la même liste
+    à tout le monde, on pouvait donc désigner un client comme responsable
+    interne de sa propre réservation. Le CDC V06 sépare pourtant les deux
+    rôles — le client n'a plus de compte du tout, le
+    gestionnaire traite (persona 2) — et sa matrice RACI n'a même pas de
+    colonne « organisateur ».
+    """
+
+    def _usernames(self, factory, user, params):
+        request = factory.get(USERS_URL, params)
+        force_authenticate(request, user=user)
+        response = UserListView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+
+        return {row["username"] for row in response.data["results"]}
+
+    def test_exclude_roles_ecarte_le_role_demande(self, factory, user):
+        from inventree_location import roles
+
+        _avec_role("lecteur-dupont", roles.LECTEUR)
+        _avec_role("magasin", roles.MAGASINIER)
+
+        noms = self._usernames(
+            factory, user, {"exclude_roles": roles.LECTEUR}
+        )
+
+        assert "client-dupont" not in noms
+        assert {"alice", "magasin"} <= noms
+
+    def test_roles_ne_garde_que_les_roles_demandes(self, factory, user):
+        from inventree_location import roles
+
+        _avec_role("lecteur-dupont", roles.LECTEUR)
+        _avec_role("magasin", roles.MAGASINIER)
+
+        noms = self._usernames(
+            factory, user, {"roles": f"{roles.MAGASINIER},{roles.LIVREUR}"}
+        )
+
+        assert noms == {"magasin"}
+
+    def test_un_compte_a_deux_roles_nest_rendu_quune_fois(self, factory, user):
+        from django.contrib.auth.models import Group
+
+        from inventree_location import roles
+
+        cumul = _avec_role("polyvalent", roles.MAGASINIER)
+        cumul.groups.add(Group.objects.get(name=roles.LIVREUR))
+
+        request = factory.get(
+            USERS_URL, {"roles": f"{roles.MAGASINIER},{roles.LIVREUR}"}
+        )
+        force_authenticate(request, user=user)
+        response = UserListView.as_view()(request)
+
+        usernames = [row["username"] for row in response.data["results"]]
+
+        assert usernames.count("polyvalent") == 1
+
+    def test_un_role_inconnu_est_ignore_plutot_que_refuse(self, factory, user):
+        # Un nom de rôle qui n'existe pas est du bruit, pas une erreur : un 400
+        # sur un sélecteur d'interface serait pire que de l'ignorer.
+        noms = self._usernames(factory, user, {"exclude_roles": "cuisinier"})
+
+        assert "alice" in noms
+
+    def test_sans_parametre_la_liste_est_inchangee(self, factory, user):
+        from inventree_location import roles
+
+        _avec_role("lecteur-dupont", roles.LECTEUR)
+
+        noms = self._usernames(factory, user, {})
+
+        assert {"alice", "lecteur-dupont"} <= noms

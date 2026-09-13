@@ -5,6 +5,7 @@ import {
 } from '@inventreedb/ui';
 
 import { RamassagesList } from './ramassage/RamassagesList';
+import { WidgetScroll } from './WidgetScroll';
 
 /**
  * Fonction appelée par InvenTree pour rendre l'écran ramassages.
@@ -13,5 +14,9 @@ export function renderInvenTreeLocationRamassages(
   context: InvenTreePluginContext
 ) {
   checkPluginVersion(context);
-  return <RamassagesList context={context} />;
+  return (
+    <WidgetScroll locale={context.locale}>
+      <RamassagesList context={context} />
+    </WidgetScroll>
+  );
 }

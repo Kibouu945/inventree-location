@@ -30,9 +30,14 @@ PLUGIN_SLUG = "inventree-location"
 #: `core.get_ui_dashboard_items` : InvenTree ne les applique qu'à l'ajout
 #: manuel, on les reproduit donc ici pour une pose automatique identique.
 WIDGET_SIZES: dict[str, tuple[int, int]] = {
+    # Le poste tient lieu de page : pleine largeur, en tête. La hauteur est un
+    # compromis — la boîte est exprimée en lignes de grille et ne sait rien de
+    # la fenêtre (cf. `postes/Poste.tsx`).
+    "inventree-location-poste": (12, 10),
     "inventree-location-catalog": (12, 8),
     "inventree-location-organisation": (12, 8),
     "inventree-location-reservations": (12, 8),
+    "inventree-location-calendrier": (12, 8),
     "inventree-location-ramassages": (12, 8),
     "inventree-location-deliveries": (12, 8),
     "inventree-location-conflicts": (12, 8),
