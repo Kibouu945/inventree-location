@@ -177,3 +177,6 @@ docs/visite/visite.html
 # docs/modele/document.py et docs/visite/guide.py, et atterrissent dans
 # ~/Downloads. Aucun ne doit entrer dans le dépôt.
 *.pdf
+
+# Version écrite par setuptools_scm à l'installation.
+inventree_location/_version.py
