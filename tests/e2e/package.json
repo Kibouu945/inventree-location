@@ -1,0 +1,14 @@
+{
+  "name": "inventree-location-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Scénarios navigateur : le seul filet qui voit un écran cassé.",
+  "scripts": {
+    "nominal": "node nominal.mjs",
+    "alternatifs": "node alternatifs.mjs",
+    "roles": "node roles.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.47.0"
+  }
+}
