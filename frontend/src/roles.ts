@@ -113,5 +113,5 @@ export function canManageBackOffice(context: InvenTreePluginContext): boolean {
 
 /** Peut tenir le fichier clients et contacts (admin, gestionnaire). */
 export function canManageClients(context: InvenTreePluginContext): boolean {
-  return hasAnyRole(context, CLIENT_DESK_ROLES);
+	return hasAnyRole(context, CLIENT_DESK_ROLES);
 }
