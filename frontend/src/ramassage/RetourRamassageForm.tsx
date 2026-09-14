@@ -148,7 +148,7 @@ export function RetourRamassageForm({
 
 			setSuccess(
 				`Retour enregistré pour ${data.numero} (statut ${data.statut})` +
-					(tickets > 0 ? ` — ${tickets} ticket(s) SAV ouvert(s).` : "."),
+				(tickets > 0 ? ` — ${tickets} ticket(s) SAV ouvert(s).` : "."),
 			);
 
 			await onSaved();

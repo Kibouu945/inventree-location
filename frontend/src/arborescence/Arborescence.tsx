@@ -4,7 +4,13 @@
 // réservée, livrée et ramassée, et les pastilles d'état.
 //
 // C'est la « navigation hiérarchique sans ressaisie » demandée le 09/09/2026.
-// Le niveau client manque : `Client` et `Contact` n'existent pas encore en base.
+//
+// Le niveau client manque toujours, mais plus faute de table : `Client` et
+// `Contact` existent depuis le lot L2 (09/09). C'est la tâche F3 — poser le
+// client au-dessus, dépliable sur ses manifestations. À ne pas confondre avec
+// le sélecteur de client posé ici (A3) : il **filtre** la liste, il ne
+// l'imbrique pas, et il devra disparaître quand le niveau arrivera — sinon on
+// filtrera deux fois la même chose, une fois par le haut et une par le côté.
 //
 // Chargement **au dépliage**, un niveau à la fois : l'arbre entier aurait
 // demandé un endpoint dédié et ramené toute la base à chaque affichage.

@@ -29,6 +29,30 @@ class BackOfficePermission(permissions.BasePermission):
         return roles.user_has_any_role(user, [roles.ADMIN])
 
 
+class ClientDeskPermission(BackOfficePermission):
+    """Fichier clients : l'admin, et le gestionnaire dont c'est le métier.
+
+    « Un gestionnaire client gère un ou plusieurs clients ; un client a au plus
+    un gestionnaire référent » (R5). Lui refuser la création d'un client
+    l'obligeait à passer par un administrateur pour enregistrer son propre
+    interlocuteur — c'est le fichier qu'il tient au téléphone.
+
+    Les comptes et les articles restent à l'admin : ce sont des objets
+    d'exploitation, pas de relation commerciale.
+    """
+
+    def has_permission(self, request, view) -> bool:
+        user = request.user
+
+        if not user or not user.is_authenticated:
+            return False
+
+        if super().has_permission(request, view):
+            return True
+
+        return roles.user_has_any_role(user, [roles.GESTIONNAIRE])
+
+
 class BackOfficePagination(PageNumberPagination):
     """Pagination commune aux listes back-office (utilisateurs, Parts).
 
@@ -332,7 +356,7 @@ class BackOfficeClientSerializer(serializers.ModelSerializer):
 class BackOfficeClientListCreateView(generics.ListCreateAPIView):
     """Liste et création des clients."""
 
-    permission_classes = [BackOfficePermission]
+    permission_classes = [ClientDeskPermission]
     serializer_class = BackOfficeClientSerializer
     pagination_class = BackOfficePagination
 
@@ -356,7 +380,7 @@ class BackOfficeClientDetailView(generics.RetrieveUpdateAPIView):
     se désactive (`actif`) — question d'historique.
     """
 
-    permission_classes = [BackOfficePermission]
+    permission_classes = [ClientDeskPermission]
     serializer_class = BackOfficeClientSerializer
 
     def get_queryset(self):
@@ -391,7 +415,7 @@ class BackOfficeContactSerializer(serializers.ModelSerializer):
 class BackOfficeContactListCreateView(generics.ListCreateAPIView):
     """Liste et création des contacts, filtrables par client."""
 
-    permission_classes = [BackOfficePermission]
+    permission_classes = [ClientDeskPermission]
     serializer_class = BackOfficeContactSerializer
     pagination_class = BackOfficePagination
 
@@ -423,7 +447,7 @@ class BackOfficeContactDetailView(generics.RetrieveUpdateAPIView):
     Pas de suppression : un contact qui a signé un devis se désactive.
     """
 
-    permission_classes = [BackOfficePermission]
+    permission_classes = [ClientDeskPermission]
     serializer_class = BackOfficeContactSerializer
 
     def get_queryset(self):
