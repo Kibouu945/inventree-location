@@ -367,7 +367,9 @@ def tournee_du_jour(jour, queryset=None) -> dict:
             "etat_livraison": reservation.etat_livraison,
             "prestation": prestation.pk,
             "prestation_nom": prestation.nom,
-            "manifestation_nom": prestation.manifestation.nom if getattr(prestation, "manifestation", None) else "",
+            "manifestation_nom": prestation.manifestation.nom
+            if getattr(prestation, "manifestation", None)
+            else "",
             "client_nom": _nom_du_client(prestation),
             "date_retrait_prevue": reservation.date_retrait_prevue,
             "lignes": lignes,
@@ -385,7 +387,7 @@ def tournee_du_jour(jour, queryset=None) -> dict:
 
     return {
         "date": jour,
-        "arrets": sorted(arrets, key=lambda a: (a["lieu"].nom if a["lieu"] else "")),
+        "arrets": sorted(arrets, key=lambda a: a["lieu"].nom if a["lieu"] else ""),
         "recap_total": sorted(total.values(), key=lambda a: a["part_nom"]),
         "quantite_totale": sum(agrege["quantite"] for agrege in total.values()),
     }
