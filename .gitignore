@@ -161,10 +161,8 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 
-# Claude Code — réglages locaux privés, mais les skills projet sont partagés
-# (un workflow figé n'a d'intérêt que si toute l'équipe l'a).
-.claude/*
-!.claude/skills/
+# Claude Code — entièrement hors du dépôt, réglages comme skills.
+.claude/
 
 # Plugin built static files
 inventree_location/static/
