@@ -1,479 +1,479 @@
 // SCRUM-89 — Liste des ramassages + bon imprimable.
-import type { InvenTreePluginContext } from '@inventreedb/ui';
+import type { InvenTreePluginContext } from "@inventreedb/ui";
 import {
-  Alert,
-  Badge,
-  Button,
-  Group,
-  Loader,
-  Modal,
-  MultiSelect,
-  Pagination,
-  SegmentedControl,
-  Stack,
-  Table,
-  Text,
-  TextInput,
-  Title
-} from '@mantine/core';
-import { DatePickerInput } from '@mantine/dates';
-import { useDebouncedValue } from '@mantine/hooks';
-import { useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+	Alert,
+	Badge,
+	Button,
+	Group,
+	Loader,
+	Modal,
+	MultiSelect,
+	Pagination,
+	SegmentedControl,
+	Stack,
+	Table,
+	Text,
+	TextInput,
+	Title,
+} from "@mantine/core";
+import { DatePickerInput } from "@mantine/dates";
+import { useDebouncedValue } from "@mantine/hooks";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 
 import {
-  PRINT_AREA,
-  PRINT_HIDE,
-  PrintableModalStyles
-} from '../print/printableModal';
-import { ownsKeys, syncOwnedParams } from '../urlState';
-import { RamassagesHierarchicalTable } from './RamassagesHierarchicalTable';
-import { RetourRamassageForm } from './RetourRamassageForm';
+	PRINT_AREA,
+	PRINT_HIDE,
+	PrintableModalStyles,
+} from "../print/printableModal";
+import { ownsKeys, syncOwnedParams } from "../urlState";
+import { RamassagesHierarchicalTable } from "./RamassagesHierarchicalTable";
+import { RetourRamassageForm } from "./RetourRamassageForm";
 import {
-  buildRamassageQuery,
-  DEFAULT_RAMASSAGE_FILTERS,
-  parseRamassageFilters,
-  RAMASSAGE_URL_KEYS,
-  type RamassageFiltersState,
-  serializeRamassageFilters,
-  totalRamassagePages
-} from './ramassageParams';
-import type { BonRamassageResponse, Page, Ramassage } from './types';
+	buildRamassageQuery,
+	DEFAULT_RAMASSAGE_FILTERS,
+	parseRamassageFilters,
+	RAMASSAGE_URL_KEYS,
+	type RamassageFiltersState,
+	serializeRamassageFilters,
+	totalRamassagePages,
+} from "./ramassageParams";
+import type { BonRamassageResponse, Page, Ramassage } from "./types";
 
-const RAMASSAGES_URL = '/plugin/inventree-location/ramassages/';
+const RAMASSAGES_URL = "/plugin/inventree-location/ramassages/";
 
 const STATUT_COLORS: Record<string, string> = {
-  brouillon: 'gray',
-  soumise: 'blue',
-  validee: 'green',
-  refusee: 'red',
-  annulee: 'red',
-  livree: 'teal',
-  retournee: 'grape',
-  cloturee: 'dark'
+	brouillon: "gray",
+	soumise: "blue",
+	validee: "green",
+	refusee: "red",
+	annulee: "red",
+	livree: "teal",
+	retournee: "grape",
+	cloturee: "dark",
 };
 
 // Miroir de `EtatRetour` côté back (models.py) : le vocabulaire est fixe et
 // court depuis l'unification, autant l'afficher en français sur un bon imprimé.
 const ETAT_RETOUR_LABELS: Record<string, string> = {
-  ok: 'Rendu conforme',
-  manquant: 'Manquant',
-  casse: 'Cassé'
+	ok: "Rendu conforme",
+	manquant: "Manquant",
+	casse: "Cassé",
 };
 
 const STATUT_OPTIONS = [
-  { value: 'brouillon', label: 'Brouillon' },
-  { value: 'soumise', label: 'Soumise' },
-  { value: 'validee', label: 'Validée' },
-  { value: 'livree', label: 'Livrée' },
-  { value: 'retournee', label: 'Retournée' }
+	{ value: "brouillon", label: "Brouillon" },
+	{ value: "soumise", label: "Soumise" },
+	{ value: "validee", label: "Validée" },
+	{ value: "livree", label: "Livrée" },
+	{ value: "retournee", label: "Retournée" },
 ];
 
 interface BonModalState {
-  open: boolean;
-  reservationId?: number;
+	open: boolean;
+	reservationId?: number;
 }
 
 const ownsRamassageKey = ownsKeys(RAMASSAGE_URL_KEYS);
 
 function syncUrl(filters: RamassageFiltersState) {
-  syncOwnedParams(
-    ownsRamassageKey,
-    new URLSearchParams(serializeRamassageFilters(filters))
-  );
+	syncOwnedParams(
+		ownsRamassageKey,
+		new URLSearchParams(serializeRamassageFilters(filters)),
+	);
 }
 
 function initialFilters(): RamassageFiltersState {
-  if (typeof window === 'undefined') {
-    return DEFAULT_RAMASSAGE_FILTERS;
-  }
+	if (typeof window === "undefined") {
+		return DEFAULT_RAMASSAGE_FILTERS;
+	}
 
-  return parseRamassageFilters(window.location.search);
+	return parseRamassageFilters(window.location.search);
 }
 
 function formatDateTime(value: string | null): string {
-  if (!value) {
-    return '—';
-  }
+	if (!value) {
+		return "—";
+	}
 
-  const date = new Date(value);
+	const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
+	if (Number.isNaN(date.getTime())) {
+		return value;
+	}
 
-  return date.toLocaleString();
+	return date.toLocaleString();
 }
 
 function lieuLabel(ramassage: Ramassage): string {
-  const lieu = ramassage.lieu;
+	const lieu = ramassage.lieu;
 
-  if (!lieu) {
-    return '—';
-  }
+	if (!lieu) {
+		return "—";
+	}
 
-  return lieu.nom || lieu.adresse || '—';
+	return lieu.nom || lieu.adresse || "—";
 }
 
 function BonRamassageContent({ bon }: { bon: BonRamassageResponse }) {
-  const reservation = bon.reservation;
+	const reservation = bon.reservation;
 
-  return (
-    <Stack gap='md'>
-      <Group justify='space-between'>
-        <Title order={4}>{bon.titre}</Title>
-        <Text size='sm' c='dimmed'>
-          Généré le {formatDateTime(bon.generated_at)}
-        </Text>
-      </Group>
+	return (
+		<Stack gap="md">
+			<Group justify="space-between">
+				<Title order={4}>{bon.titre}</Title>
+				<Text size="sm" c="dimmed">
+					Généré le {formatDateTime(bon.generated_at)}
+				</Text>
+			</Group>
 
-      <Table withTableBorder withColumnBorders>
-        <Table.Tbody>
-          <Table.Tr>
-            <Table.Th>Numéro</Table.Th>
-            <Table.Td>{reservation.numero}</Table.Td>
-          </Table.Tr>
-          <Table.Tr>
-            <Table.Th>Manifestation</Table.Th>
-            <Table.Td>{reservation.manifestation_nom || '—'}</Table.Td>
-          </Table.Tr>
-          <Table.Tr>
-            <Table.Th>Prestation</Table.Th>
-            <Table.Td>{reservation.prestation_nom || '—'}</Table.Td>
-          </Table.Tr>
-          <Table.Tr>
-            <Table.Th>Demandeur</Table.Th>
-            <Table.Td>{reservation.demandeur_nom || '—'}</Table.Td>
-          </Table.Tr>
-          <Table.Tr>
-            <Table.Th>Date de ramassage</Table.Th>
-            <Table.Td>{formatDateTime(reservation.date_ramassage)}</Table.Td>
-          </Table.Tr>
-          <Table.Tr>
-            <Table.Th>Lieu</Table.Th>
-            <Table.Td>{lieuLabel(reservation)}</Table.Td>
-          </Table.Tr>
-        </Table.Tbody>
-      </Table>
+			<Table withTableBorder withColumnBorders>
+				<Table.Tbody>
+					<Table.Tr>
+						<Table.Th>Numéro</Table.Th>
+						<Table.Td>{reservation.numero}</Table.Td>
+					</Table.Tr>
+					<Table.Tr>
+						<Table.Th>Manifestation</Table.Th>
+						<Table.Td>{reservation.manifestation_nom || "—"}</Table.Td>
+					</Table.Tr>
+					<Table.Tr>
+						<Table.Th>Prestation</Table.Th>
+						<Table.Td>{reservation.prestation_nom || "—"}</Table.Td>
+					</Table.Tr>
+					<Table.Tr>
+						<Table.Th>Demandeur</Table.Th>
+						<Table.Td>{reservation.demandeur_nom || "—"}</Table.Td>
+					</Table.Tr>
+					<Table.Tr>
+						<Table.Th>Date de ramassage</Table.Th>
+						<Table.Td>{formatDateTime(reservation.date_ramassage)}</Table.Td>
+					</Table.Tr>
+					<Table.Tr>
+						<Table.Th>Lieu</Table.Th>
+						<Table.Td>{lieuLabel(reservation)}</Table.Td>
+					</Table.Tr>
+				</Table.Tbody>
+			</Table>
 
-      <Title order={5}>Matériel à ramasser</Title>
+			<Title order={5}>Matériel à ramasser</Title>
 
-      <Table striped withTableBorder>
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>Article</Table.Th>
-            <Table.Th>Demandée</Table.Th>
-            <Table.Th>Livrée</Table.Th>
-            <Table.Th>À ramasser</Table.Th>
-            <Table.Th>Retournée</Table.Th>
-            <Table.Th>État retour</Table.Th>
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {reservation.lignes.map((ligne) => (
-            <Table.Tr key={`${ligne.part}-${ligne.part_nom}`}>
-              <Table.Td>{ligne.part_nom}</Table.Td>
-              <Table.Td>{ligne.quantite_demandee}</Table.Td>
-              <Table.Td>{ligne.quantite_livree}</Table.Td>
-              <Table.Td>{ligne.quantite_a_ramasser}</Table.Td>
-              <Table.Td>{ligne.quantite_retournee}</Table.Td>
-              <Table.Td>
-                {ETAT_RETOUR_LABELS[ligne.etat_retour] ??
-                  ligne.etat_retour ??
-                  '—'}
-              </Table.Td>
-            </Table.Tr>
-          ))}
-        </Table.Tbody>
-      </Table>
+			<Table striped withTableBorder>
+				<Table.Thead>
+					<Table.Tr>
+						<Table.Th>Article</Table.Th>
+						<Table.Th>Demandée</Table.Th>
+						<Table.Th>Livrée</Table.Th>
+						<Table.Th>À ramasser</Table.Th>
+						<Table.Th>Retournée</Table.Th>
+						<Table.Th>État retour</Table.Th>
+					</Table.Tr>
+				</Table.Thead>
+				<Table.Tbody>
+					{reservation.lignes.map((ligne) => (
+						<Table.Tr key={`${ligne.part}-${ligne.part_nom}`}>
+							<Table.Td>{ligne.part_nom}</Table.Td>
+							<Table.Td>{ligne.quantite_demandee}</Table.Td>
+							<Table.Td>{ligne.quantite_livree}</Table.Td>
+							<Table.Td>{ligne.quantite_a_ramasser}</Table.Td>
+							<Table.Td>{ligne.quantite_retournee}</Table.Td>
+							<Table.Td>
+								{ETAT_RETOUR_LABELS[ligne.etat_retour] ??
+									ligne.etat_retour ??
+									"—"}
+							</Table.Td>
+						</Table.Tr>
+					))}
+				</Table.Tbody>
+			</Table>
 
-      <Title order={5}>Récapitulatif par véhicule</Title>
+			<Title order={5}>Récapitulatif par véhicule</Title>
 
-      <Table striped withTableBorder>
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>Véhicule</Table.Th>
-            <Table.Th>Quantité totale</Table.Th>
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {reservation.recap_par_vehicule.map((recap) => (
-            <Table.Tr key={recap.vehicule}>
-              <Table.Td>{recap.vehicule}</Table.Td>
-              <Table.Td>{recap.quantite_totale}</Table.Td>
-            </Table.Tr>
-          ))}
-        </Table.Tbody>
-      </Table>
+			<Table striped withTableBorder>
+				<Table.Thead>
+					<Table.Tr>
+						<Table.Th>Véhicule</Table.Th>
+						<Table.Th>Quantité totale</Table.Th>
+					</Table.Tr>
+				</Table.Thead>
+				<Table.Tbody>
+					{reservation.recap_par_vehicule.map((recap) => (
+						<Table.Tr key={recap.vehicule}>
+							<Table.Td>{recap.vehicule}</Table.Td>
+							<Table.Td>{recap.quantite_totale}</Table.Td>
+						</Table.Tr>
+					))}
+				</Table.Tbody>
+			</Table>
 
-      {reservation.commentaire && (
-        <>
-          <Title order={5}>Commentaire</Title>
-          <Text>{reservation.commentaire}</Text>
-        </>
-      )}
-    </Stack>
-  );
+			{reservation.commentaire && (
+				<>
+					<Title order={5}>Commentaire</Title>
+					<Text>{reservation.commentaire}</Text>
+				</>
+			)}
+		</Stack>
+	);
 }
 
 export function RamassagesList({
-  context
+	context,
 }: {
-  context: InvenTreePluginContext;
+	context: InvenTreePluginContext;
 }) {
-  const [filters, setFilters] = useState<RamassageFiltersState>(initialFilters);
-  // Les deux champs texte sont pilotés localement puis débattus : sans ça,
-  // chaque frappe déclencherait une requête et une réécriture d'URL.
-  const [debouncedSearch] = useDebouncedValue(filters.search, 300);
-  const [debouncedLieu] = useDebouncedValue(filters.lieu, 300);
+	const [filters, setFilters] = useState<RamassageFiltersState>(initialFilters);
+	// Les deux champs texte sont pilotés localement puis débattus : sans ça,
+	// chaque frappe déclencherait une requête et une réécriture d'URL.
+	const [debouncedSearch] = useDebouncedValue(filters.search, 300);
+	const [debouncedLieu] = useDebouncedValue(filters.lieu, 300);
 
-  const [bonModal, setBonModal] = useState<BonModalState>({ open: false });
+	const [bonModal, setBonModal] = useState<BonModalState>({ open: false });
 
-  useEffect(() => {
-    syncUrl(filters);
-  }, [filters]);
+	useEffect(() => {
+		syncUrl(filters);
+	}, [filters]);
 
-  function update(patch: Partial<RamassageFiltersState>) {
-    // Tout changement de filtre (hors page) réinitialise la pagination.
-    const resetsPage = !('page' in patch);
+	function update(patch: Partial<RamassageFiltersState>) {
+		// Tout changement de filtre (hors page) réinitialise la pagination.
+		const resetsPage = !("page" in patch);
 
-    setFilters((current) => ({
-      ...current,
-      ...patch,
-      ...(resetsPage ? { page: 1 } : {})
-    }));
-  }
+		setFilters((current) => ({
+			...current,
+			...patch,
+			...(resetsPage ? { page: 1 } : {}),
+		}));
+	}
 
-  const params = buildRamassageQuery({
-    ...filters,
-    search: debouncedSearch,
-    lieu: debouncedLieu
-  });
+	const params = buildRamassageQuery({
+		...filters,
+		search: debouncedSearch,
+		lieu: debouncedLieu,
+	});
 
-  const query = useQuery<Page<Ramassage>>(
-    {
-      queryKey: ['ramassages', params],
-      queryFn: async () => {
-        const response = await context.api.get(RAMASSAGES_URL, {
-          params,
-          // Clés répétées `statut=a&statut=b` (le backend lit getlist).
-          paramsSerializer: { indexes: null }
-        });
-        return response.data;
-      }
-    },
-    context.queryClient
-  );
+	const query = useQuery<Page<Ramassage>>(
+		{
+			queryKey: ["ramassages", params],
+			queryFn: async () => {
+				const response = await context.api.get(RAMASSAGES_URL, {
+					params,
+					// Clés répétées `statut=a&statut=b` (le backend lit getlist).
+					paramsSerializer: { indexes: null },
+				});
+				return response.data;
+			},
+		},
+		context.queryClient,
+	);
 
-  const bonQuery = useQuery<BonRamassageResponse>(
-    {
-      queryKey: ['bon-ramassage', bonModal.reservationId],
-      enabled: bonModal.open && Boolean(bonModal.reservationId),
-      queryFn: async () => {
-        const response = await context.api.get(
-          `${RAMASSAGES_URL}${bonModal.reservationId}/bon/`
-        );
+	const bonQuery = useQuery<BonRamassageResponse>(
+		{
+			queryKey: ["bon-ramassage", bonModal.reservationId],
+			enabled: bonModal.open && Boolean(bonModal.reservationId),
+			queryFn: async () => {
+				const response = await context.api.get(
+					`${RAMASSAGES_URL}${bonModal.reservationId}/bon/`,
+				);
 
-        return response.data;
-      }
-    },
-    context.queryClient
-  );
+				return response.data;
+			},
+		},
+		context.queryClient,
+	);
 
-  const rows = query.data?.results ?? [];
-  const count = query.data?.count ?? 0;
-  const pages = totalRamassagePages(count);
+	const rows = query.data?.results ?? [];
+	const count = query.data?.count ?? 0;
+	const pages = totalRamassagePages(count);
 
-  return (
-    <Stack gap='md'>
-      <Group justify='space-between'>
-        <Title order={4} c={context.theme.primaryColor}>
-          Mes ramassages
-        </Title>
-        <SegmentedControl
-          size='xs'
-          value={filters.viewMode}
-          onChange={(value) =>
-            update({
-              viewMode: value as RamassageFiltersState['viewMode']
-            })
-          }
-          data={[
-            { label: 'Arborescence', value: 'hierarchique' },
-            { label: 'Liste', value: 'liste' }
-          ]}
-        />
-      </Group>
+	return (
+		<Stack gap="md">
+			<Group justify="space-between">
+				<Title order={4} c={context.theme.primaryColor}>
+					Mes ramassages
+				</Title>
+				<SegmentedControl
+					size="xs"
+					value={filters.viewMode}
+					onChange={(value) =>
+						update({
+							viewMode: value as RamassageFiltersState["viewMode"],
+						})
+					}
+					data={[
+						{ label: "Arborescence", value: "hierarchique" },
+						{ label: "Liste", value: "liste" },
+					]}
+				/>
+			</Group>
 
-      <Group align='flex-end' gap='md' wrap='wrap'>
-        <TextInput
-          label='Recherche'
-          placeholder='Numéro, prestation, demandeur…'
-          value={filters.search}
-          onChange={(event) => update({ search: event.currentTarget.value })}
-          w={260}
-        />
+			<Group align="flex-end" gap="md" wrap="wrap">
+				<TextInput
+					label="Recherche"
+					placeholder="Numéro, prestation, demandeur…"
+					value={filters.search}
+					onChange={(event) => update({ search: event.currentTarget.value })}
+					w={260}
+				/>
 
-        <TextInput
-          label='Lieu'
-          placeholder='Nom ou adresse du lieu'
-          value={filters.lieu}
-          onChange={(event) => update({ lieu: event.currentTarget.value })}
-          w={240}
-        />
+				<TextInput
+					label="Lieu"
+					placeholder="Nom ou adresse du lieu"
+					value={filters.lieu}
+					onChange={(event) => update({ lieu: event.currentTarget.value })}
+					w={240}
+				/>
 
-        <MultiSelect
-          label='Statut'
-          placeholder='Tous'
-          data={STATUT_OPTIONS}
-          value={filters.statuts}
-          onChange={(statuts) => update({ statuts })}
-          clearable
-          w={240}
-        />
+				<MultiSelect
+					label="Statut"
+					placeholder="Tous"
+					data={STATUT_OPTIONS}
+					value={filters.statuts}
+					onChange={(statuts) => update({ statuts })}
+					clearable
+					w={240}
+				/>
 
-        <DatePickerInput
-          type='range'
-          label='Date de ramassage'
-          placeholder='Du — au'
-          value={filters.dateRange}
-          onChange={(dateRange) => update({ dateRange })}
-          clearable
-          w={260}
-        />
-      </Group>
+				<DatePickerInput
+					type="range"
+					label="Date de ramassage"
+					placeholder="Du — au"
+					value={filters.dateRange}
+					onChange={(dateRange) => update({ dateRange })}
+					clearable
+					w={260}
+				/>
+			</Group>
 
-      {query.isError && (
-        <Alert color='red' title='Erreur'>
-          Impossible de charger les ramassages.
-        </Alert>
-      )}
+			{query.isError && (
+				<Alert color="red" title="Erreur">
+					Impossible de charger les ramassages.
+				</Alert>
+			)}
 
-      {query.isLoading ? (
-        <Group justify='center' p='xl'>
-          <Loader />
-        </Group>
-      ) : rows.length === 0 ? (
-        <Text c='dimmed'>Aucun ramassage à afficher.</Text>
-      ) : filters.viewMode === 'hierarchique' ? (
-        <RamassagesHierarchicalTable
-          context={context}
-          ramassages={rows}
-          onOpenBon={(ramassage) =>
-            setBonModal({
-              open: true,
-              reservationId: ramassage.id
-            })
-          }
-          onSaved={async () => {
-            await query.refetch();
-          }}
-        />
-      ) : (
-        <Table striped highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Numéro</Table.Th>
-              <Table.Th>Demandeur</Table.Th>
-              <Table.Th>Prestation</Table.Th>
-              <Table.Th>Lieu</Table.Th>
-              <Table.Th>Date ramassage</Table.Th>
-              <Table.Th>Statut</Table.Th>
-              <Table.Th>Qté totale</Table.Th>
-              <Table.Th>Bon</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
+			{query.isLoading ? (
+				<Group justify="center" p="xl">
+					<Loader />
+				</Group>
+			) : rows.length === 0 ? (
+				<Text c="dimmed">Aucun ramassage à afficher.</Text>
+			) : filters.viewMode === "hierarchique" ? (
+				<RamassagesHierarchicalTable
+					context={context}
+					ramassages={rows}
+					onOpenBon={(ramassage) =>
+						setBonModal({
+							open: true,
+							reservationId: ramassage.id,
+						})
+					}
+					onSaved={async () => {
+						await query.refetch();
+					}}
+				/>
+			) : (
+				<Table striped highlightOnHover>
+					<Table.Thead>
+						<Table.Tr>
+							<Table.Th>Numéro</Table.Th>
+							<Table.Th>Demandeur</Table.Th>
+							<Table.Th>Prestation</Table.Th>
+							<Table.Th>Lieu</Table.Th>
+							<Table.Th>Date ramassage</Table.Th>
+							<Table.Th>Statut</Table.Th>
+							<Table.Th>Qté totale</Table.Th>
+							<Table.Th>Bon</Table.Th>
+						</Table.Tr>
+					</Table.Thead>
 
-          <Table.Tbody>
-            {rows.map((ramassage) => (
-              <Table.Tr key={ramassage.id}>
-                <Table.Td>{ramassage.numero}</Table.Td>
-                <Table.Td>{ramassage.demandeur_nom || '—'}</Table.Td>
-                <Table.Td>{ramassage.prestation_nom || '—'}</Table.Td>
-                <Table.Td>{lieuLabel(ramassage)}</Table.Td>
-                <Table.Td>{formatDateTime(ramassage.date_ramassage)}</Table.Td>
-                <Table.Td>
-                  <Badge color={STATUT_COLORS[ramassage.statut] ?? 'gray'}>
-                    {ramassage.statut}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>{ramassage.quantite_totale}</Table.Td>
-                <Table.Td>
-                  <Button
-                    size='xs'
-                    variant='light'
-                    onClick={() =>
-                      setBonModal({
-                        open: true,
-                        reservationId: ramassage.id
-                      })
-                    }
-                  >
-                    Voir / imprimer
-                  </Button>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      )}
+					<Table.Tbody>
+						{rows.map((ramassage) => (
+							<Table.Tr key={ramassage.id}>
+								<Table.Td>{ramassage.numero}</Table.Td>
+								<Table.Td>{ramassage.demandeur_nom || "—"}</Table.Td>
+								<Table.Td>{ramassage.prestation_nom || "—"}</Table.Td>
+								<Table.Td>{lieuLabel(ramassage)}</Table.Td>
+								<Table.Td>{formatDateTime(ramassage.date_ramassage)}</Table.Td>
+								<Table.Td>
+									<Badge color={STATUT_COLORS[ramassage.statut] ?? "gray"}>
+										{ramassage.statut}
+									</Badge>
+								</Table.Td>
+								<Table.Td>{ramassage.quantite_totale}</Table.Td>
+								<Table.Td>
+									<Button
+										size="xs"
+										variant="light"
+										onClick={() =>
+											setBonModal({
+												open: true,
+												reservationId: ramassage.id,
+											})
+										}
+									>
+										Voir / imprimer
+									</Button>
+								</Table.Td>
+							</Table.Tr>
+						))}
+					</Table.Tbody>
+				</Table>
+			)}
 
-      <Group justify='space-between'>
-        <Text size='sm' c='dimmed'>
-          {count} ramassage(s)
-        </Text>
+			<Group justify="space-between">
+				<Text size="sm" c="dimmed">
+					{count} ramassage(s)
+				</Text>
 
-        {pages > 1 && (
-          <Pagination
-            total={pages}
-            value={filters.page}
-            onChange={(page) => update({ page })}
-          />
-        )}
-      </Group>
+				{pages > 1 && (
+					<Pagination
+						total={pages}
+						value={filters.page}
+						onChange={(page) => update({ page })}
+					/>
+				)}
+			</Group>
 
-      <Modal
-        opened={bonModal.open}
-        onClose={() => setBonModal({ open: false })}
-        size='xl'
-        title='Bon de ramassage'
-      >
-        {bonQuery.isLoading ? (
-          <Group justify='center' p='xl'>
-            <Loader />
-          </Group>
-        ) : bonQuery.isError ? (
-          <Alert color='red' title='Erreur'>
-            Impossible de charger le bon de ramassage.
-          </Alert>
-        ) : bonQuery.data ? (
-          <Stack gap='md'>
-            <PrintableModalStyles />
+			<Modal
+				opened={bonModal.open}
+				onClose={() => setBonModal({ open: false })}
+				size="xl"
+				title="Bon de ramassage"
+			>
+				{bonQuery.isLoading ? (
+					<Group justify="center" p="xl">
+						<Loader />
+					</Group>
+				) : bonQuery.isError ? (
+					<Alert color="red" title="Erreur">
+						Impossible de charger le bon de ramassage.
+					</Alert>
+				) : bonQuery.data ? (
+					<Stack gap="md">
+						<PrintableModalStyles />
 
-            <Group justify='flex-end' className={PRINT_HIDE}>
-              <Button onClick={() => window.print()}>Imprimer</Button>
-            </Group>
+						<Group justify="flex-end" className={PRINT_HIDE}>
+							<Button onClick={() => window.print()}>Imprimer</Button>
+						</Group>
 
-            <div className={PRINT_AREA}>
-              <BonRamassageContent bon={bonQuery.data} />
-            </div>
+						<div className={PRINT_AREA}>
+							<BonRamassageContent bon={bonQuery.data} />
+						</div>
 
-            {/* La saisie ne part pas à l'impression : un bon imprimé avec des
+						{/* La saisie ne part pas à l'impression : un bon imprimé avec des
                 champs de formulaire vides ne sert à personne. */}
-            <div className={PRINT_HIDE}>
-              <RetourRamassageForm
-                context={context}
-                reservationId={bonQuery.data.reservation.id}
-                lignes={bonQuery.data.reservation.lignes}
-                onSaved={async () => {
-                  await bonQuery.refetch();
-                  await query.refetch();
-                }}
-              />
-            </div>
-          </Stack>
-        ) : null}
-      </Modal>
-    </Stack>
-  );
+						<div className={PRINT_HIDE}>
+							<RetourRamassageForm
+								context={context}
+								reservationId={bonQuery.data.reservation.id}
+								lignes={bonQuery.data.reservation.lignes}
+								onSaved={async () => {
+									await bonQuery.refetch();
+									await query.refetch();
+								}}
+							/>
+						</div>
+					</Stack>
+				) : null}
+			</Modal>
+		</Stack>
+	);
 }

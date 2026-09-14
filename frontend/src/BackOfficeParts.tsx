@@ -1,22 +1,22 @@
 // Point d'entrée SCRUM-111, rendu comme dashboard item.
 import {
-  checkPluginVersion,
-  type InvenTreePluginContext
-} from '@inventreedb/ui';
+	checkPluginVersion,
+	type InvenTreePluginContext,
+} from "@inventreedb/ui";
 
-import { PartsBackOffice } from './backoffice/PartsBackOffice';
-import { WidgetScroll } from './WidgetScroll';
+import { PartsBackOffice } from "./backoffice/PartsBackOffice";
+import { WidgetScroll } from "./WidgetScroll";
 
 /**
  * Fonction appelée par InvenTree pour rendre le back-office Parts.
  */
 export function renderInvenTreeLocationBackOfficeParts(
-  context: InvenTreePluginContext
+	context: InvenTreePluginContext,
 ) {
-  checkPluginVersion(context);
-  return (
-    <WidgetScroll locale={context.locale}>
-      <PartsBackOffice context={context} />
-    </WidgetScroll>
-  );
+	checkPluginVersion(context);
+	return (
+		<WidgetScroll locale={context.locale}>
+			<PartsBackOffice context={context} />
+		</WidgetScroll>
+	);
 }

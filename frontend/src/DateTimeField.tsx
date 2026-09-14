@@ -18,26 +18,26 @@
 // La hauteur constante du calendrier, elle, se règle par `consistentWeeks` dans
 // `LocaleFrame` : c'est un réglage de `DatesProvider`, il vaut donc pour tous
 // les calendriers d'un coup, y compris les `DatePickerInput` de filtres.
-import { DateTimePicker, type DateTimePickerProps } from '@mantine/dates';
+import { DateTimePicker, type DateTimePickerProps } from "@mantine/dates";
 
 // Heure par défaut quand l'utilisateur choisit un jour au calendrier. Le CDC
 // raisonne à la journée entière ; l'heure ne sert qu'à la logistique
 // livraison / ramassage, et une journée de montage commence le matin.
-export const HEURE_PAR_DEFAUT = '08:00';
+export const HEURE_PAR_DEFAUT = "08:00";
 
 export function DateTimeField({
-  defaultTimeValue = HEURE_PAR_DEFAUT,
-  popoverProps,
-  ...props
+	defaultTimeValue = HEURE_PAR_DEFAUT,
+	popoverProps,
+	...props
 }: DateTimePickerProps) {
-  return (
-    <DateTimePicker
-      defaultTimeValue={defaultTimeValue}
-      popoverProps={{
-        portalProps: { translate: 'no' },
-        ...popoverProps
-      }}
-      {...props}
-    />
-  );
+	return (
+		<DateTimePicker
+			defaultTimeValue={defaultTimeValue}
+			popoverProps={{
+				portalProps: { translate: "no" },
+				...popoverProps,
+			}}
+			{...props}
+		/>
+	);
 }

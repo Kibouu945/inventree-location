@@ -3,46 +3,46 @@
 // Seul widget attribué par le plugin. La barre horizontale d'InvenTree se règle
 // ailleurs, côté serveur (`roles.ROLE_VIEW_RULESETS`).
 import {
-  checkPluginVersion,
-  type InvenTreePluginContext
-} from '@inventreedb/ui';
-import { Alert } from '@mantine/core';
+	checkPluginVersion,
+	type InvenTreePluginContext,
+} from "@inventreedb/ui";
+import { Alert } from "@mantine/core";
 
-import { LocaleFrame } from './LocaleFrame';
-import { posteDeLUtilisateur } from './postes/definitions';
-import { Poste } from './postes/Poste';
+import { LocaleFrame } from "./LocaleFrame";
+import { posteDeLUtilisateur } from "./postes/definitions";
+import { Poste } from "./postes/Poste";
 
 function PosteDashboard({ context }: { context: InvenTreePluginContext }) {
-  const poste = posteDeLUtilisateur(context);
+	const poste = posteDeLUtilisateur(context);
 
-  if (!poste) {
-    return (
-      <Alert color='gray' title='Aucun poste'>
-        Aucun rôle métier n’est attribué à ce compte : demandez à un
-        administrateur de vous en attribuer un.
-      </Alert>
-    );
-  }
+	if (!poste) {
+		return (
+			<Alert color="gray" title="Aucun poste">
+				Aucun rôle métier n’est attribué à ce compte : demandez à un
+				administrateur de vous en attribuer un.
+			</Alert>
+		);
+	}
 
-  return (
-    <Poste
-      poste={poste.cle}
-      onglets={poste.definition.onglets.map((onglet) => ({
-        value: onglet.value,
-        label: onglet.label,
-        icon: onglet.icon,
-        render: () => onglet.render(context)
-      }))}
-    />
-  );
+	return (
+		<Poste
+			poste={poste.cle}
+			onglets={poste.definition.onglets.map((onglet) => ({
+				value: onglet.value,
+				label: onglet.label,
+				icon: onglet.icon,
+				render: () => onglet.render(context),
+			}))}
+		/>
+	);
 }
 
 export function renderInvenTreeLocationPoste(context: InvenTreePluginContext) {
-  checkPluginVersion(context);
+	checkPluginVersion(context);
 
-  return (
-    <LocaleFrame locale={context.locale}>
-      <PosteDashboard context={context} />
-    </LocaleFrame>
-  );
+	return (
+		<LocaleFrame locale={context.locale}>
+			<PosteDashboard context={context} />
+		</LocaleFrame>
+	);
 }

@@ -1,28 +1,28 @@
 /** Types de l'API catalogue (`/plugin/inventree-location/catalog/`). */
 
 export interface CatalogPart {
-  id: number;
-  name: string;
-  description: string;
-  IPN: string | null;
-  active: boolean;
-  category: number | null;
-  category_name: string | null;
-  stock_available: number;
-  image_url: string | null;
-  rentable: boolean;
-  consommable: boolean;
-  is_virtual: boolean;
-  stock_total?: number;
-  poids?: string | null;
-  seuil_alerte_bas?: number | null;
-  seuil_alerte_haut?: number | null;
+	id: number;
+	name: string;
+	description: string;
+	IPN: string | null;
+	active: boolean;
+	category: number | null;
+	category_name: string | null;
+	stock_available: number;
+	image_url: string | null;
+	rentable: boolean;
+	consommable: boolean;
+	is_virtual: boolean;
+	stock_total?: number;
+	poids?: string | null;
+	seuil_alerte_bas?: number | null;
+	seuil_alerte_haut?: number | null;
 }
 
 /** Réponse paginée DRF (PageNumberPagination). */
 export interface CatalogPage {
-  count: number;
-  next: string | null;
-  previous: string | null;
-  results: CatalogPart[];
+	count: number;
+	next: string | null;
+	previous: string | null;
+	results: CatalogPart[];
 }

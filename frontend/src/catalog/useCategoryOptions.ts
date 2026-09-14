@@ -11,22 +11,22 @@
 //
 // Le tri est fait ici plutôt que côté serveur : InvenTree renvoie les
 // catégories dans l'ordre de l'arbre, et un `Select` se parcourt à l'œil.
-import type { InvenTreePluginContext } from '@inventreedb/ui';
-import { useQuery } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import type { InvenTreePluginContext } from "@inventreedb/ui";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 
 /** Une catégorie telle qu'InvenTree la renvoie, selon la version : `id` ou
  * `pk`, avec ou sans enveloppe paginée. */
 interface CategoryResponseItem {
-  id?: number;
-  pk?: number;
-  name?: string;
-  pathstring?: string;
+	id?: number;
+	pk?: number;
+	name?: string;
+	pathstring?: string;
 }
 
 export interface CategoryOption {
-  value: string;
-  label: string;
+	value: string;
+	label: string;
 }
 
 /** Nombre de catégories chargées d'un coup. La base de Jambville en compte
@@ -34,53 +34,53 @@ export interface CategoryOption {
 const CATEGORY_LIMIT = 250;
 
 export function useCategoryOptions(
-  context: InvenTreePluginContext
+	context: InvenTreePluginContext,
 ): CategoryOption[] {
-  const query = useQuery<
-    CategoryResponseItem[] | { results: CategoryResponseItem[] }
-  >(
-    {
-      queryKey: ['part-category-options'],
-      queryFn: async () => {
-        const response = await context.api.get('/api/part/category/', {
-          params: { limit: CATEGORY_LIMIT }
-        });
-        return response.data;
-      }
-    },
-    context.queryClient
-  );
+	const query = useQuery<
+		CategoryResponseItem[] | { results: CategoryResponseItem[] }
+	>(
+		{
+			queryKey: ["part-category-options"],
+			queryFn: async () => {
+				const response = await context.api.get("/api/part/category/", {
+					params: { limit: CATEGORY_LIMIT },
+				});
+				return response.data;
+			},
+		},
+		context.queryClient,
+	);
 
-  return useMemo(() => toCategoryOptions(query.data), [query.data]);
+	return useMemo(() => toCategoryOptions(query.data), [query.data]);
 }
 
 /** Mise en forme pure, testable sans rendu ni requête. */
 export function toCategoryOptions(
-  payload:
-    | CategoryResponseItem[]
-    | { results: CategoryResponseItem[] }
-    | undefined
+	payload:
+		| CategoryResponseItem[]
+		| { results: CategoryResponseItem[] }
+		| undefined,
 ): CategoryOption[] {
-  if (!payload) {
-    return [];
-  }
+	if (!payload) {
+		return [];
+	}
 
-  const categories = Array.isArray(payload) ? payload : (payload.results ?? []);
+	const categories = Array.isArray(payload) ? payload : (payload.results ?? []);
 
-  return categories
-    .map((category) => ({
-      id: category.id ?? category.pk,
-      // `pathstring` (« Mobilier/Tables ») lève l'ambiguïté entre deux
-      // sous-catégories de même nom sous deux parents différents.
-      name: category.pathstring || category.name || ''
-    }))
-    .filter(
-      (category): category is { id: number; name: string } =>
-        Number.isInteger(category.id) && category.name.length > 0
-    )
-    .sort((a, b) => a.name.localeCompare(b.name, 'fr'))
-    .map((category) => ({
-      value: String(category.id),
-      label: category.name
-    }));
+	return categories
+		.map((category) => ({
+			id: category.id ?? category.pk,
+			// `pathstring` (« Mobilier/Tables ») lève l'ambiguïté entre deux
+			// sous-catégories de même nom sous deux parents différents.
+			name: category.pathstring || category.name || "",
+		}))
+		.filter(
+			(category): category is { id: number; name: string } =>
+				Number.isInteger(category.id) && category.name.length > 0,
+		)
+		.sort((a, b) => a.name.localeCompare(b.name, "fr"))
+		.map((category) => ({
+			value: String(category.id),
+			label: category.name,
+		}));
 }

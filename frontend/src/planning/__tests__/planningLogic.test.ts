@@ -1,536 +1,539 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from "vitest";
 
 import {
-  barres,
-  bornes,
-  colonnes,
-  contientAujourdhui,
-  debutDeLaFenetre,
-  decaler,
-  estWeekEnd,
-  etatDepuisUrl,
-  fenetreParDefaut,
-  jourDe,
-  joursDuMois,
-  largeurDeColonne,
-  libelleLivraison,
-  libellePeriode,
-  libelleStatut,
-  lundiDeLaSemaine,
-  ouvertesDepuisTexte,
-  ouvertesEnTexte,
-  parManifestation,
-  placer,
-  urlDuPlanning
-} from '../planningLogic';
+	barres,
+	bornes,
+	colonnes,
+	contientAujourdhui,
+	debutDeLaFenetre,
+	decaler,
+	estWeekEnd,
+	etatDepuisUrl,
+	fenetreParDefaut,
+	jourDe,
+	joursDuMois,
+	largeurDeColonne,
+	libelleLivraison,
+	libellePeriode,
+	libelleStatut,
+	lundiDeLaSemaine,
+	ouvertesDepuisTexte,
+	ouvertesEnTexte,
+	parManifestation,
+	placer,
+	urlDuPlanning,
+} from "../planningLogic";
 import type {
-  FenetrePlanning,
-  ManifestationPlanning,
-  PrestationPlanning
-} from '../types';
+	FenetrePlanning,
+	ManifestationPlanning,
+	PrestationPlanning,
+} from "../types";
 
 function manifestation(
-  overrides: Partial<ManifestationPlanning> = {}
+	overrides: Partial<ManifestationPlanning> = {},
 ): ManifestationPlanning {
-  return {
-    id: 1,
-    nom: 'Camp d’été',
-    date_debut: '2026-09-14 09:00',
-    date_fin: '2026-09-16 19:00',
-    statut: 'planifiee',
-    statut_effectif: 'planifiee',
-    couleur: '#be185d',
-    client_nom: 'Pionniers de Mantes',
-    organisateur_nom: 'Paule Durand',
-    contact_telephone: '0611223344',
-    quantite_totale: 24,
-    etat_livraison: { bons: 2, livres: 1, a_livrer: 1 },
-    prestations_count: 2,
-    ...overrides
-  };
+	return {
+		id: 1,
+		nom: "Camp d’été",
+		date_debut: "2026-09-14 09:00",
+		date_fin: "2026-09-16 19:00",
+		statut: "planifiee",
+		statut_effectif: "planifiee",
+		couleur: "#be185d",
+		client_nom: "Pionniers de Mantes",
+		organisateur_nom: "Paule Durand",
+		contact_telephone: "0611223344",
+		quantite_totale: 24,
+		etat_livraison: { bons: 2, livres: 1, a_livrer: 1 },
+		prestations_count: 2,
+		...overrides,
+	};
 }
 
 function prestation(
-  overrides: Partial<PrestationPlanning> = {}
+	overrides: Partial<PrestationPlanning> = {},
 ): PrestationPlanning {
-  return {
-    id: 10,
-    manifestation: 1,
-    nom: 'Montage',
-    date_debut: '2026-09-14 09:00',
-    date_fin: '2026-09-14 18:00',
-    statut: 'planifiee',
-    lieu_detail: { nom: 'Terrain central' },
-    quantite_totale: 12,
-    etat_livraison: { bons: 1, livres: 1, a_livrer: 0 },
-    ...overrides
-  };
+	return {
+		id: 10,
+		manifestation: 1,
+		nom: "Montage",
+		date_debut: "2026-09-14 09:00",
+		date_fin: "2026-09-14 18:00",
+		statut: "planifiee",
+		lieu_detail: { nom: "Terrain central" },
+		quantite_totale: 12,
+		etat_livraison: { bons: 1, livres: 1, a_livrer: 0 },
+		...overrides,
+	};
 }
 
 // Le 16 septembre 2026 est un mercredi : sa semaine court du 14 au 20.
-const JOUR: FenetrePlanning = { echelle: 'jour', ancre: '2026-09-16' };
-const SEMAINE: FenetrePlanning = { echelle: 'semaine', ancre: '2026-09-16' };
-const MOIS: FenetrePlanning = { echelle: 'mois', ancre: '2026-09-16' };
-const ANNEE: FenetrePlanning = { echelle: 'annee', ancre: '2026-09-16' };
+const JOUR: FenetrePlanning = { echelle: "jour", ancre: "2026-09-16" };
+const SEMAINE: FenetrePlanning = { echelle: "semaine", ancre: "2026-09-16" };
+const MOIS: FenetrePlanning = { echelle: "mois", ancre: "2026-09-16" };
+const ANNEE: FenetrePlanning = { echelle: "annee", ancre: "2026-09-16" };
 
-describe('jourDe', () => {
-  it('garde le jour et jette l’heure', () => {
-    expect(jourDe('2026-09-14 09:00')).toBe('2026-09-14');
-  });
+describe("jourDe", () => {
+	it("garde le jour et jette l’heure", () => {
+		expect(jourDe("2026-09-14 09:00")).toBe("2026-09-14");
+	});
 
-  it('tolère une valeur absente', () => {
-    expect(jourDe('')).toBe('');
-  });
+	it("tolère une valeur absente", () => {
+		expect(jourDe("")).toBe("");
+	});
 });
 
-describe('alignement de la fenêtre', () => {
-  it('la semaine commence le lundi, quel que soit le jour d’ancrage', () => {
-    expect(lundiDeLaSemaine('2026-09-16')).toBe('2026-09-14');
-    expect(lundiDeLaSemaine('2026-09-20')).toBe('2026-09-14');
-    expect(debutDeLaFenetre(SEMAINE)).toBe('2026-09-14');
-  });
+describe("alignement de la fenêtre", () => {
+	it("la semaine commence le lundi, quel que soit le jour d’ancrage", () => {
+		expect(lundiDeLaSemaine("2026-09-16")).toBe("2026-09-14");
+		expect(lundiDeLaSemaine("2026-09-20")).toBe("2026-09-14");
+		expect(debutDeLaFenetre(SEMAINE)).toBe("2026-09-14");
+	});
 
-  it('la journée commence et finit sur elle-même', () => {
-    expect(debutDeLaFenetre(JOUR)).toBe('2026-09-16');
-    expect(bornes(JOUR)).toEqual({ from: '2026-09-16', to: '2026-09-16' });
-  });
+	it("la journée commence et finit sur elle-même", () => {
+		expect(debutDeLaFenetre(JOUR)).toBe("2026-09-16");
+		expect(bornes(JOUR)).toEqual({ from: "2026-09-16", to: "2026-09-16" });
+	});
 
-  it('le mois commence le premier', () => {
-    expect(debutDeLaFenetre(MOIS)).toBe('2026-09-01');
-  });
+	it("le mois commence le premier", () => {
+		expect(debutDeLaFenetre(MOIS)).toBe("2026-09-01");
+	});
 
-  it('l’année commence au 1er janvier', () => {
-    expect(debutDeLaFenetre(ANNEE)).toBe('2026-01-01');
-  });
+	it("l’année commence au 1er janvier", () => {
+		expect(debutDeLaFenetre(ANNEE)).toBe("2026-01-01");
+	});
 
-  it('se rabat sur aujourd’hui quand l’ancre est illisible', () => {
-    expect(debutDeLaFenetre({ echelle: 'mois', ancre: 'hier' })).toMatch(
-      /^\d{4}-\d{2}-\d{2}$/
-    );
-  });
+	it("se rabat sur aujourd’hui quand l’ancre est illisible", () => {
+		expect(debutDeLaFenetre({ echelle: "mois", ancre: "hier" })).toMatch(
+			/^\d{4}-\d{2}-\d{2}$/,
+		);
+	});
 });
 
-describe('colonnes', () => {
-  it('la journée en fait une seule', () => {
-    const grille = colonnes(JOUR);
+describe("colonnes", () => {
+	it("la journée en fait une seule", () => {
+		const grille = colonnes(JOUR);
 
-    expect(grille).toHaveLength(1);
-    expect(grille[0]).toMatchObject({ debut: '2026-09-16', fin: '2026-09-16' });
-  });
+		expect(grille).toHaveLength(1);
+		expect(grille[0]).toMatchObject({ debut: "2026-09-16", fin: "2026-09-16" });
+	});
 
-  it('la semaine en fait sept, du lundi au dimanche', () => {
-    const grille = colonnes(SEMAINE);
+	it("la semaine en fait sept, du lundi au dimanche", () => {
+		const grille = colonnes(SEMAINE);
 
-    expect(grille).toHaveLength(7);
-    expect(grille[0].debut).toBe('2026-09-14');
-    expect(grille[6].fin).toBe('2026-09-20');
-    expect(grille[5].weekend).toBe(true);
-    expect(grille[6].weekend).toBe(true);
-  });
+		expect(grille).toHaveLength(7);
+		expect(grille[0].debut).toBe("2026-09-14");
+		expect(grille[6].fin).toBe("2026-09-20");
+		expect(grille[5].weekend).toBe(true);
+		expect(grille[6].weekend).toBe(true);
+	});
 
-  it('le mois en fait autant que le mois a de jours', () => {
-    expect(colonnes(MOIS)).toHaveLength(30);
-    expect(colonnes({ echelle: 'mois', ancre: '2026-02-10' })).toHaveLength(28);
-    // 2028 est bissextile : une grille figée à 31 colonnes afficherait des
-    // jours fantômes, une grille figée à 28 en perdrait un.
-    expect(colonnes({ echelle: 'mois', ancre: '2028-02-10' })).toHaveLength(29);
-  });
+	it("le mois en fait autant que le mois a de jours", () => {
+		expect(colonnes(MOIS)).toHaveLength(30);
+		expect(colonnes({ echelle: "mois", ancre: "2026-02-10" })).toHaveLength(28);
+		// 2028 est bissextile : une grille figée à 31 colonnes afficherait des
+		// jours fantômes, une grille figée à 28 en perdrait un.
+		expect(colonnes({ echelle: "mois", ancre: "2028-02-10" })).toHaveLength(29);
+	});
 
-  it('l’année en fait douze, un par mois', () => {
-    const grille = colonnes(ANNEE);
+	it("l’année en fait douze, un par mois", () => {
+		const grille = colonnes(ANNEE);
 
-    expect(grille).toHaveLength(12);
-    expect(grille[0]).toMatchObject({ debut: '2026-01-01', fin: '2026-01-31' });
-    expect(grille[11]).toMatchObject({
-      debut: '2026-12-01',
-      fin: '2026-12-31'
-    });
-  });
+		expect(grille).toHaveLength(12);
+		expect(grille[0]).toMatchObject({ debut: "2026-01-01", fin: "2026-01-31" });
+		expect(grille[11]).toMatchObject({
+			debut: "2026-12-01",
+			fin: "2026-12-31",
+		});
+	});
 
-  it('franchit le changement d’heure sans perdre un jour', () => {
-    // La France repasse à l'heure d'hiver le 25 octobre 2026 : une
-    // arithmétique en heure locale y saute ou double un jour.
-    const grille = colonnes({ echelle: 'mois', ancre: '2026-10-01' });
+	it("franchit le changement d’heure sans perdre un jour", () => {
+		// La France repasse à l'heure d'hiver le 25 octobre 2026 : une
+		// arithmétique en heure locale y saute ou double un jour.
+		const grille = colonnes({ echelle: "mois", ancre: "2026-10-01" });
 
-    expect(grille).toHaveLength(31);
-    expect(grille[24].debut).toBe('2026-10-25');
-    expect(grille[30].debut).toBe('2026-10-31');
-  });
+		expect(grille).toHaveLength(31);
+		expect(grille[24].debut).toBe("2026-10-25");
+		expect(grille[30].debut).toBe("2026-10-31");
+	});
 });
 
-describe('joursDuMois', () => {
-  it('connaît les mois courts et les années bissextiles', () => {
-    expect(joursDuMois('2026-02-10')).toBe(28);
-    expect(joursDuMois('2028-02-10')).toBe(29);
-    expect(joursDuMois('2026-04-10')).toBe(30);
-    expect(joursDuMois('2026-12-10')).toBe(31);
-  });
+describe("joursDuMois", () => {
+	it("connaît les mois courts et les années bissextiles", () => {
+		expect(joursDuMois("2026-02-10")).toBe(28);
+		expect(joursDuMois("2028-02-10")).toBe(29);
+		expect(joursDuMois("2026-04-10")).toBe(30);
+		expect(joursDuMois("2026-12-10")).toBe(31);
+	});
 });
 
-describe('decaler', () => {
-  it('avance et recule d’un jour', () => {
-    expect(debutDeLaFenetre(decaler(JOUR, 1))).toBe('2026-09-17');
-    expect(debutDeLaFenetre(decaler(JOUR, -1))).toBe('2026-09-15');
-  });
+describe("decaler", () => {
+	it("avance et recule d’un jour", () => {
+		expect(debutDeLaFenetre(decaler(JOUR, 1))).toBe("2026-09-17");
+		expect(debutDeLaFenetre(decaler(JOUR, -1))).toBe("2026-09-15");
+	});
 
-  it('avance et recule d’une semaine entière', () => {
-    expect(debutDeLaFenetre(decaler(SEMAINE, 1))).toBe('2026-09-21');
-    expect(debutDeLaFenetre(decaler(SEMAINE, -1))).toBe('2026-09-07');
-  });
+	it("avance et recule d’une semaine entière", () => {
+		expect(debutDeLaFenetre(decaler(SEMAINE, 1))).toBe("2026-09-21");
+		expect(debutDeLaFenetre(decaler(SEMAINE, -1))).toBe("2026-09-07");
+	});
 
-  it('avance et recule d’un mois entier', () => {
-    expect(debutDeLaFenetre(decaler(MOIS, 1))).toBe('2026-10-01');
-    expect(debutDeLaFenetre(decaler(MOIS, -1))).toBe('2026-08-01');
-  });
+	it("avance et recule d’un mois entier", () => {
+		expect(debutDeLaFenetre(decaler(MOIS, 1))).toBe("2026-10-01");
+		expect(debutDeLaFenetre(decaler(MOIS, -1))).toBe("2026-08-01");
+	});
 
-  it('franchit le passage d’une année à l’autre', () => {
-    const decembre: FenetrePlanning = { echelle: 'mois', ancre: '2026-12-15' };
+	it("franchit le passage d’une année à l’autre", () => {
+		const decembre: FenetrePlanning = { echelle: "mois", ancre: "2026-12-15" };
 
-    expect(debutDeLaFenetre(decaler(decembre, 1))).toBe('2027-01-01');
-  });
+		expect(debutDeLaFenetre(decaler(decembre, 1))).toBe("2027-01-01");
+	});
 
-  it('avance et recule d’une année entière', () => {
-    expect(debutDeLaFenetre(decaler(ANNEE, 1))).toBe('2027-01-01');
-    expect(debutDeLaFenetre(decaler(ANNEE, -1))).toBe('2025-01-01');
-  });
+	it("avance et recule d’une année entière", () => {
+		expect(debutDeLaFenetre(decaler(ANNEE, 1))).toBe("2027-01-01");
+		expect(debutDeLaFenetre(decaler(ANNEE, -1))).toBe("2025-01-01");
+	});
 });
 
-describe('bornes envoyées au serveur', () => {
-  it('couvrent exactement la période affichée', () => {
-    expect(bornes(SEMAINE)).toEqual({ from: '2026-09-14', to: '2026-09-20' });
-    expect(bornes(MOIS)).toEqual({ from: '2026-09-01', to: '2026-09-30' });
-    expect(bornes(ANNEE)).toEqual({ from: '2026-01-01', to: '2026-12-31' });
-  });
+describe("bornes envoyées au serveur", () => {
+	it("couvrent exactement la période affichée", () => {
+		expect(bornes(SEMAINE)).toEqual({ from: "2026-09-14", to: "2026-09-20" });
+		expect(bornes(MOIS)).toEqual({ from: "2026-09-01", to: "2026-09-30" });
+		expect(bornes(ANNEE)).toEqual({ from: "2026-01-01", to: "2026-12-31" });
+	});
 });
 
-describe('placer', () => {
-  it('place une manifestation dans la semaine', () => {
-    // Du lundi 14 au mercredi 16 : première colonne, trois jours.
-    expect(placer(manifestation(), colonnes(SEMAINE))).toMatchObject({
-      colonne: 1,
-      largeur: 3,
-      deborde_avant: false,
-      deborde_apres: false
-    });
-  });
+describe("placer", () => {
+	it("place une manifestation dans la semaine", () => {
+		// Du lundi 14 au mercredi 16 : première colonne, trois jours.
+		expect(placer(manifestation(), colonnes(SEMAINE))).toMatchObject({
+			colonne: 1,
+			largeur: 3,
+			deborde_avant: false,
+			deborde_apres: false,
+		});
+	});
 
-  it('rogne celle qui commence avant, sans l’écarter', () => {
-    expect(
-      placer(
-        manifestation({ date_debut: '2026-09-10 08:00' }),
-        colonnes(SEMAINE)
-      )
-    ).toMatchObject({ colonne: 1, largeur: 3, deborde_avant: true });
-  });
+	it("rogne celle qui commence avant, sans l’écarter", () => {
+		expect(
+			placer(
+				manifestation({ date_debut: "2026-09-10 08:00" }),
+				colonnes(SEMAINE),
+			),
+		).toMatchObject({ colonne: 1, largeur: 3, deborde_avant: true });
+	});
 
-  it('rogne celle qui finit après', () => {
-    expect(
-      placer(manifestation({ date_fin: '2026-10-30 18:00' }), colonnes(SEMAINE))
-    ).toMatchObject({ largeur: 7, deborde_apres: true });
-  });
+	it("rogne celle qui finit après", () => {
+		expect(
+			placer(
+				manifestation({ date_fin: "2026-10-30 18:00" }),
+				colonnes(SEMAINE),
+			),
+		).toMatchObject({ largeur: 7, deborde_apres: true });
+	});
 
-  it('écarte celle qui est entièrement hors fenêtre', () => {
-    expect(
-      placer(
-        manifestation({
-          date_debut: '2026-08-01 08:00',
-          date_fin: '2026-08-03 18:00'
-        }),
-        colonnes(SEMAINE)
-      )
-    ).toBeNull();
-  });
+	it("écarte celle qui est entièrement hors fenêtre", () => {
+		expect(
+			placer(
+				manifestation({
+					date_debut: "2026-08-01 08:00",
+					date_fin: "2026-08-03 18:00",
+				}),
+				colonnes(SEMAINE),
+			),
+		).toBeNull();
+	});
 
-  it('paraît sur la journée qu’elle traverse', () => {
-    // Du 14 au 16 : le 16 est dedans, le 20 non.
-    expect(placer(manifestation(), colonnes(JOUR))).toMatchObject({
-      colonne: 1,
-      largeur: 1,
-      deborde_avant: true
-    });
-    expect(
-      placer(
-        manifestation(),
-        colonnes({ echelle: 'jour', ancre: '2026-09-20' })
-      )
-    ).toBeNull();
-  });
+	it("paraît sur la journée qu’elle traverse", () => {
+		// Du 14 au 16 : le 16 est dedans, le 20 non.
+		expect(placer(manifestation(), colonnes(JOUR))).toMatchObject({
+			colonne: 1,
+			largeur: 1,
+			deborde_avant: true,
+		});
+		expect(
+			placer(
+				manifestation(),
+				colonnes({ echelle: "jour", ancre: "2026-09-20" }),
+			),
+		).toBeNull();
+	});
 
-  it('tient sur une seule colonne à l’échelle de l’année', () => {
-    // Trois jours de septembre : un mois, pas trois colonnes.
-    expect(placer(manifestation(), colonnes(ANNEE))).toMatchObject({
-      colonne: 9,
-      largeur: 1
-    });
-  });
+	it("tient sur une seule colonne à l’échelle de l’année", () => {
+		// Trois jours de septembre : un mois, pas trois colonnes.
+		expect(placer(manifestation(), colonnes(ANNEE))).toMatchObject({
+			colonne: 9,
+			largeur: 1,
+		});
+	});
 
-  it('couvre plusieurs mois quand elle les traverse', () => {
-    expect(
-      placer(
-        manifestation({
-          date_debut: '2026-09-28 09:00',
-          date_fin: '2026-11-02 18:00'
-        }),
-        colonnes(ANNEE)
-      )
-    ).toMatchObject({ colonne: 9, largeur: 3 });
-  });
+	it("couvre plusieurs mois quand elle les traverse", () => {
+		expect(
+			placer(
+				manifestation({
+					date_debut: "2026-09-28 09:00",
+					date_fin: "2026-11-02 18:00",
+				}),
+				colonnes(ANNEE),
+			),
+		).toMatchObject({ colonne: 9, largeur: 3 });
+	});
 
-  it('donne une largeur de 1 à une manifestation d’un seul jour', () => {
-    expect(
-      placer(
-        manifestation({
-          date_debut: '2026-09-15 09:00',
-          date_fin: '2026-09-15 23:00'
-        }),
-        colonnes(SEMAINE)
-      )
-    ).toMatchObject({ colonne: 2, largeur: 1 });
-  });
+	it("donne une largeur de 1 à une manifestation d’un seul jour", () => {
+		expect(
+			placer(
+				manifestation({
+					date_debut: "2026-09-15 09:00",
+					date_fin: "2026-09-15 23:00",
+				}),
+				colonnes(SEMAINE),
+			),
+		).toMatchObject({ colonne: 2, largeur: 1 });
+	});
 
-  it('survit à une date de fin absente', () => {
-    expect(
-      placer(manifestation({ date_fin: '' }), colonnes(SEMAINE))
-    ).toMatchObject({ colonne: 1, largeur: 1 });
-  });
+	it("survit à une date de fin absente", () => {
+		expect(
+			placer(manifestation({ date_fin: "" }), colonnes(SEMAINE)),
+		).toMatchObject({ colonne: 1, largeur: 1 });
+	});
 });
 
-describe('barres', () => {
-  it('trie par colonne puis par nom, quel que soit l’ordre reçu', () => {
-    const rendues = barres(
-      [
-        manifestation({ id: 3, nom: 'Zoulou', date_debut: '2026-09-15 09:00' }),
-        manifestation({ id: 2, nom: 'Bravo', date_debut: '2026-09-14 09:00' }),
-        manifestation({ id: 1, nom: 'Alpha', date_debut: '2026-09-15 09:00' })
-      ],
-      colonnes(SEMAINE)
-    );
+describe("barres", () => {
+	it("trie par colonne puis par nom, quel que soit l’ordre reçu", () => {
+		const rendues = barres(
+			[
+				manifestation({ id: 3, nom: "Zoulou", date_debut: "2026-09-15 09:00" }),
+				manifestation({ id: 2, nom: "Bravo", date_debut: "2026-09-14 09:00" }),
+				manifestation({ id: 1, nom: "Alpha", date_debut: "2026-09-15 09:00" }),
+			],
+			colonnes(SEMAINE),
+		);
 
-    expect(rendues.map((barre) => barre.sujet.nom)).toEqual([
-      'Bravo',
-      'Alpha',
-      'Zoulou'
-    ]);
-  });
+		expect(rendues.map((barre) => barre.sujet.nom)).toEqual([
+			"Bravo",
+			"Alpha",
+			"Zoulou",
+		]);
+	});
 
-  it('laisse de côté ce qui ne paraît pas dans la fenêtre', () => {
-    const rendues = barres(
-      [
-        manifestation(),
-        manifestation({
-          id: 2,
-          date_debut: '2020-01-01 09:00',
-          date_fin: '2020-01-02 09:00'
-        })
-      ],
-      colonnes(SEMAINE)
-    );
+	it("laisse de côté ce qui ne paraît pas dans la fenêtre", () => {
+		const rendues = barres(
+			[
+				manifestation(),
+				manifestation({
+					id: 2,
+					date_debut: "2020-01-01 09:00",
+					date_fin: "2020-01-02 09:00",
+				}),
+			],
+			colonnes(SEMAINE),
+		);
 
-    expect(rendues).toHaveLength(1);
-  });
+		expect(rendues).toHaveLength(1);
+	});
 });
 
-describe('libellePeriode', () => {
-  it('nomme la journée en toutes lettres', () => {
-    expect(libellePeriode(JOUR)).toBe('Mercredi 16 septembre 2026');
-  });
+describe("libellePeriode", () => {
+	it("nomme la journée en toutes lettres", () => {
+		expect(libellePeriode(JOUR)).toBe("Mercredi 16 septembre 2026");
+	});
 
-  it('nomme la semaine par ses bornes', () => {
-    expect(libellePeriode(SEMAINE)).toContain('14 sept.');
-    expect(libellePeriode(SEMAINE)).toContain('2026');
-  });
+	it("nomme la semaine par ses bornes", () => {
+		expect(libellePeriode(SEMAINE)).toContain("14 sept.");
+		expect(libellePeriode(SEMAINE)).toContain("2026");
+	});
 
-  it('nomme le mois et l’année', () => {
-    expect(libellePeriode(MOIS)).toBe('Septembre 2026');
-  });
+	it("nomme le mois et l’année", () => {
+		expect(libellePeriode(MOIS)).toBe("Septembre 2026");
+	});
 
-  it('nomme l’année par son seul millésime', () => {
-    expect(libellePeriode(ANNEE)).toBe('2026');
-  });
+	it("nomme l’année par son seul millésime", () => {
+		expect(libellePeriode(ANNEE)).toBe("2026");
+	});
 });
 
-describe('contientAujourdhui', () => {
-  it('reconnaît la colonne du jour, au jour comme au mois', () => {
-    const jour = {
-      debut: '2026-09-16',
-      fin: '2026-09-16',
-      libelle: '',
-      weekend: false
-    };
-    const mois = {
-      debut: '2026-09-01',
-      fin: '2026-09-30',
-      libelle: '',
-      weekend: false
-    };
+describe("contientAujourdhui", () => {
+	it("reconnaît la colonne du jour, au jour comme au mois", () => {
+		const jour = {
+			debut: "2026-09-16",
+			fin: "2026-09-16",
+			libelle: "",
+			weekend: false,
+		};
+		const mois = {
+			debut: "2026-09-01",
+			fin: "2026-09-30",
+			libelle: "",
+			weekend: false,
+		};
 
-    expect(contientAujourdhui(jour, '2026-09-16')).toBe(true);
-    expect(contientAujourdhui(jour, '2026-09-17')).toBe(false);
-    expect(contientAujourdhui(mois, '2026-09-16')).toBe(true);
-  });
+		expect(contientAujourdhui(jour, "2026-09-16")).toBe(true);
+		expect(contientAujourdhui(jour, "2026-09-17")).toBe(false);
+		expect(contientAujourdhui(mois, "2026-09-16")).toBe(true);
+	});
 });
 
-describe('estWeekEnd', () => {
-  it('reconnaît samedi et dimanche', () => {
-    expect(estWeekEnd('2026-09-19')).toBe(true);
-    expect(estWeekEnd('2026-09-20')).toBe(true);
-    expect(estWeekEnd('2026-09-21')).toBe(false);
-  });
+describe("estWeekEnd", () => {
+	it("reconnaît samedi et dimanche", () => {
+		expect(estWeekEnd("2026-09-19")).toBe(true);
+		expect(estWeekEnd("2026-09-20")).toBe(true);
+		expect(estWeekEnd("2026-09-21")).toBe(false);
+	});
 });
 
-describe('libelleLivraison', () => {
-  it('rend l’avancement', () => {
-    expect(libelleLivraison(manifestation())).toBe('1/2 livré');
-  });
+describe("libelleLivraison", () => {
+	it("rend l’avancement", () => {
+		expect(libelleLivraison(manifestation())).toBe("1/2 livré");
+	});
 
-  it('accorde le pluriel', () => {
-    expect(
-      libelleLivraison(
-        manifestation({ etat_livraison: { bons: 5, livres: 2, a_livrer: 3 } })
-      )
-    ).toBe('2/5 livrés');
-  });
+	it("accorde le pluriel", () => {
+		expect(
+			libelleLivraison(
+				manifestation({ etat_livraison: { bons: 5, livres: 2, a_livrer: 3 } }),
+			),
+		).toBe("2/5 livrés");
+	});
 
-  it('dit qu’il n’y a aucun bon plutôt que 0/0', () => {
-    expect(
-      libelleLivraison(
-        manifestation({ etat_livraison: { bons: 0, livres: 0, a_livrer: 0 } })
-      )
-    ).toBe('aucun bon');
-  });
+	it("dit qu’il n’y a aucun bon plutôt que 0/0", () => {
+		expect(
+			libelleLivraison(
+				manifestation({ etat_livraison: { bons: 0, livres: 0, a_livrer: 0 } }),
+			),
+		).toBe("aucun bon");
+	});
 });
 
-describe('libelleStatut', () => {
-  it('traduit les codes du serveur', () => {
-    expect(libelleStatut('en_cours')).toBe('En cours');
-    expect(libelleStatut('planifiee')).toBe('Planifiée');
-  });
+describe("libelleStatut", () => {
+	it("traduit les codes du serveur", () => {
+		expect(libelleStatut("en_cours")).toBe("En cours");
+		expect(libelleStatut("planifiee")).toBe("Planifiée");
+	});
 
-  it('rend le code tel quel s’il est inconnu, jamais une case vide', () => {
-    expect(libelleStatut('inattendu')).toBe('inattendu');
-  });
+	it("rend le code tel quel s’il est inconnu, jamais une case vide", () => {
+		expect(libelleStatut("inattendu")).toBe("inattendu");
+	});
 });
 
-describe('état d’URL', () => {
-  it('fait l’aller-retour sur les trois échelles', () => {
-    for (const fenetre of [JOUR, SEMAINE, MOIS, ANNEE]) {
-      const relu = etatDepuisUrl(urlDuPlanning('liste', fenetre).toString());
+describe("état d’URL", () => {
+	it("fait l’aller-retour sur les trois échelles", () => {
+		for (const fenetre of [JOUR, SEMAINE, MOIS, ANNEE]) {
+			const relu = etatDepuisUrl(urlDuPlanning("liste", fenetre).toString());
 
-      expect(relu.vue).toBe('liste');
-      expect(relu.fenetre.echelle).toBe(fenetre.echelle);
-      expect(debutDeLaFenetre(relu.fenetre)).toBe(debutDeLaFenetre(fenetre));
-    }
-  });
+			expect(relu.vue).toBe("liste");
+			expect(relu.fenetre.echelle).toBe(fenetre.echelle);
+			expect(debutDeLaFenetre(relu.fenetre)).toBe(debutDeLaFenetre(fenetre));
+		}
+	});
 
-  it('se rabat sur le mois courant quand l’URL est illisible', () => {
-    const etat = etatDepuisUrl(
-      'plan_echelle=trimestre&plan_date=hier',
-      new Date('2026-09-16T10:00:00Z')
-    );
+	it("se rabat sur le mois courant quand l’URL est illisible", () => {
+		const etat = etatDepuisUrl(
+			"plan_echelle=trimestre&plan_date=hier",
+			new Date("2026-09-16T10:00:00Z"),
+		);
 
-    expect(etat.fenetre.echelle).toBe('mois');
-    expect(etat.vue).toBe('gantt');
-    expect(debutDeLaFenetre(etat.fenetre)).toBe('2026-09-01');
-  });
+		expect(etat.fenetre.echelle).toBe("mois");
+		expect(etat.vue).toBe("gantt");
+		expect(debutDeLaFenetre(etat.fenetre)).toBe("2026-09-01");
+	});
 
-  it('préfixe toutes ses clés', () => {
-    for (const cle of urlDuPlanning('gantt', MOIS).keys()) {
-      expect(cle.startsWith('plan_')).toBe(true);
-    }
-  });
+	it("préfixe toutes ses clés", () => {
+		for (const cle of urlDuPlanning("gantt", MOIS).keys()) {
+			expect(cle.startsWith("plan_")).toBe(true);
+		}
+	});
 });
 
-describe('fenetreParDefaut', () => {
-  it('ancre la période sur aujourd’hui', () => {
-    const fenetre = fenetreParDefaut('mois', new Date('2026-09-16T10:00:00Z'));
+describe("fenetreParDefaut", () => {
+	it("ancre la période sur aujourd’hui", () => {
+		const fenetre = fenetreParDefaut("mois", new Date("2026-09-16T10:00:00Z"));
 
-    expect(debutDeLaFenetre(fenetre)).toBe('2026-09-01');
-  });
+		expect(debutDeLaFenetre(fenetre)).toBe("2026-09-01");
+	});
 });
 
-describe('la maille prestation', () => {
-  it('place une prestation comme une manifestation', () => {
-    // Le même calcul aux deux mailles : c'est ce qui garantit qu'une
-    // sous-ligne tombe sous la portion de barre qui la contient.
-    expect(
-      placer(
-        prestation({
-          date_debut: '2026-09-15 08:00',
-          date_fin: '2026-09-16 20:00'
-        }),
-        colonnes(SEMAINE)
-      )
-    ).toMatchObject({ colonne: 2, largeur: 2 });
-  });
+describe("la maille prestation", () => {
+	it("place une prestation comme une manifestation", () => {
+		// Le même calcul aux deux mailles : c'est ce qui garantit qu'une
+		// sous-ligne tombe sous la portion de barre qui la contient.
+		expect(
+			placer(
+				prestation({
+					date_debut: "2026-09-15 08:00",
+					date_fin: "2026-09-16 20:00",
+				}),
+				colonnes(SEMAINE),
+			),
+		).toMatchObject({ colonne: 2, largeur: 2 });
+	});
 
-  it('range les prestations sous leur manifestation', () => {
-    const rangees = parManifestation([
-      prestation({ id: 1, manifestation: 7 }),
-      prestation({ id: 2, manifestation: 9 }),
-      prestation({ id: 3, manifestation: 7 })
-    ]);
+	it("range les prestations sous leur manifestation", () => {
+		const rangees = parManifestation([
+			prestation({ id: 1, manifestation: 7 }),
+			prestation({ id: 2, manifestation: 9 }),
+			prestation({ id: 3, manifestation: 7 }),
+		]);
 
-    expect(Array.from(rangees.keys()).sort()).toEqual([7, 9]);
-    expect(rangees.get(7)?.map((p) => p.id)).toEqual([1, 3]);
-    expect(rangees.get(9)?.map((p) => p.id)).toEqual([2]);
-  });
+		expect(Array.from(rangees.keys()).sort()).toEqual([7, 9]);
+		expect(rangees.get(7)?.map((p) => p.id)).toEqual([1, 3]);
+		expect(rangees.get(9)?.map((p) => p.id)).toEqual([2]);
+	});
 
-  it('rend une table vide sans prestation, plutôt que rien', () => {
-    expect(parManifestation([]).size).toBe(0);
-  });
+	it("rend une table vide sans prestation, plutôt que rien", () => {
+		expect(parManifestation([]).size).toBe(0);
+	});
 
-  it('lit l’avancement d’une prestation comme celui d’une manifestation', () => {
-    expect(
-      libelleLivraison(
-        prestation({ etat_livraison: { bons: 3, livres: 2, a_livrer: 1 } })
-      )
-    ).toBe('2/3 livrés');
-  });
+	it("lit l’avancement d’une prestation comme celui d’une manifestation", () => {
+		expect(
+			libelleLivraison(
+				prestation({ etat_livraison: { bons: 3, livres: 2, a_livrer: 1 } }),
+			),
+		).toBe("2/3 livrés");
+	});
 });
 
-describe('les manifestations dépliées, dans l’URL', () => {
-  it('fait l’aller-retour', () => {
-    const relu = etatDepuisUrl(
-      urlDuPlanning('gantt', SEMAINE, [4, 1]).toString()
-    );
+describe("les manifestations dépliées, dans l’URL", () => {
+	it("fait l’aller-retour", () => {
+		const relu = etatDepuisUrl(
+			urlDuPlanning("gantt", SEMAINE, [4, 1]).toString(),
+		);
 
-    expect(Array.from(relu.ouvertes).sort()).toEqual([1, 4]);
-  });
+		expect(Array.from(relu.ouvertes).sort()).toEqual([1, 4]);
+	});
 
-  it('trie et dédoublonne, pour que la même vue donne la même URL', () => {
-    expect(ouvertesEnTexte([9, 2, 9])).toBe('2,9');
-  });
+	it("trie et dédoublonne, pour que la même vue donne la même URL", () => {
+		expect(ouvertesEnTexte([9, 2, 9])).toBe("2,9");
+	});
 
-  it('n’écrit pas de clé quand rien n’est déplié', () => {
-    expect(urlDuPlanning('gantt', SEMAINE).has('plan_ouvertes')).toBe(false);
-  });
+	it("n’écrit pas de clé quand rien n’est déplié", () => {
+		expect(urlDuPlanning("gantt", SEMAINE).has("plan_ouvertes")).toBe(false);
+	});
 
-  it('écarte ce qui n’est pas un identifiant', () => {
-    expect(Array.from(ouvertesDepuisTexte('3,,abc,-1,0,5'))).toEqual([3, 5]);
-  });
+	it("écarte ce qui n’est pas un identifiant", () => {
+		expect(Array.from(ouvertesDepuisTexte("3,,abc,-1,0,5"))).toEqual([3, 5]);
+	});
 
-  it('rend un ensemble vide quand la clé est absente', () => {
-    expect(ouvertesDepuisTexte(null).size).toBe(0);
-  });
+	it("rend un ensemble vide quand la clé est absente", () => {
+		expect(ouvertesDepuisTexte(null).size).toBe(0);
+	});
 });
 
-describe('largeurDeColonne', () => {
-  it('répartit la place disponible entre les colonnes', () => {
-    // Sept colonnes dans 1400 px : 200 px chacune, bien au-dessus du minimum.
-    expect(largeurDeColonne('semaine', 7, 1400)).toBe(200);
-  });
+describe("largeurDeColonne", () => {
+	it("répartit la place disponible entre les colonnes", () => {
+		// Sept colonnes dans 1400 px : 200 px chacune, bien au-dessus du minimum.
+		expect(largeurDeColonne("semaine", 7, 1400)).toBe(200);
+	});
 
-  it('ne descend jamais sous le minimum de l’échelle', () => {
-    // Trente jours dans 600 px feraient 20 px : on garde 34 et on défile.
-    expect(largeurDeColonne('mois', 30, 600)).toBe(34);
-  });
+	it("ne descend jamais sous le minimum de l’échelle", () => {
+		// Trente jours dans 600 px feraient 20 px : on garde 34 et on défile.
+		expect(largeurDeColonne("mois", 30, 600)).toBe(34);
+	});
 
-  it('rend le minimum tant que le conteneur n’est pas mesuré', () => {
-    expect(largeurDeColonne('annee', 12, 0)).toBe(74);
-    expect(largeurDeColonne('jour', 1, -200)).toBe(420);
-  });
+	it("rend le minimum tant que le conteneur n’est pas mesuré", () => {
+		expect(largeurDeColonne("annee", 12, 0)).toBe(74);
+		expect(largeurDeColonne("jour", 1, -200)).toBe(420);
+	});
 
-  it('tolère une grille vide', () => {
-    expect(largeurDeColonne('mois', 0, 1000)).toBe(34);
-  });
+	it("tolère une grille vide", () => {
+		expect(largeurDeColonne("mois", 0, 1000)).toBe(34);
+	});
 });

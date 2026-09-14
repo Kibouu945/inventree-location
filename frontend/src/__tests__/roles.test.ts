@@ -1,162 +1,162 @@
-import type { InvenTreePluginContext } from '@inventreedb/ui';
-import { describe, expect, it } from 'vitest';
+import type { InvenTreePluginContext } from "@inventreedb/ui";
+import { describe, expect, it } from "vitest";
 
 import {
-  canArbitrateReservations,
-  canCheckinReturns,
-  canDeclareRetour,
-  canManageBackOffice,
-  canWriteCatalog,
-  canWriteReservations,
-  hasAnyRole,
-  isSuperuser,
-  userRoles
-} from '../roles';
+	canArbitrateReservations,
+	canCheckinReturns,
+	canDeclareRetour,
+	canManageBackOffice,
+	canWriteCatalog,
+	canWriteReservations,
+	hasAnyRole,
+	isSuperuser,
+	userRoles,
+} from "../roles";
 
 // Fabrique un contexte minimal imitant le store user d'InvenTree :
 // les données sont derrière getUser(), groups est [{ pk, name }].
 function makeContext({
-  groups = [],
-  is_superuser = false
+	groups = [],
+	is_superuser = false,
 }: {
-  groups?: Array<{ pk: number; name: string }> | null;
-  is_superuser?: boolean;
+	groups?: Array<{ pk: number; name: string }> | null;
+	is_superuser?: boolean;
 } = {}): InvenTreePluginContext {
-  const user = { groups, is_superuser };
-  return {
-    user: {
-      getUser: () => user,
-      isSuperuser: () => is_superuser
-    }
-  } as unknown as InvenTreePluginContext;
+	const user = { groups, is_superuser };
+	return {
+		user: {
+			getUser: () => user,
+			isSuperuser: () => is_superuser,
+		},
+	} as unknown as InvenTreePluginContext;
 }
 
 const groups = (...names: string[]) =>
-  names.map((name, index) => ({ pk: index + 1, name }));
+	names.map((name, index) => ({ pk: index + 1, name }));
 
-describe('userRoles', () => {
-  it('extrait les noms de groupes depuis getUser()', () => {
-    const ctx = makeContext({ groups: groups('gestionnaire', 'lecteur') });
-    expect(userRoles(ctx)).toEqual(['gestionnaire', 'lecteur']);
-  });
+describe("userRoles", () => {
+	it("extrait les noms de groupes depuis getUser()", () => {
+		const ctx = makeContext({ groups: groups("gestionnaire", "lecteur") });
+		expect(userRoles(ctx)).toEqual(["gestionnaire", "lecteur"]);
+	});
 
-  it('renvoie [] quand groups est null ou absent', () => {
-    expect(userRoles(makeContext({ groups: null }))).toEqual([]);
-    expect(userRoles({} as InvenTreePluginContext)).toEqual([]);
-  });
+	it("renvoie [] quand groups est null ou absent", () => {
+		expect(userRoles(makeContext({ groups: null }))).toEqual([]);
+		expect(userRoles({} as InvenTreePluginContext)).toEqual([]);
+	});
 });
 
-describe('isSuperuser', () => {
-  it('détecte le superutilisateur', () => {
-    expect(isSuperuser(makeContext({ is_superuser: true }))).toBe(true);
-    expect(isSuperuser(makeContext({ is_superuser: false }))).toBe(false);
-  });
+describe("isSuperuser", () => {
+	it("détecte le superutilisateur", () => {
+		expect(isSuperuser(makeContext({ is_superuser: true }))).toBe(true);
+		expect(isSuperuser(makeContext({ is_superuser: false }))).toBe(false);
+	});
 });
 
-describe('hasAnyRole', () => {
-  it('vrai si un rôle correspond', () => {
-    const ctx = makeContext({ groups: groups('livreur') });
-    expect(hasAnyRole(ctx, ['livreur', 'sav'])).toBe(true);
-    expect(hasAnyRole(ctx, ['admin'])).toBe(false);
-  });
+describe("hasAnyRole", () => {
+	it("vrai si un rôle correspond", () => {
+		const ctx = makeContext({ groups: groups("livreur") });
+		expect(hasAnyRole(ctx, ["livreur", "sav"])).toBe(true);
+		expect(hasAnyRole(ctx, ["admin"])).toBe(false);
+	});
 
-  it('le superutilisateur passe toujours', () => {
-    const ctx = makeContext({ is_superuser: true });
-    expect(hasAnyRole(ctx, ['admin'])).toBe(true);
-  });
+	it("le superutilisateur passe toujours", () => {
+		const ctx = makeContext({ is_superuser: true });
+		expect(hasAnyRole(ctx, ["admin"])).toBe(true);
+	});
 });
 
-describe('canWriteReservations', () => {
-  it.each([
-    ['admin', true],
-    ['gestionnaire', true],
-    ['magasinier', false],
-    ['livreur', false],
-    ['sav', false],
-    ['lecteur', false]
-  ])('%s -> %s', (role, expected) => {
-    expect(canWriteReservations(makeContext({ groups: groups(role) }))).toBe(
-      expected
-    );
-  });
+describe("canWriteReservations", () => {
+	it.each([
+		["admin", true],
+		["gestionnaire", true],
+		["magasinier", false],
+		["livreur", false],
+		["sav", false],
+		["lecteur", false],
+	])("%s -> %s", (role, expected) => {
+		expect(canWriteReservations(makeContext({ groups: groups(role) }))).toBe(
+			expected,
+		);
+	});
 });
 
-describe('canCheckinReturns', () => {
-  // Miroir de ReturnCheckinPermission.write_roles côté serveur. Le
-  // gestionnaire arbitre les réservations mais ne pointe pas les retours :
-  // lui montrer le bouton lui vaudrait un 403 au POST.
-  it.each([
-    ['admin', true],
-    ['gestionnaire', false],
-    ['magasinier', true],
-    ['livreur', false],
-    ['sav', false],
-    ['lecteur', false]
-  ])('%s -> %s', (role, expected) => {
-    expect(canCheckinReturns(makeContext({ groups: groups(role) }))).toBe(
-      expected
-    );
-  });
+describe("canCheckinReturns", () => {
+	// Miroir de ReturnCheckinPermission.write_roles côté serveur. Le
+	// gestionnaire arbitre les réservations mais ne pointe pas les retours :
+	// lui montrer le bouton lui vaudrait un 403 au POST.
+	it.each([
+		["admin", true],
+		["gestionnaire", false],
+		["magasinier", true],
+		["livreur", false],
+		["sav", false],
+		["lecteur", false],
+	])("%s -> %s", (role, expected) => {
+		expect(canCheckinReturns(makeContext({ groups: groups(role) }))).toBe(
+			expected,
+		);
+	});
 });
 
-describe('canWriteCatalog', () => {
-  it.each([
-    ['admin', true],
-    ['gestionnaire', true],
-    ['magasinier', false],
-    ['livreur', false],
-    ['lecteur', false]
-  ])('%s -> %s', (role, expected) => {
-    expect(canWriteCatalog(makeContext({ groups: groups(role) }))).toBe(
-      expected
-    );
-  });
+describe("canWriteCatalog", () => {
+	it.each([
+		["admin", true],
+		["gestionnaire", true],
+		["magasinier", false],
+		["livreur", false],
+		["lecteur", false],
+	])("%s -> %s", (role, expected) => {
+		expect(canWriteCatalog(makeContext({ groups: groups(role) }))).toBe(
+			expected,
+		);
+	});
 });
 
 // Le retour et l'arbitrage ne se recouvrent pas : le magasinier déclare les
 // retours sans arbitrer, le gestionnaire arbitre sans déclarer. Le bouton
 // « Déclarer le retour » vivait dans la colonne d'arbitrage, donc invisible
 // pour sa propre persona.
-describe('canDeclareRetour', () => {
-  it('ouvert au magasinier et à l’admin', () => {
-    expect(
-      canDeclareRetour(makeContext({ groups: groups('magasinier') }))
-    ).toBe(true);
-    expect(canDeclareRetour(makeContext({ groups: groups('admin') }))).toBe(
-      true
-    );
-  });
+describe("canDeclareRetour", () => {
+	it("ouvert au magasinier et à l’admin", () => {
+		expect(
+			canDeclareRetour(makeContext({ groups: groups("magasinier") })),
+		).toBe(true);
+		expect(canDeclareRetour(makeContext({ groups: groups("admin") }))).toBe(
+			true,
+		);
+	});
 
-  it('fermé au gestionnaire, qui n’arbitre que les réservations', () => {
-    const ctx = makeContext({ groups: groups('gestionnaire') });
-    expect(canDeclareRetour(ctx)).toBe(false);
-    expect(canArbitrateReservations(ctx)).toBe(true);
-  });
+	it("fermé au gestionnaire, qui n’arbitre que les réservations", () => {
+		const ctx = makeContext({ groups: groups("gestionnaire") });
+		expect(canDeclareRetour(ctx)).toBe(false);
+		expect(canArbitrateReservations(ctx)).toBe(true);
+	});
 
-  it('le magasinier n’arbitre pas', () => {
-    const ctx = makeContext({ groups: groups('magasinier') });
-    expect(canArbitrateReservations(ctx)).toBe(false);
-  });
+	it("le magasinier n’arbitre pas", () => {
+		const ctx = makeContext({ groups: groups("magasinier") });
+		expect(canArbitrateReservations(ctx)).toBe(false);
+	});
 });
 
 // Les back-offices (utilisateurs, Parts) sont réservés à l'admin : ce sont les
 // seuls écrans qui créent des comptes et posent des rôles.
-describe('canManageBackOffice', () => {
-  it.each([
-    ['admin', true],
-    ['gestionnaire', false],
-    ['magasinier', false],
-    ['livreur', false],
-    ['sav', false],
-    ['lecteur', false],
-    ['acheteur', false]
-  ])('%s -> %s', (role, expected) => {
-    expect(canManageBackOffice(makeContext({ groups: groups(role) }))).toBe(
-      expected
-    );
-  });
+describe("canManageBackOffice", () => {
+	it.each([
+		["admin", true],
+		["gestionnaire", false],
+		["magasinier", false],
+		["livreur", false],
+		["sav", false],
+		["lecteur", false],
+		["acheteur", false],
+	])("%s -> %s", (role, expected) => {
+		expect(canManageBackOffice(makeContext({ groups: groups(role) }))).toBe(
+			expected,
+		);
+	});
 
-  it('ouvert au superutilisateur sans rôle plugin', () => {
-    expect(canManageBackOffice(makeContext({ is_superuser: true }))).toBe(true);
-  });
+	it("ouvert au superutilisateur sans rôle plugin", () => {
+		expect(canManageBackOffice(makeContext({ is_superuser: true }))).toBe(true);
+	});
 });

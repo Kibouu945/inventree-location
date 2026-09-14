@@ -6,57 +6,57 @@
  */
 
 export interface RetourLigneValues {
-  id: number;
-  quantite_demandee: number;
-  quantite_rendue: number;
+	id: number;
+	quantite_demandee: number;
+	quantite_rendue: number;
 }
 
-export type StatutRetour = 'aucun' | 'partiel' | 'complet';
+export type StatutRetour = "aucun" | "partiel" | "complet";
 
 export function computeStatutRetour(lignes: RetourLigneValues[]): StatutRetour {
-  const totalDemandee = lignes.reduce(
-    (sum, ligne) => sum + (ligne.quantite_demandee || 0),
-    0
-  );
-  const totalRendue = lignes.reduce(
-    (sum, ligne) =>
-      sum + Math.min(ligne.quantite_rendue || 0, ligne.quantite_demandee || 0),
-    0
-  );
+	const totalDemandee = lignes.reduce(
+		(sum, ligne) => sum + (ligne.quantite_demandee || 0),
+		0,
+	);
+	const totalRendue = lignes.reduce(
+		(sum, ligne) =>
+			sum + Math.min(ligne.quantite_rendue || 0, ligne.quantite_demandee || 0),
+		0,
+	);
 
-  if (totalDemandee <= 0 || totalRendue <= 0) {
-    return 'aucun';
-  }
+	if (totalDemandee <= 0 || totalRendue <= 0) {
+		return "aucun";
+	}
 
-  if (totalRendue >= totalDemandee) {
-    return 'complet';
-  }
+	if (totalRendue >= totalDemandee) {
+		return "complet";
+	}
 
-  return 'partiel';
+	return "partiel";
 }
 
 export interface RetourErrors {
-  [ligneId: number]: string | undefined;
+	[ligneId: number]: string | undefined;
 }
 
 export function validateRetourLignes(
-  lignes: RetourLigneValues[]
+	lignes: RetourLigneValues[],
 ): RetourErrors {
-  const errors: RetourErrors = {};
+	const errors: RetourErrors = {};
 
-  for (const ligne of lignes) {
-    if (ligne.quantite_rendue < 0) {
-      errors[ligne.id] = 'La quantité rendue ne peut pas être négative.';
-      continue;
-    }
+	for (const ligne of lignes) {
+		if (ligne.quantite_rendue < 0) {
+			errors[ligne.id] = "La quantité rendue ne peut pas être négative.";
+			continue;
+		}
 
-    if (ligne.quantite_rendue > ligne.quantite_demandee) {
-      errors[ligne.id] =
-        `La quantité rendue (${ligne.quantite_rendue}) ne peut pas dépasser la quantité demandée (${ligne.quantite_demandee}).`;
-    }
-  }
+		if (ligne.quantite_rendue > ligne.quantite_demandee) {
+			errors[ligne.id] =
+				`La quantité rendue (${ligne.quantite_rendue}) ne peut pas dépasser la quantité demandée (${ligne.quantite_demandee}).`;
+		}
+	}
 
-  return errors;
+	return errors;
 }
 
 /**
@@ -69,46 +69,46 @@ export function validateRetourLignes(
  * planter le widget.
  */
 export function normalizeRetourErrors(
-  data: unknown,
-  envoyees: RetourLigneValues[]
+	data: unknown,
+	envoyees: RetourLigneValues[],
 ): RetourErrors {
-  const errors: RetourErrors = {};
+	const errors: RetourErrors = {};
 
-  if (!data || typeof data !== 'object') {
-    return errors;
-  }
+	if (!data || typeof data !== "object") {
+		return errors;
+	}
 
-  const lignes = (data as { lignes?: unknown }).lignes;
+	const lignes = (data as { lignes?: unknown }).lignes;
 
-  if (Array.isArray(lignes)) {
-    lignes.forEach((entry, index) => {
-      const ligne = envoyees[index];
+	if (Array.isArray(lignes)) {
+		lignes.forEach((entry, index) => {
+			const ligne = envoyees[index];
 
-      if (!ligne || !entry || typeof entry !== 'object') {
-        return;
-      }
+			if (!ligne || !entry || typeof entry !== "object") {
+				return;
+			}
 
-      const messages = Object.values(entry as Record<string, unknown>)
-        .flat()
-        .map((message) => String(message));
+			const messages = Object.values(entry as Record<string, unknown>)
+				.flat()
+				.map((message) => String(message));
 
-      if (messages.length > 0) {
-        errors[ligne.id] = messages.join(' ');
-      }
-    });
+			if (messages.length > 0) {
+				errors[ligne.id] = messages.join(" ");
+			}
+		});
 
-    return errors;
-  }
+		return errors;
+	}
 
-  if (lignes && typeof lignes === 'object') {
-    for (const [id, message] of Object.entries(
-      lignes as Record<string, unknown>
-    )) {
-      errors[Number(id)] = Array.isArray(message)
-        ? message.map(String).join(' ')
-        : String(message);
-    }
-  }
+	if (lignes && typeof lignes === "object") {
+		for (const [id, message] of Object.entries(
+			lignes as Record<string, unknown>,
+		)) {
+			errors[Number(id)] = Array.isArray(message)
+				? message.map(String).join(" ")
+				: String(message);
+		}
+	}
 
-  return errors;
+	return errors;
 }
