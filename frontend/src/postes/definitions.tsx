@@ -134,16 +134,8 @@ const RESERVATIONS = onglet(
 // La maquette du CDC : manifestations étalées sur les jours, fiche au survol.
 // L'ancien calendrier mensuel des réservations est remplacé — il montrait les
 // bons, pas les manifestations, et ni volume ni avancement.
-<<<<<<< HEAD
 const PLANNING = onglet("planning", "Planning", IconCalendarMonth, Planning);
 const CATALOGUE = onglet("catalogue", "Catalogue", IconListSearch, CatalogList);
-=======
-const PLANNING = onglet('planning', 'Planning', IconCalendarMonth, Planning);
-// Le fichier clients. Même écran que le back-office de l'admin, qui masque de
-// lui-même l'onglet Utilisateurs à qui ne gère pas les comptes.
-const CLIENTS = onglet('clients', 'Clients', IconUsersGroup, UsersBackOffice);
-const CATALOGUE = onglet('catalogue', 'Catalogue', IconListSearch, CatalogList);
->>>>>>> 0bb1bc39ead8495ad9112f55d37e1fdcc6ed0dc7
 const CONFLITS = onglet(
 	"conflits",
 	"Conflits",
@@ -172,7 +164,6 @@ const RAMASSAGES = onglet(
 //: Ordre = journée de travail du métier. Le premier écran est celui qu'on doit
 //: voir en arrivant.
 export const POSTES: Record<string, PosteDefinition> = {
-<<<<<<< HEAD
 	gestionnaire: {
 		titre: "Poste gestionnaire client",
 		roles: [ADMIN, GESTIONNAIRE],
@@ -229,65 +220,6 @@ export const POSTES: Record<string, PosteDefinition> = {
 			ALERTES,
 		],
 	},
-=======
-  gestionnaire: {
-    titre: 'Poste gestionnaire client',
-    roles: [ADMIN, GESTIONNAIRE],
-    // Devis, Factures et Histogramme (CDC §95-101) manquent : leurs écrans
-    // n'existent pas, on ne pose pas d'onglet vide.
-    onglets: [
-      MANIFESTATIONS,
-      CLIENTS,
-      PLANNING,
-      FICHES,
-      RESERVATIONS,
-      CATALOGUE,
-      CONFLITS,
-      ALERTES
-    ]
-  },
-  magasinier: {
-    titre: 'Poste magasinier',
-    roles: [ADMIN, MAGASINIER],
-    // Le catalogue reste faute d'écran stock dédié : c'est le seul qui donne
-    // l'état article par article.
-    onglets: [RAMASSAGES, CATALOGUE, ALERTES, RESERVATIONS]
-  },
-  livreur: {
-    titre: 'Poste livreur',
-    roles: [ADMIN, LIVREUR],
-    onglets: [LIVRAISONS, RAMASSAGES]
-  },
-  acheteur: {
-    titre: 'Poste acheteur',
-    roles: [ADMIN, ACHETEUR],
-    // Les commandes fournisseurs passent par les écrans natifs.
-    onglets: [ALERTES, CATALOGUE]
-  },
-  lecteur: {
-    titre: 'Poste lecture',
-    roles: [ADMIN, LECTEUR],
-    onglets: [PLANNING, RESERVATIONS, CATALOGUE, CONFLITS]
-  },
-  admin: {
-    titre: 'Poste administration',
-    roles: [ADMIN],
-    // « Voit tout mais ne travaille pas au quotidien » : les utilisateurs
-    // d'abord.
-    onglets: [
-      onglet('utilisateurs', 'Utilisateurs', IconUsersGroup, UsersBackOffice),
-      onglet('articles', 'Articles', IconBox, PartsBackOffice),
-      MANIFESTATIONS,
-      PLANNING,
-      FICHES,
-      RESERVATIONS,
-      LIVRAISONS,
-      RAMASSAGES,
-      CONFLITS,
-      ALERTES
-    ]
-  }
->>>>>>> 0bb1bc39ead8495ad9112f55d37e1fdcc6ed0dc7
 };
 
 /**
