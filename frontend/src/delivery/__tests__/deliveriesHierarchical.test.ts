@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Delivery } from '../types';
 
-export function computeAvancement(
+function computeAvancement(
   fait: number,
   attendu: number
 ): 'rien' | 'partiel' | 'complet' {
@@ -12,7 +12,7 @@ export function computeAvancement(
   return fait >= attendu ? 'complet' : 'partiel';
 }
 
-export function agregerAvancement(
+function agregerAvancement(
   etats: ('rien' | 'partiel' | 'complet')[]
 ): 'rien' | 'partiel' | 'complet' {
   if (etats.length === 0 || etats.every((e) => e === 'rien')) {
