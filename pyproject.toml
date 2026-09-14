@@ -4,7 +4,7 @@
 #- Ref: https://github.com/inventree/plugin_creator
 
 [build-system]
-requires = ["setuptools", "twine", "wheel"]
+requires = ["setuptools", "setuptools_scm>=8", "twine", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -55,8 +55,15 @@ InvenTreeLocation = "inventree_location.core:InvenTreeLocation"
 [tool.setuptools.packages.find]
 where = [""]
 
-[tool.setuptools.dynamic]
-version = {attr = "inventree_location.PLUGIN_VERSION"} 
+# La version vient du tag git, pas d'une constante à tenir à jour : `git tag
+# 1.2.0` suffit à livrer 1.2.0. Sur un commit non taggué, le numéro porte la
+# distance au dernier tag et le hash — une version de développement se
+# reconnaît sans avoir à demander.
+[tool.setuptools_scm]
+version_file = "inventree_location/_version.py"
+# Sans `.git` — archive, image construite sans l'historique — on préfère un
+# numéro manifestement faux à un build qui casse.
+fallback_version = "0.0.0+sans-git"
 
 [tool.ruff]
 exclude = [

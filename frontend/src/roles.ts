@@ -17,16 +17,10 @@ export const ACHETEUR = 'acheteur';
 export const RESERVATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE];
 export const CATALOG_WRITE_ROLES = [ADMIN, GESTIONNAIRE];
 export const ORGANISATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE];
-// Arbitrage (valider / refuser) : gestionnaire + admin seulement.
 export const RESERVATION_ARBITRAGE_ROLES = [ADMIN, GESTIONNAIRE];
-/** Marquer livrée : celui qui livre, plus l'encadrement. */
 export const MARQUER_LIVREE_ROLES = [ADMIN, GESTIONNAIRE, LIVREUR];
-// Back-office (gestion des parts, des utilisateurs) : admin seulement.
 export const BACKOFFICE_ROLES = [ADMIN];
-// Retours (check-in comme déclaration) : magasinier + admin, miroir strict de
-// `ReturnCheckinPermission` et `PrestationRetourPermission`. Distinct de
-// l'arbitrage : le magasinier traite les retours mais ne valide pas les
-// réservations, et le gestionnaire fait l'inverse.
+export const CLIENT_DESK_ROLES = [ADMIN, GESTIONNAIRE];
 export const RETURN_CHECKIN_ROLES = [ADMIN, MAGASINIER];
 export const RESERVATION_RETOUR_ROLES = [ADMIN, MAGASINIER];
 
@@ -115,4 +109,9 @@ export function canWriteOrganisation(context: InvenTreePluginContext): boolean {
 /** Peut accéder aux back-offices (admin). */
 export function canManageBackOffice(context: InvenTreePluginContext): boolean {
   return hasAnyRole(context, BACKOFFICE_ROLES);
+}
+
+/** Peut tenir le fichier clients et contacts (admin, gestionnaire). */
+export function canManageClients(context: InvenTreePluginContext): boolean {
+  return hasAnyRole(context, CLIENT_DESK_ROLES);
 }

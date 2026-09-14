@@ -80,16 +80,46 @@ def _patch_contact(factory, user, contact, payload):
 
 
 class TestAcces:
-    @pytest.mark.parametrize(
-        "role", [roles.GESTIONNAIRE, roles.MAGASINIER, roles.LECTEUR]
-    )
-    def test_role_non_admin_refuse(self, factory, db, role):
+    @pytest.mark.parametrize("role", [roles.MAGASINIER, roles.LECTEUR, roles.LIVREUR])
+    def test_role_sans_relation_client_refuse(self, factory, db, role):
         account = User.objects.create_user(
             username=f"u-{role}", password=STRONG_PASSWORD
         )
         account.groups.add(Group.objects.get(name=role))
 
         assert _list(factory, account).status_code == status.HTTP_403_FORBIDDEN
+
+    def test_gestionnaire_autorise(self, factory, db):
+        """R5 : « un gestionnaire client gère un ou plusieurs clients ».
+
+        Le fichier clients est son outil de travail — il le tient au téléphone.
+        Lui refuser l'accès l'obligeait à demander à un administrateur
+        d'enregistrer son propre interlocuteur.
+        """
+
+        account = User.objects.create_user(
+            username="gestionnaire-fichier", password=STRONG_PASSWORD
+        )
+        account.groups.add(Group.objects.get(name=roles.GESTIONNAIRE))
+
+        assert _list(factory, account).status_code == status.HTTP_200_OK
+
+    def test_gestionnaire_cree_un_client(self, factory, db):
+        account = User.objects.create_user(
+            username="gestionnaire-createur", password=STRONG_PASSWORD
+        )
+        account.groups.add(Group.objects.get(name=roles.GESTIONNAIRE))
+
+        request = factory.post(
+            CLIENTS_URL,
+            {"nom": "Festival du Lac", "type_client": "entreprise"},
+            format="json",
+        )
+        force_authenticate(request, user=account)
+        response = BackOfficeClientListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert Client.objects.filter(nom="Festival du Lac").exists()
 
     def test_admin_autorise(self, factory, admin):
         assert _list(factory, admin).status_code == status.HTTP_200_OK
@@ -101,13 +131,27 @@ class TestAcces:
 
         assert _list(factory, root).status_code == status.HTTP_200_OK
 
-    def test_contacts_reserves_a_l_admin(self, factory, db):
+    def test_contacts_suivent_les_clients(self, factory, db):
+        """Les contacts vont avec le fichier : c'est le même geste métier.
+
+        Ouvrir les clients au gestionnaire sans leurs interlocuteurs l'aurait
+        laissé créer une fiche qu'il ne peut pas remplir — une manifestation
+        demande un contact référent.
+        """
+
         account = User.objects.create_user(username="gest", password=STRONG_PASSWORD)
         account.groups.add(Group.objects.get(name=roles.GESTIONNAIRE))
 
-        reponse = _list_contacts(factory, account)
+        assert _list_contacts(factory, account).status_code == status.HTTP_200_OK
 
-        assert reponse.status_code == status.HTTP_403_FORBIDDEN
+    def test_contacts_refuses_au_magasinier(self, factory, db):
+        account = User.objects.create_user(username="mag", password=STRONG_PASSWORD)
+        account.groups.add(Group.objects.get(name=roles.MAGASINIER))
+
+        assert (
+            _list_contacts(factory, account).status_code
+            == status.HTTP_403_FORBIDDEN
+        )
 
 
 class TestListeClients:
