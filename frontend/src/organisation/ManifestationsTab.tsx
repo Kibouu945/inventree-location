@@ -1,391 +1,391 @@
 // CRUD des manifestations (ORG-01).
-import type { InvenTreePluginContext } from "@inventreedb/ui";
+import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
-	Alert,
-	Badge,
-	Button,
-	Group,
-	Loader,
-	Modal,
-	Select,
-	Stack,
-	Table,
-	Text,
-	Textarea,
-	TextInput,
-	Title,
-} from "@mantine/core";
-import { useForm } from "@mantine/form";
-import { useDebouncedValue } from "@mantine/hooks";
-import { notifications } from "@mantine/notifications";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { optionsDeContacts } from "../backoffice/contactLogic";
-import { DateTimeField } from "../DateTimeField";
+  Alert,
+  Badge,
+  Button,
+  Group,
+  Loader,
+  Modal,
+  Select,
+  Stack,
+  Table,
+  Text,
+  Textarea,
+  TextInput,
+  Title
+} from '@mantine/core';
+import { useForm } from '@mantine/form';
+import { useDebouncedValue } from '@mantine/hooks';
+import { notifications } from '@mantine/notifications';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { optionsDeContacts } from '../backoffice/contactLogic';
+import { DateTimeField } from '../DateTimeField';
 
-import { canWriteOrganisation } from "../roles";
-import { apiErrorMessage, type Manifestation, type Page } from "./types";
+import { canWriteOrganisation } from '../roles';
+import { apiErrorMessage, type Manifestation, type Page } from './types';
 
-const MANIFESTATIONS_URL = "/plugin/inventree-location/manifestations/";
-const CLIENTS_URL = "/plugin/inventree-location/clients/";
-const CONTACTS_URL = "/plugin/inventree-location/backoffice/contacts/";
+const MANIFESTATIONS_URL = '/plugin/inventree-location/manifestations/';
+const CLIENTS_URL = '/plugin/inventree-location/clients/';
+const CONTACTS_URL = '/plugin/inventree-location/backoffice/contacts/';
 
 // en_cours / terminée sont dérivés des dates côté serveur, pas posables ici.
 const STATUT_OPTIONS = [
-	{ value: "brouillon", label: "Brouillon" },
-	{ value: "planifiee", label: "Planifiée" },
-	{ value: "annulee", label: "Annulée" },
+  { value: 'brouillon', label: 'Brouillon' },
+  { value: 'planifiee', label: 'Planifiée' },
+  { value: 'annulee', label: 'Annulée' }
 ];
 
 const STATUT_COLORS: Record<string, string> = {
-	brouillon: "gray",
-	planifiee: "blue",
-	en_cours: "teal",
-	terminee: "green",
-	annulee: "red",
+  brouillon: 'gray',
+  planifiee: 'blue',
+  en_cours: 'teal',
+  terminee: 'green',
+  annulee: 'red'
 };
 
 interface FormValues {
-	nom: string;
-	description: string;
-	statut: string;
-	client: string | null;
-	contact: string | null;
-	date_debut: Date | null;
-	date_fin: Date | null;
+  nom: string;
+  description: string;
+  statut: string;
+  client: string | null;
+  contact: string | null;
+  date_debut: Date | null;
+  date_fin: Date | null;
 }
 
 function emptyValues(): FormValues {
-	return {
-		nom: "",
-		description: "",
-		statut: "brouillon",
-		client: null,
-		contact: null,
-		date_debut: null,
-		date_fin: null,
-	};
+  return {
+    nom: '',
+    description: '',
+    statut: 'brouillon',
+    client: null,
+    contact: null,
+    date_debut: null,
+    date_fin: null
+  };
 }
 
 export function ManifestationsTab({
-	context,
+  context
 }: {
-	context: InvenTreePluginContext;
+  context: InvenTreePluginContext;
 }) {
-	const canWrite = canWriteOrganisation(context);
+  const canWrite = canWriteOrganisation(context);
 
-	const [search, setSearch] = useState("");
-	const [debouncedSearch] = useDebouncedValue(search, 300);
-	const [clientFiltre, setClientFiltre] = useState<string | null>(null);
-	const [modalOpen, setModalOpen] = useState(false);
-	const [editId, setEditId] = useState<number | null>(null);
+  const [search, setSearch] = useState('');
+  const [debouncedSearch] = useDebouncedValue(search, 300);
+  const [clientFiltre, setClientFiltre] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editId, setEditId] = useState<number | null>(null);
 
-	const form = useForm<FormValues>({ initialValues: emptyValues() });
+  const form = useForm<FormValues>({ initialValues: emptyValues() });
 
-	const listQuery = useQuery<Manifestation[] | Page<Manifestation>>(
-		{
-			queryKey: ["manifestations", debouncedSearch, clientFiltre],
-			queryFn: async () => {
-				// Deux filtres distincts : au téléphone on cherche par client, dans
-				// une liste on cherche par nom. Les envoyer ensemble les cumule.
-				const params: Record<string, string> = {};
+  const listQuery = useQuery<Manifestation[] | Page<Manifestation>>(
+    {
+      queryKey: ['manifestations', debouncedSearch, clientFiltre],
+      queryFn: async () => {
+        // Deux filtres distincts : au téléphone on cherche par client, dans
+        // une liste on cherche par nom. Les envoyer ensemble les cumule.
+        const params: Record<string, string> = {};
 
-				if (debouncedSearch) {
-					params.search = debouncedSearch;
-				}
+        if (debouncedSearch) {
+          params.search = debouncedSearch;
+        }
 
-				if (clientFiltre) {
-					params.client = clientFiltre;
-				}
+        if (clientFiltre) {
+          params.client = clientFiltre;
+        }
 
-				const response = await context.api.get(MANIFESTATIONS_URL, { params });
-				return response.data;
-			},
-		},
-		context.queryClient,
-	);
+        const response = await context.api.get(MANIFESTATIONS_URL, { params });
+        return response.data;
+      }
+    },
+    context.queryClient
+  );
 
-	const clientsQuery = useQuery<{
-		results: Array<{ id: number; nom: string }>;
-	}>(
-		{
-			queryKey: ["clients"],
-			queryFn: async () => {
-				const response = await context.api.get(CLIENTS_URL);
-				return response.data;
-			},
-		},
-		context.queryClient,
-	);
+  const clientsQuery = useQuery<{
+    results: Array<{ id: number; nom: string }>;
+  }>(
+    {
+      queryKey: ['clients'],
+      queryFn: async () => {
+        const response = await context.api.get(CLIENTS_URL);
+        return response.data;
+      }
+    },
+    context.queryClient
+  );
 
-	// Les contacts du client choisi seulement : la liste complète mélangerait
-	// les interlocuteurs de tous les clients.
-	const clientChoisi = form.values.client;
+  // Les contacts du client choisi seulement : la liste complète mélangerait
+  // les interlocuteurs de tous les clients.
+  const clientChoisi = form.values.client;
 
-	const contactsQuery = useQuery<{
-		results: Array<{
-			id: number;
-			nom: string;
-			prenom: string;
-			actif: boolean;
-		}>;
-	}>(
-		{
-			queryKey: ["contacts", clientChoisi],
-			enabled: Boolean(clientChoisi),
-			queryFn: async () => {
-				const response = await context.api.get(CONTACTS_URL, {
-					params: { client: clientChoisi },
-				});
-				return response.data;
-			},
-		},
-		context.queryClient,
-	);
+  const contactsQuery = useQuery<{
+    results: Array<{
+      id: number;
+      nom: string;
+      prenom: string;
+      actif: boolean;
+    }>;
+  }>(
+    {
+      queryKey: ['contacts', clientChoisi],
+      enabled: Boolean(clientChoisi),
+      queryFn: async () => {
+        const response = await context.api.get(CONTACTS_URL, {
+          params: { client: clientChoisi }
+        });
+        return response.data;
+      }
+    },
+    context.queryClient
+  );
 
-	const rows = Array.isArray(listQuery.data)
-		? listQuery.data
-		: (listQuery.data?.results ?? []);
+  const rows = Array.isArray(listQuery.data)
+    ? listQuery.data
+    : (listQuery.data?.results ?? []);
 
-	const clientOptions = (clientsQuery.data?.results ?? []).map((c) => ({
-		value: String(c.id),
-		label: c.nom,
-	}));
+  const clientOptions = (clientsQuery.data?.results ?? []).map((c) => ({
+    value: String(c.id),
+    label: c.nom
+  }));
 
-	const contactOptions = optionsDeContacts(
-		contactsQuery.data?.results ?? [],
-		form.values.contact,
-	);
+  const contactOptions = optionsDeContacts(
+    contactsQuery.data?.results ?? [],
+    form.values.contact
+  );
 
-	const mutation = useMutation(
-		{
-			mutationFn: async (values: FormValues) => {
-				const payload = {
-					nom: values.nom,
-					description: values.description,
-					statut: values.statut,
-					client: values.client ? Number(values.client) : null,
-					contact: values.contact ? Number(values.contact) : null,
-					date_debut: values.date_debut?.toISOString(),
-					date_fin: values.date_fin?.toISOString(),
-				};
+  const mutation = useMutation(
+    {
+      mutationFn: async (values: FormValues) => {
+        const payload = {
+          nom: values.nom,
+          description: values.description,
+          statut: values.statut,
+          client: values.client ? Number(values.client) : null,
+          contact: values.contact ? Number(values.contact) : null,
+          date_debut: values.date_debut?.toISOString(),
+          date_fin: values.date_fin?.toISOString()
+        };
 
-				if (editId != null) {
-					const response = await context.api.patch(
-						`${MANIFESTATIONS_URL}${editId}/`,
-						payload,
-					);
-					return response.data;
-				}
+        if (editId != null) {
+          const response = await context.api.patch(
+            `${MANIFESTATIONS_URL}${editId}/`,
+            payload
+          );
+          return response.data;
+        }
 
-				const response = await context.api.post(MANIFESTATIONS_URL, payload);
-				return response.data;
-			},
-			onSuccess: () => {
-				notifications.show({
-					color: "green",
-					message:
-						editId != null
-							? "Manifestation mise à jour."
-							: "Manifestation créée.",
-				});
-				context.queryClient.invalidateQueries({ queryKey: ["manifestations"] });
-				setModalOpen(false);
-			},
-			onError: (error) => {
-				notifications.show({
-					color: "red",
-					title: "Erreur",
-					message: apiErrorMessage(error, "Échec de l'enregistrement."),
-				});
-			},
-		},
-		context.queryClient,
-	);
+        const response = await context.api.post(MANIFESTATIONS_URL, payload);
+        return response.data;
+      },
+      onSuccess: () => {
+        notifications.show({
+          color: 'green',
+          message:
+            editId != null
+              ? 'Manifestation mise à jour.'
+              : 'Manifestation créée.'
+        });
+        context.queryClient.invalidateQueries({ queryKey: ['manifestations'] });
+        setModalOpen(false);
+      },
+      onError: (error) => {
+        notifications.show({
+          color: 'red',
+          title: 'Erreur',
+          message: apiErrorMessage(error, "Échec de l'enregistrement.")
+        });
+      }
+    },
+    context.queryClient
+  );
 
-	function openCreate() {
-		setEditId(null);
-		form.setValues(emptyValues());
-		setModalOpen(true);
-	}
+  function openCreate() {
+    setEditId(null);
+    form.setValues(emptyValues());
+    setModalOpen(true);
+  }
 
-	function openEdit(manifestation: Manifestation) {
-		setEditId(manifestation.id);
-		form.setValues({
-			nom: manifestation.nom,
-			description: manifestation.description,
-			statut: manifestation.statut,
-			client: String(manifestation.client),
-			contact: manifestation.contact ? String(manifestation.contact) : null,
-			date_debut: new Date(manifestation.date_debut),
-			date_fin: new Date(manifestation.date_fin),
-		});
-		setModalOpen(true);
-	}
+  function openEdit(manifestation: Manifestation) {
+    setEditId(manifestation.id);
+    form.setValues({
+      nom: manifestation.nom,
+      description: manifestation.description,
+      statut: manifestation.statut,
+      client: String(manifestation.client),
+      contact: manifestation.contact ? String(manifestation.contact) : null,
+      date_debut: new Date(manifestation.date_debut),
+      date_fin: new Date(manifestation.date_fin)
+    });
+    setModalOpen(true);
+  }
 
-	return (
-		<Stack gap="md">
-			<Group justify="space-between">
-				<Title order={5}>Manifestations</Title>
-				{canWrite && (
-					<Button onClick={openCreate}>Nouvelle manifestation</Button>
-				)}
-			</Group>
+  return (
+    <Stack gap='md'>
+      <Group justify='space-between'>
+        <Title order={5}>Manifestations</Title>
+        {canWrite && (
+          <Button onClick={openCreate}>Nouvelle manifestation</Button>
+        )}
+      </Group>
 
-			<Group align="flex-end" gap="md">
-				<TextInput
-					label="Recherche"
-					placeholder="Nom de la manifestation…"
-					value={search}
-					onChange={(event) => setSearch(event.currentTarget.value)}
-					w={280}
-				/>
+      <Group align='flex-end' gap='md'>
+        <TextInput
+          label='Recherche'
+          placeholder='Nom de la manifestation…'
+          value={search}
+          onChange={(event) => setSearch(event.currentTarget.value)}
+          w={280}
+        />
 
-				<Select
-					label="Client"
-					placeholder="Tous les clients"
-					data={clientOptions}
-					value={clientFiltre}
-					onChange={setClientFiltre}
-					clearable
-					searchable
-					w={280}
-				/>
-			</Group>
+        <Select
+          label='Client'
+          placeholder='Tous les clients'
+          data={clientOptions}
+          value={clientFiltre}
+          onChange={setClientFiltre}
+          clearable
+          searchable
+          w={280}
+        />
+      </Group>
 
-			{listQuery.isError && (
-				<Alert color="red" title="Erreur">
-					Impossible de charger les manifestations.
-				</Alert>
-			)}
+      {listQuery.isError && (
+        <Alert color='red' title='Erreur'>
+          Impossible de charger les manifestations.
+        </Alert>
+      )}
 
-			{listQuery.isLoading ? (
-				<Group justify="center" p="xl">
-					<Loader />
-				</Group>
-			) : rows.length === 0 ? (
-				<Text c="dimmed">Aucune manifestation pour le moment.</Text>
-			) : (
-				<Table striped highlightOnHover>
-					<Table.Thead>
-						<Table.Tr>
-							<Table.Th>Nom</Table.Th>
-							<Table.Th>Client</Table.Th>
-							<Table.Th>Début</Table.Th>
-							<Table.Th>Fin</Table.Th>
-							<Table.Th>Statut</Table.Th>
-							<Table.Th>Prestations</Table.Th>
-						</Table.Tr>
-					</Table.Thead>
-					<Table.Tbody>
-						{rows.map((manifestation) => (
-							<Table.Tr
-								key={manifestation.id}
-								style={{ cursor: canWrite ? "pointer" : "default" }}
-								onClick={() => canWrite && openEdit(manifestation)}
-							>
-								<Table.Td>{manifestation.nom}</Table.Td>
-								<Table.Td>{manifestation.client_nom || "—"}</Table.Td>
-								<Table.Td>
-									{new Date(manifestation.date_debut).toLocaleDateString()}
-								</Table.Td>
-								<Table.Td>
-									{new Date(manifestation.date_fin).toLocaleDateString()}
-								</Table.Td>
-								<Table.Td>
-									<Badge
-										color={
-											STATUT_COLORS[
-												manifestation.statut_effectif ?? manifestation.statut
-											] ?? "gray"
-										}
-									>
-										{manifestation.statut_effectif ?? manifestation.statut}
-									</Badge>
-								</Table.Td>
-								<Table.Td>{manifestation.prestations_count}</Table.Td>
-							</Table.Tr>
-						))}
-					</Table.Tbody>
-				</Table>
-			)}
+      {listQuery.isLoading ? (
+        <Group justify='center' p='xl'>
+          <Loader />
+        </Group>
+      ) : rows.length === 0 ? (
+        <Text c='dimmed'>Aucune manifestation pour le moment.</Text>
+      ) : (
+        <Table striped highlightOnHover>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Nom</Table.Th>
+              <Table.Th>Client</Table.Th>
+              <Table.Th>Début</Table.Th>
+              <Table.Th>Fin</Table.Th>
+              <Table.Th>Statut</Table.Th>
+              <Table.Th>Prestations</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {rows.map((manifestation) => (
+              <Table.Tr
+                key={manifestation.id}
+                style={{ cursor: canWrite ? 'pointer' : 'default' }}
+                onClick={() => canWrite && openEdit(manifestation)}
+              >
+                <Table.Td>{manifestation.nom}</Table.Td>
+                <Table.Td>{manifestation.client_nom || '—'}</Table.Td>
+                <Table.Td>
+                  {new Date(manifestation.date_debut).toLocaleDateString()}
+                </Table.Td>
+                <Table.Td>
+                  {new Date(manifestation.date_fin).toLocaleDateString()}
+                </Table.Td>
+                <Table.Td>
+                  <Badge
+                    color={
+                      STATUT_COLORS[
+                        manifestation.statut_effectif ?? manifestation.statut
+                      ] ?? 'gray'
+                    }
+                  >
+                    {manifestation.statut_effectif ?? manifestation.statut}
+                  </Badge>
+                </Table.Td>
+                <Table.Td>{manifestation.prestations_count}</Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      )}
 
-			<Modal
-				opened={modalOpen}
-				onClose={() => setModalOpen(false)}
-				size="lg"
-				title={
-					editId != null
-						? "Modifier la manifestation"
-						: "Nouvelle manifestation"
-				}
-			>
-				<form onSubmit={form.onSubmit((values) => mutation.mutate(values))}>
-					<Stack gap="sm">
-						<TextInput label="Nom" required {...form.getInputProps("nom")} />
-						<Textarea
-							label="Description"
-							autosize
-							minRows={2}
-							{...form.getInputProps("description")}
-						/>
-						<Group grow>
-							<DateTimeField
-								label="Date de début"
-								required
-								value={form.values.date_debut}
-								onChange={(value) =>
-									form.setFieldValue(
-										"date_debut",
-										value ? new Date(value) : null,
-									)
-								}
-							/>
-							<DateTimeField
-								label="Date de fin"
-								required
-								value={form.values.date_fin}
-								onChange={(value) =>
-									form.setFieldValue("date_fin", value ? new Date(value) : null)
-								}
-							/>
-						</Group>
-						<Group grow>
-							<Select
-								label="Client"
-								required
-								data={clientOptions}
-								searchable
-								{...form.getInputProps("client")}
-							/>
-							<Select
-								label="Contact référent"
-								description={
-									clientChoisi ? undefined : "Choisir d'abord un client"
-								}
-								data={contactOptions}
-								disabled={!clientChoisi}
-								clearable
-								searchable
-								{...form.getInputProps("contact")}
-							/>
-						</Group>
-						<Select
-							label="Statut"
-							data={STATUT_OPTIONS}
-							{...form.getInputProps("statut")}
-						/>
-						<Group justify="flex-end">
-							<Button variant="default" onClick={() => setModalOpen(false)}>
-								Annuler
-							</Button>
-							<Button type="submit" loading={mutation.isPending}>
-								Enregistrer
-							</Button>
-						</Group>
-					</Stack>
-				</form>
-			</Modal>
-		</Stack>
-	);
+      <Modal
+        opened={modalOpen}
+        onClose={() => setModalOpen(false)}
+        size='lg'
+        title={
+          editId != null
+            ? 'Modifier la manifestation'
+            : 'Nouvelle manifestation'
+        }
+      >
+        <form onSubmit={form.onSubmit((values) => mutation.mutate(values))}>
+          <Stack gap='sm'>
+            <TextInput label='Nom' required {...form.getInputProps('nom')} />
+            <Textarea
+              label='Description'
+              autosize
+              minRows={2}
+              {...form.getInputProps('description')}
+            />
+            <Group grow>
+              <DateTimeField
+                label='Date de début'
+                required
+                value={form.values.date_debut}
+                onChange={(value) =>
+                  form.setFieldValue(
+                    'date_debut',
+                    value ? new Date(value) : null
+                  )
+                }
+              />
+              <DateTimeField
+                label='Date de fin'
+                required
+                value={form.values.date_fin}
+                onChange={(value) =>
+                  form.setFieldValue('date_fin', value ? new Date(value) : null)
+                }
+              />
+            </Group>
+            <Group grow>
+              <Select
+                label='Client'
+                required
+                data={clientOptions}
+                searchable
+                {...form.getInputProps('client')}
+              />
+              <Select
+                label='Contact référent'
+                description={
+                  clientChoisi ? undefined : "Choisir d'abord un client"
+                }
+                data={contactOptions}
+                disabled={!clientChoisi}
+                clearable
+                searchable
+                {...form.getInputProps('contact')}
+              />
+            </Group>
+            <Select
+              label='Statut'
+              data={STATUT_OPTIONS}
+              {...form.getInputProps('statut')}
+            />
+            <Group justify='flex-end'>
+              <Button variant='default' onClick={() => setModalOpen(false)}>
+                Annuler
+              </Button>
+              <Button type='submit' loading={mutation.isPending}>
+                Enregistrer
+              </Button>
+            </Group>
+          </Stack>
+        </form>
+      </Modal>
+    </Stack>
+  );
 }

@@ -1,55 +1,55 @@
-import type { InvenTreePluginContext } from "@inventreedb/ui";
+import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
-	Alert,
-	Badge,
-	Group,
-	Loader,
-	MultiSelect,
-	Pagination,
-	SegmentedControl,
-	Stack,
-	Table,
-	Text,
-	TextInput,
-	Title,
-} from "@mantine/core";
-import { DatePickerInput } from "@mantine/dates";
-import { useDebouncedValue } from "@mantine/hooks";
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+  Alert,
+  Badge,
+  Group,
+  Loader,
+  MultiSelect,
+  Pagination,
+  SegmentedControl,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title
+} from '@mantine/core';
+import { DatePickerInput } from '@mantine/dates';
+import { useDebouncedValue } from '@mantine/hooks';
+import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
 
-import { ownsKeys, syncOwnedParams } from "../urlState";
+import { ownsKeys, syncOwnedParams } from '../urlState';
 import {
-	buildCatalogQuery,
-	CATALOG_URL_KEYS,
-	type CatalogFiltersState,
-	DEFAULT_FILTERS,
-	libelleColonneDisponibilite,
-	parseFilters,
-	serializeFilters,
-	totalPages,
-} from "./catalogParams";
-import { PartKindBadge } from "./PartKindBadge";
-import type { CatalogPage } from "./types";
-import { useCategoryOptions } from "./useCategoryOptions";
+  buildCatalogQuery,
+  CATALOG_URL_KEYS,
+  type CatalogFiltersState,
+  DEFAULT_FILTERS,
+  libelleColonneDisponibilite,
+  parseFilters,
+  serializeFilters,
+  totalPages
+} from './catalogParams';
+import { PartKindBadge } from './PartKindBadge';
+import type { CatalogPage } from './types';
+import { useCategoryOptions } from './useCategoryOptions';
 
-const CATALOG_URL = "/plugin/inventree-location/catalog/";
+const CATALOG_URL = '/plugin/inventree-location/catalog/';
 
 const ownsCatalogKey = ownsKeys(CATALOG_URL_KEYS);
 
 /** Reflète l'état des filtres dans la query string sans recharger la page. */
 function syncUrl(filters: CatalogFiltersState) {
-	syncOwnedParams(
-		ownsCatalogKey,
-		new URLSearchParams(serializeFilters(filters)),
-	);
+  syncOwnedParams(
+    ownsCatalogKey,
+    new URLSearchParams(serializeFilters(filters))
+  );
 }
 
 function initialFilters(): CatalogFiltersState {
-	if (typeof window === "undefined") {
-		return DEFAULT_FILTERS;
-	}
-	return parseFilters(window.location.search);
+  if (typeof window === 'undefined') {
+    return DEFAULT_FILTERS;
+  }
+  return parseFilters(window.location.search);
 }
 
 /**
@@ -60,190 +60,190 @@ function initialFilters(): CatalogFiltersState {
  * l'URL.
  */
 export function CatalogList({ context }: { context: InvenTreePluginContext }) {
-	const [filters, setFilters] = useState<CatalogFiltersState>(initialFilters);
-	const [debouncedSearch] = useDebouncedValue(filters.search, 300);
+  const [filters, setFilters] = useState<CatalogFiltersState>(initialFilters);
+  const [debouncedSearch] = useDebouncedValue(filters.search, 300);
 
-	// L'état effectif envoyé à l'API utilise la recherche debouncée (CAT-03).
-	const effectiveFilters = useMemo<CatalogFiltersState>(
-		() => ({ ...filters, search: debouncedSearch }),
-		[filters, debouncedSearch],
-	);
+  // L'état effectif envoyé à l'API utilise la recherche debouncée (CAT-03).
+  const effectiveFilters = useMemo<CatalogFiltersState>(
+    () => ({ ...filters, search: debouncedSearch }),
+    [filters, debouncedSearch]
+  );
 
-	useEffect(() => {
-		syncUrl(effectiveFilters);
-	}, [effectiveFilters]);
+  useEffect(() => {
+    syncUrl(effectiveFilters);
+  }, [effectiveFilters]);
 
-	const query = useQuery<CatalogPage>(
-		{
-			queryKey: ["catalog", buildCatalogQuery(effectiveFilters)],
-			queryFn: async () => {
-				const response = await context.api.get(CATALOG_URL, {
-					params: buildCatalogQuery(effectiveFilters),
-				});
-				return response.data as CatalogPage;
-			},
-		},
-		context.queryClient,
-	);
+  const query = useQuery<CatalogPage>(
+    {
+      queryKey: ['catalog', buildCatalogQuery(effectiveFilters)],
+      queryFn: async () => {
+        const response = await context.api.get(CATALOG_URL, {
+          params: buildCatalogQuery(effectiveFilters)
+        });
+        return response.data as CatalogPage;
+      }
+    },
+    context.queryClient
+  );
 
-	const rows = query.data?.results ?? [];
+  const rows = query.data?.results ?? [];
 
-	// Les options venaient des seules lignes de la page courante : la liste
-	// était incomplète, et se réduisait encore à chaque filtrage — un filtre
-	// qui rétrécit à mesure qu'on s'en sert. Elles viennent maintenant de
-	// l'arbre des catégories InvenTree, comme sur les autres écrans.
-	const categoryOptions = useCategoryOptions(context);
+  // Les options venaient des seules lignes de la page courante : la liste
+  // était incomplète, et se réduisait encore à chaque filtrage — un filtre
+  // qui rétrécit à mesure qu'on s'en sert. Elles viennent maintenant de
+  // l'arbre des catégories InvenTree, comme sur les autres écrans.
+  const categoryOptions = useCategoryOptions(context);
 
-	const pages = totalPages(query.data?.count ?? 0);
+  const pages = totalPages(query.data?.count ?? 0);
 
-	// L'en-tête dit sur quoi porte le chiffre. « Disponible aujourd'hui » sur
-	// une colonne qui, en réalité, répondait pour la période demandée aurait
-	// été pire que l'ancien libellé.
-	const libelleDisponibilite = useMemo(
-		() => libelleColonneDisponibilite(filters.dateDebut, filters.dateFin),
-		[filters.dateDebut, filters.dateFin],
-	);
+  // L'en-tête dit sur quoi porte le chiffre. « Disponible aujourd'hui » sur
+  // une colonne qui, en réalité, répondait pour la période demandée aurait
+  // été pire que l'ancien libellé.
+  const libelleDisponibilite = useMemo(
+    () => libelleColonneDisponibilite(filters.dateDebut, filters.dateFin),
+    [filters.dateDebut, filters.dateFin]
+  );
 
-	function update(patch: Partial<CatalogFiltersState>) {
-		// Tout changement de filtre (hors page) réinitialise la pagination.
-		const resetsPage = !("page" in patch);
-		setFilters((current) => ({
-			...current,
-			...patch,
-			...(resetsPage ? { page: 1 } : {}),
-		}));
-	}
+  function update(patch: Partial<CatalogFiltersState>) {
+    // Tout changement de filtre (hors page) réinitialise la pagination.
+    const resetsPage = !('page' in patch);
+    setFilters((current) => ({
+      ...current,
+      ...patch,
+      ...(resetsPage ? { page: 1 } : {})
+    }));
+  }
 
-	return (
-		<Stack gap="md">
-			<Title order={4} c={context.theme.primaryColor}>
-				Catalogue du matériel
-			</Title>
+  return (
+    <Stack gap='md'>
+      <Title order={4} c={context.theme.primaryColor}>
+        Catalogue du matériel
+      </Title>
 
-			<Group align="flex-end" gap="md" wrap="wrap">
-				<TextInput
-					label="Recherche"
-					placeholder="Nom, description, référence…"
-					value={filters.search}
-					onChange={(event) => update({ search: event.currentTarget.value })}
-					w={260}
-				/>
-				<MultiSelect
-					label="Catégories"
-					placeholder="Toutes"
-					data={categoryOptions}
-					value={filters.categories.map(String)}
-					onChange={(values) =>
-						update({ categories: values.map((value) => Number(value)) })
-					}
-					clearable
-					w={240}
-				/>
-				<SegmentedControl
-					value={String(filters.rentable)}
-					onChange={(value) =>
-						update({
-							rentable: value === "all" ? "all" : value === "true",
-						})
-					}
-					data={[
-						{ label: "Louable", value: "true" },
-						{ label: "Non-louable", value: "false" },
-						{ label: "Tout", value: "all" },
-					]}
-				/>
-				{/* « De quoi je dispose du 10 au 14 septembre ? » — la question que
+      <Group align='flex-end' gap='md' wrap='wrap'>
+        <TextInput
+          label='Recherche'
+          placeholder='Nom, description, référence…'
+          value={filters.search}
+          onChange={(event) => update({ search: event.currentTarget.value })}
+          w={260}
+        />
+        <MultiSelect
+          label='Catégories'
+          placeholder='Toutes'
+          data={categoryOptions}
+          value={filters.categories.map(String)}
+          onChange={(values) =>
+            update({ categories: values.map((value) => Number(value)) })
+          }
+          clearable
+          w={240}
+        />
+        <SegmentedControl
+          value={String(filters.rentable)}
+          onChange={(value) =>
+            update({
+              rentable: value === 'all' ? 'all' : value === 'true'
+            })
+          }
+          data={[
+            { label: 'Louable', value: 'true' },
+            { label: 'Non-louable', value: 'false' },
+            { label: 'Tout', value: 'all' }
+          ]}
+        />
+        {/* « De quoi je dispose du 10 au 14 septembre ? » — la question que
             le catalogue ne savait pas poser, puisqu'il ne montrait que le
             disponible du jour (revue interne du 07/09/2026). Vide, le
             serveur retombe sur aujourd'hui : le comportement d'avant. */}
-				<DatePickerInput
-					type="range"
-					label="Période"
-					placeholder="Aujourd’hui"
-					value={[filters.dateDebut, filters.dateFin]}
-					onChange={([debut, fin]) =>
-						update({ dateDebut: debut, dateFin: fin })
-					}
-					clearable
-					valueFormat="DD/MM/YYYY"
-					w={240}
-				/>
-			</Group>
+        <DatePickerInput
+          type='range'
+          label='Période'
+          placeholder='Aujourd’hui'
+          value={[filters.dateDebut, filters.dateFin]}
+          onChange={([debut, fin]) =>
+            update({ dateDebut: debut, dateFin: fin })
+          }
+          clearable
+          valueFormat='DD/MM/YYYY'
+          w={240}
+        />
+      </Group>
 
-			{query.isError && (
-				<Alert color="red" title="Erreur">
-					Impossible de charger le catalogue.
-				</Alert>
-			)}
+      {query.isError && (
+        <Alert color='red' title='Erreur'>
+          Impossible de charger le catalogue.
+        </Alert>
+      )}
 
-			{query.isLoading ? (
-				<Group justify="center" p="xl">
-					<Loader />
-				</Group>
-			) : rows.length === 0 ? (
-				<Alert color="gray" title="Aucun résultat">
-					Aucun matériel ne correspond aux filtres.
-				</Alert>
-			) : (
-				<Table striped highlightOnHover>
-					<Table.Thead>
-						<Table.Tr>
-							<Table.Th>Nom</Table.Th>
-							<Table.Th>Référence</Table.Th>
-							<Table.Th>Catégorie</Table.Th>
-							{/* La colonne dit la nature de l'article, pas seulement s'il est
+      {query.isLoading ? (
+        <Group justify='center' p='xl'>
+          <Loader />
+        </Group>
+      ) : rows.length === 0 ? (
+        <Alert color='gray' title='Aucun résultat'>
+          Aucun matériel ne correspond aux filtres.
+        </Alert>
+      ) : (
+        <Table striped highlightOnHover>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Nom</Table.Th>
+              <Table.Th>Référence</Table.Th>
+              <Table.Th>Catégorie</Table.Th>
+              {/* La colonne dit la nature de l'article, pas seulement s'il est
                   louable : service, consommable ou matériel. */}
-							<Table.Th>Nature</Table.Th>
-							<Table.Th>{libelleDisponibilite}</Table.Th>
-						</Table.Tr>
-					</Table.Thead>
-					<Table.Tbody>
-						{rows.map((part) => (
-							<Table.Tr
-								key={part.id}
-								style={{ cursor: "pointer" }}
-								onClick={() => context.navigate(`/part/${part.id}/`)}
-							>
-								<Table.Td>{part.name}</Table.Td>
-								<Table.Td>{part.IPN || "—"}</Table.Td>
-								<Table.Td>{part.category_name || "—"}</Table.Td>
-								<Table.Td>
-									<PartKindBadge
-										isVirtual={part.is_virtual}
-										consommable={part.consommable}
-										rentable={part.rentable}
-									/>
-								</Table.Td>
-								<Table.Td>
-									{part.is_virtual ? (
-										"—"
-									) : (
-										<Badge
-											color={part.stock_available > 0 ? "blue" : "red"}
-											variant="light"
-										>
-											{part.stock_available}
-										</Badge>
-									)}
-								</Table.Td>
-							</Table.Tr>
-						))}
-					</Table.Tbody>
-				</Table>
-			)}
+              <Table.Th>Nature</Table.Th>
+              <Table.Th>{libelleDisponibilite}</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {rows.map((part) => (
+              <Table.Tr
+                key={part.id}
+                style={{ cursor: 'pointer' }}
+                onClick={() => context.navigate(`/part/${part.id}/`)}
+              >
+                <Table.Td>{part.name}</Table.Td>
+                <Table.Td>{part.IPN || '—'}</Table.Td>
+                <Table.Td>{part.category_name || '—'}</Table.Td>
+                <Table.Td>
+                  <PartKindBadge
+                    isVirtual={part.is_virtual}
+                    consommable={part.consommable}
+                    rentable={part.rentable}
+                  />
+                </Table.Td>
+                <Table.Td>
+                  {part.is_virtual ? (
+                    '—'
+                  ) : (
+                    <Badge
+                      color={part.stock_available > 0 ? 'blue' : 'red'}
+                      variant='light'
+                    >
+                      {part.stock_available}
+                    </Badge>
+                  )}
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      )}
 
-			<Group justify="space-between">
-				<Text size="sm" c="dimmed">
-					{query.data?.count ?? 0} article(s)
-				</Text>
-				{pages > 1 && (
-					<Pagination
-						total={pages}
-						value={filters.page}
-						onChange={(page) => update({ page })}
-					/>
-				)}
-			</Group>
-		</Stack>
-	);
+      <Group justify='space-between'>
+        <Text size='sm' c='dimmed'>
+          {query.data?.count ?? 0} article(s)
+        </Text>
+        {pages > 1 && (
+          <Pagination
+            total={pages}
+            value={filters.page}
+            onChange={(page) => update({ page })}
+          />
+        )}
+      </Group>
+    </Stack>
+  );
 }

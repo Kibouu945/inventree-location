@@ -2,27 +2,27 @@
  * `/prestations/`, `/users/`, `/catalog/`). */
 
 export interface UserOption {
-	id: number;
-	username: string;
-	first_name: string;
-	last_name: string;
-	email: string;
+  id: number;
+  username: string;
+  first_name: string;
+  last_name: string;
+  email: string;
 }
 
 export interface LieuSummary {
-	id: number;
-	nom: string;
-	adresse: string;
-	// DRF sérialise les DecimalField en chaîne (cf. organisation/types.ts).
-	latitude: string | null;
-	longitude: string | null;
+  id: number;
+  nom: string;
+  adresse: string;
+  // DRF sérialise les DecimalField en chaîne (cf. organisation/types.ts).
+  latitude: string | null;
+  longitude: string | null;
 }
 
 /** Manifestation minimale pour le sélecteur de la pop-up de création de
  * prestation (RES-08). */
 export interface ManifestationOption {
-	id: number;
-	nom: string;
+  id: number;
+  nom: string;
 }
 
 /** Ligne prévisionnelle d'une prestation (`LignePrestationSerializer`).
@@ -31,92 +31,92 @@ export interface ManifestationOption {
  * ensuite son propre réalisé (`LigneReservation`), d'où deux modèles distincts
  * — mais ce n'est pas une raison pour faire ressaisir la liste. */
 export interface LignePrestationSummary {
-	id: number;
-	part: number;
-	part_name: string;
-	quantite: number;
-	commentaire: string;
+  id: number;
+  part: number;
+  part_name: string;
+  quantite: number;
+  commentaire: string;
 }
 
 export interface Prestation {
-	id: number;
-	nom: string;
-	date_debut: string;
-	date_fin: string;
-	manifestation: number;
-	manifestation_nom: string;
-	// ORG-02 : une prestation se déroule sur un seul lieu géolocalisé.
-	lieu: number | null;
-	lieu_detail: LieuSummary | null;
-	// RES-09 : le prévisionnel saisi sur la prestation. `GET /prestations/{id}/`
-	// le renvoyait déjà, le type l'ignorait — le formulaire de réservation
-	// repartait donc d'une liste vide. Recette Tassin du 07/09/2026, remarque 15.
-	lignes?: LignePrestationSummary[];
+  id: number;
+  nom: string;
+  date_debut: string;
+  date_fin: string;
+  manifestation: number;
+  manifestation_nom: string;
+  // ORG-02 : une prestation se déroule sur un seul lieu géolocalisé.
+  lieu: number | null;
+  lieu_detail: LieuSummary | null;
+  // RES-09 : le prévisionnel saisi sur la prestation. `GET /prestations/{id}/`
+  // le renvoyait déjà, le type l'ignorait — le formulaire de réservation
+  // repartait donc d'une liste vide. Recette Tassin du 07/09/2026, remarque 15.
+  lignes?: LignePrestationSummary[];
 }
 
 /** Réponse paginée DRF (PageNumberPagination). */
 export interface Page<T> {
-	count: number;
-	next: string | null;
-	previous: string | null;
-	results: T[];
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
 }
 
-export type ReservationStatut = "brouillon" | "soumise";
+export type ReservationStatut = 'brouillon' | 'soumise';
 
 /** Ligne de matériel telle que manipulée par le formulaire (avant envoi API). */
 export interface LigneReservationLine {
-	part: number;
-	partName: string;
-	quantiteDemandee: number;
-	isVirtual: boolean;
+  part: number;
+  partName: string;
+  quantiteDemandee: number;
+  isVirtual: boolean;
 }
 
 /** Payload envoyé à l'API pour une ligne (`LigneReservationSerializer`). */
 export interface LigneReservationPayload {
-	part: number;
-	quantite_demandee: number;
+  part: number;
+  quantite_demandee: number;
 }
 
 /** Valeurs manipulées par le formulaire Mantine (`useForm`). */
 export interface ReservationFormValues {
-	prestation: number | null;
-	demandeur: number | null;
-	date_retrait_prevue: Date | null;
-	date_retour_prevue: Date | null;
-	commentaire: string;
-	lignes: LigneReservationLine[];
+  prestation: number | null;
+  demandeur: number | null;
+  date_retrait_prevue: Date | null;
+  date_retour_prevue: Date | null;
+  commentaire: string;
+  lignes: LigneReservationLine[];
 }
 
 /** Réservation telle que renvoyée par l'API (`ReservationSerializer`). */
 export interface Reservation {
-	id: number;
-	numero: string;
-	prestation: number;
-	prestation_nom: string;
-	demandeur: number;
-	demandeur_nom: string;
-	validateur: number | null;
-	statut: ReservationStatut | string;
-	forced: boolean;
-	date_demande: string;
-	date_retrait_prevue: string | null;
-	date_retour_prevue: string | null;
-	date_retrait_reelle: string | null;
-	date_retour_reelle: string | null;
-	commentaire: string;
-	lignes: Array<{
-		id: number;
-		part: number;
-		// Pour l'arborescence : « Sono YAMAHA / Réf. 1516 ».
-		part_name?: string;
-		part_noi?: string;
-		quantite_demandee: number;
-		quantite_livree: number;
-		quantite_retournee: number;
-		etat_retour: string;
-		commentaire: string;
-	}>;
-	created_at: string;
-	updated_at: string;
+  id: number;
+  numero: string;
+  prestation: number;
+  prestation_nom: string;
+  demandeur: number;
+  demandeur_nom: string;
+  validateur: number | null;
+  statut: ReservationStatut | string;
+  forced: boolean;
+  date_demande: string;
+  date_retrait_prevue: string | null;
+  date_retour_prevue: string | null;
+  date_retrait_reelle: string | null;
+  date_retour_reelle: string | null;
+  commentaire: string;
+  lignes: Array<{
+    id: number;
+    part: number;
+    // Pour l'arborescence : « Sono YAMAHA / Réf. 1516 ».
+    part_name?: string;
+    part_noi?: string;
+    quantite_demandee: number;
+    quantite_livree: number;
+    quantite_retournee: number;
+    etat_retour: string;
+    commentaire: string;
+  }>;
+  created_at: string;
+  updated_at: string;
 }

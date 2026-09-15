@@ -6,15 +6,15 @@
 
 /** Ce qu'il faut d'un contact pour l'afficher : le reste ne regarde pas ces règles. */
 export interface ContactAffichable {
-	id: number;
-	nom: string;
-	prenom: string;
-	actif: boolean;
+  id: number;
+  nom: string;
+  prenom: string;
+  actif: boolean;
 }
 
 /** « Paule Durand », ou le seul nom quand le prénom manque. */
 export function nomComplet(contact: { nom: string; prenom: string }): string {
-	return `${contact.prenom} ${contact.nom}`.trim();
+  return `${contact.prenom} ${contact.nom}`.trim();
 }
 
 /** Options d'un sélecteur de contact, désactivés écartés.
@@ -26,15 +26,15 @@ export function nomComplet(contact: { nom: string; prenom: string }): string {
  * silencieusement son interlocuteur.
  */
 export function optionsDeContacts(
-	contacts: ContactAffichable[],
-	selectionne: string | null = null,
+  contacts: ContactAffichable[],
+  selectionne: string | null = null
 ): Array<{ value: string; label: string }> {
-	return contacts
-		.filter((contact) => contact.actif || String(contact.id) === selectionne)
-		.map((contact) => ({
-			value: String(contact.id),
-			label: contact.actif
-				? nomComplet(contact)
-				: `${nomComplet(contact)} (inactif)`,
-		}));
+  return contacts
+    .filter((contact) => contact.actif || String(contact.id) === selectionne)
+    .map((contact) => ({
+      value: String(contact.id),
+      label: contact.actif
+        ? nomComplet(contact)
+        : `${nomComplet(contact)} (inactif)`
+    }));
 }

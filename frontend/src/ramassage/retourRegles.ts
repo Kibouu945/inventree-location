@@ -15,22 +15,22 @@
 
 /** Ce qu'il faut d'une ligne pour juger la saisie ; le reste ne la regarde pas. */
 export interface LigneSaisie {
-	partNom: string;
-	quantiteAttendue: number;
-	quantite_ramassee: number;
-	quantite_sav: number;
-	quantite_detruite: number;
-	quantite_manquante: number;
+  partNom: string;
+  quantiteAttendue: number;
+  quantite_ramassee: number;
+  quantite_sav: number;
+  quantite_detruite: number;
+  quantite_manquante: number;
 }
 
 /** Tout ce qui a été déclaré sur la ligne, quel qu'en soit l'état. */
 export function totalSaisi(ligne: LigneSaisie): number {
-	return (
-		ligne.quantite_ramassee +
-		ligne.quantite_sav +
-		ligne.quantite_detruite +
-		ligne.quantite_manquante
-	);
+  return (
+    ligne.quantite_ramassee +
+    ligne.quantite_sav +
+    ligne.quantite_detruite +
+    ligne.quantite_manquante
+  );
 }
 
 /**
@@ -40,9 +40,9 @@ export function totalSaisi(ligne: LigneSaisie): number {
  * dire avant l'envoi plutôt que de laisser le livreur buter dessus.
  */
 export function manquantExcessif(lignes: LigneSaisie[]): LigneSaisie[] {
-	return lignes.filter(
-		(ligne) => ligne.quantite_manquante > ligne.quantiteAttendue,
-	);
+  return lignes.filter(
+    (ligne) => ligne.quantite_manquante > ligne.quantiteAttendue
+  );
 }
 
 /**
@@ -53,5 +53,5 @@ export function manquantExcessif(lignes: LigneSaisie[]): LigneSaisie[] {
  * explicitement d'autoriser.
  */
 export function enSurplus(lignes: LigneSaisie[]): LigneSaisie[] {
-	return lignes.filter((ligne) => totalSaisi(ligne) > ligne.quantiteAttendue);
+  return lignes.filter((ligne) => totalSaisi(ligne) > ligne.quantiteAttendue);
 }

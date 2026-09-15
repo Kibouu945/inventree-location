@@ -1,30 +1,57 @@
 {
-  "$schema": "https://biomejs.dev",
-  "files": {
-    "includes": [
-      "**",
-      "frontend/src/**",
-      "!frontend/src/locales",
-      "!**/inventree_location/static",
-      "!**/dist",
-      "!**/node_modules"
-    ]
-  },
-  "linter": {
-    "enabled": true,
-    "rules": {
-      "suspicious": {
-        "noExplicitAny": "off"
-      },
-      "style": {
-        "noNonNullAssertion": "off"
-      },
-      "correctness": {
-        "useExhaustiveDependencies": "off"
-      }
-    }
-  },
-  "formatter": {
-    "enabled": true
-  }
+	"$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+	"files": {
+		"includes": [
+			"**",
+			"frontend/src/**",
+			"!frontend/src/locales/**",
+			"!**/inventree_location/static",
+			"!**/dist",
+			"!**/node_modules"
+		]
+	},
+	"javascript": {
+		"formatter": {
+			"quoteStyle": "single",
+			"jsxQuoteStyle": "single",
+			"trailingCommas": "none",
+			"indentStyle": "space"
+		}
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"suspicious": {
+				"noExplicitAny": "off",
+				"noDoubleEquals": "off",
+				"noArrayIndexKey": "off",
+				"useDefaultSwitchClauseLast": "off"
+			},
+			"style": {
+				"noUselessElse": "off",
+				"noNonNullAssertion": "off",
+				"noParameterAssign": "off"
+			},
+			"correctness": {
+				"useExhaustiveDependencies": "off",
+				"useJsxKeyInIterable": "off",
+				"noUnsafeOptionalChaining": "off",
+				"noSwitchDeclarations": "off",
+				"noUnusedImports": "error"
+			},
+			"complexity": {
+				"noBannedTypes": "off",
+				"noExtraBooleanCast": "off",
+				"noForEach": "off",
+				"noUselessSwitchCase": "off",
+				"useLiteralKeys": "off"
+			},
+			"performance": {
+				"noDelete": "off"
+			}
+		}
+	},
+	"formatter": {
+		"enabled": true
+	}
 }

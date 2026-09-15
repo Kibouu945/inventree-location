@@ -16,8 +16,8 @@
  * dans la modale.
  */
 
-export const PRINT_AREA = "inventree-location-print-area";
-export const PRINT_HIDE = "inventree-location-print-hide";
+export const PRINT_AREA = 'inventree-location-print-area';
+export const PRINT_HIDE = 'inventree-location-print-hide';
 
 const CSS = `
 @media print {
@@ -58,5 +58,5 @@ const CSS = `
 `;
 
 export function PrintableModalStyles() {
-	return <style>{CSS}</style>;
+  return <style>{CSS}</style>;
 }

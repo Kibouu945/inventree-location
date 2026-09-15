@@ -1,639 +1,639 @@
 // SCRUM-111 — Back-office front : création / édition complète d'une Part.
-import type { InvenTreePluginContext } from "@inventreedb/ui";
+import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
-	Alert,
-	Badge,
-	Button,
-	Checkbox,
-	FileInput,
-	Group,
-	Image,
-	Loader,
-	Modal,
-	NumberInput,
-	Pagination,
-	Stack,
-	Table,
-	Text,
-	Textarea,
-	TextInput,
-	Title,
-} from "@mantine/core";
-import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+  Alert,
+  Badge,
+  Button,
+  Checkbox,
+  FileInput,
+  Group,
+  Image,
+  Loader,
+  Modal,
+  NumberInput,
+  Pagination,
+  Stack,
+  Table,
+  Text,
+  Textarea,
+  TextInput,
+  Title
+} from '@mantine/core';
+import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 
-import { canManageBackOffice } from "../roles";
-import { listParams, PARTS_URL, pageCount, partImageUrl } from "./api";
-import { apiErrorMessage } from "./apiError";
+import { canManageBackOffice } from '../roles';
+import { listParams, PARTS_URL, pageCount, partImageUrl } from './api';
+import { apiErrorMessage } from './apiError';
 import type {
-	BackOfficePart,
-	BackOfficePartFormValues,
-	Page,
-} from "./partTypes";
-import { usePagedSearch } from "./usePagedSearch";
+  BackOfficePart,
+  BackOfficePartFormValues,
+  Page
+} from './partTypes';
+import { usePagedSearch } from './usePagedSearch';
 
 interface ModalState {
-	open: boolean;
-	part?: BackOfficePart;
+  open: boolean;
+  part?: BackOfficePart;
 }
 
 function emptyForm(): BackOfficePartFormValues {
-	return {
-		NOI: "",
-		name: "",
-		description: "",
-		link: "",
-		active: true,
-		salable: false,
-		virtual: false,
-		is_rentable: true,
-		consommable: false,
-		poids: null,
-		seuil_alerte_bas: null,
-		seuil_alerte_haut: null,
-		alertes_desactivees: false,
-		stock_initial: 0,
-	};
+  return {
+    NOI: '',
+    name: '',
+    description: '',
+    link: '',
+    active: true,
+    salable: false,
+    virtual: false,
+    is_rentable: true,
+    consommable: false,
+    poids: null,
+    seuil_alerte_bas: null,
+    seuil_alerte_haut: null,
+    alertes_desactivees: false,
+    stock_initial: 0
+  };
 }
 
 function formFromPart(part: BackOfficePart): BackOfficePartFormValues {
-	return {
-		NOI: part.NOI ?? "",
-		name: part.name ?? "",
-		description: part.description ?? "",
-		link: part.link ?? "",
-		active: part.active,
-		salable: part.salable,
-		virtual: part.virtual,
-		is_rentable: part.is_rentable,
-		consommable: part.consommable,
-		poids: part.poids,
-		seuil_alerte_bas: part.seuil_alerte_bas,
-		seuil_alerte_haut: part.seuil_alerte_haut,
-		alertes_desactivees: part.alertes_desactivees,
-		stock_initial: 0,
-	};
+  return {
+    NOI: part.NOI ?? '',
+    name: part.name ?? '',
+    description: part.description ?? '',
+    link: part.link ?? '',
+    active: part.active,
+    salable: part.salable,
+    virtual: part.virtual,
+    is_rentable: part.is_rentable,
+    consommable: part.consommable,
+    poids: part.poids,
+    seuil_alerte_bas: part.seuil_alerte_bas,
+    seuil_alerte_haut: part.seuil_alerte_haut,
+    alertes_desactivees: part.alertes_desactivees,
+    stock_initial: 0
+  };
 }
 
 function numberOrZero(value: string | number): number {
-	const parsed = Number(value);
+  const parsed = Number(value);
 
-	return Number.isFinite(parsed) ? parsed : 0;
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function nullableNumber(value: string | number): number | null {
-	if (value === "") {
-		return null;
-	}
+  if (value === '') {
+    return null;
+  }
 
-	const parsed = Number(value);
+  const parsed = Number(value);
 
-	return Number.isFinite(parsed) ? parsed : null;
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function PartsBackOffice({
-	context,
+  context
 }: {
-	context: InvenTreePluginContext;
+  context: InvenTreePluginContext;
 }) {
-	const canAccess = canManageBackOffice(context);
+  const canAccess = canManageBackOffice(context);
 
-	const { search, debouncedSearch, page, setPage, updateSearch } =
-		usePagedSearch();
+  const { search, debouncedSearch, page, setPage, updateSearch } =
+    usePagedSearch();
 
-	const [modalState, setModalState] = useState<ModalState>({ open: false });
-	const [formValues, setFormValues] = useState<BackOfficePartFormValues>(
-		emptyForm(),
-	);
-	const [saving, setSaving] = useState(false);
-	const [formError, setFormError] = useState("");
-	// La photo voyage à part du formulaire JSON (cf. `partImageUrl`) : on retient
-	// le fichier choisi, et l'intention de retirer la photo existante.
-	const [imageFile, setImageFile] = useState<File | null>(null);
-	const [removeImage, setRemoveImage] = useState(false);
+  const [modalState, setModalState] = useState<ModalState>({ open: false });
+  const [formValues, setFormValues] = useState<BackOfficePartFormValues>(
+    emptyForm()
+  );
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
+  // La photo voyage à part du formulaire JSON (cf. `partImageUrl`) : on retient
+  // le fichier choisi, et l'intention de retirer la photo existante.
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [removeImage, setRemoveImage] = useState(false);
 
-	const partsQuery = useQuery<Page<BackOfficePart>>(
-		{
-			queryKey: ["backoffice-parts", debouncedSearch, page],
-			enabled: canAccess,
-			queryFn: async () => {
-				const response = await context.api.get(PARTS_URL, {
-					params: listParams(page, debouncedSearch),
-				});
+  const partsQuery = useQuery<Page<BackOfficePart>>(
+    {
+      queryKey: ['backoffice-parts', debouncedSearch, page],
+      enabled: canAccess,
+      queryFn: async () => {
+        const response = await context.api.get(PARTS_URL, {
+          params: listParams(page, debouncedSearch)
+        });
 
-				return response.data;
-			},
-		},
-		context.queryClient,
-	);
+        return response.data;
+      }
+    },
+    context.queryClient
+  );
 
-	const rows = partsQuery.data?.results ?? [];
-	const count = partsQuery.data?.count ?? 0;
-	const pages = pageCount(count);
+  const rows = partsQuery.data?.results ?? [];
+  const count = partsQuery.data?.count ?? 0;
+  const pages = pageCount(count);
 
-	function updateField<K extends keyof BackOfficePartFormValues>(
-		field: K,
-		value: BackOfficePartFormValues[K],
-	) {
-		setFormValues((current) => ({
-			...current,
-			[field]: value,
-		}));
-	}
+  function updateField<K extends keyof BackOfficePartFormValues>(
+    field: K,
+    value: BackOfficePartFormValues[K]
+  ) {
+    setFormValues((current) => ({
+      ...current,
+      [field]: value
+    }));
+  }
 
-	function resetImageState() {
-		setImageFile(null);
-		setRemoveImage(false);
-	}
+  function resetImageState() {
+    setImageFile(null);
+    setRemoveImage(false);
+  }
 
-	function openCreateModal() {
-		setFormError("");
-		setFormValues(emptyForm());
-		resetImageState();
-		setModalState({ open: true });
-	}
+  function openCreateModal() {
+    setFormError('');
+    setFormValues(emptyForm());
+    resetImageState();
+    setModalState({ open: true });
+  }
 
-	function openEditModal(part: BackOfficePart) {
-		setFormError("");
-		setFormValues(formFromPart(part));
-		resetImageState();
-		setModalState({ open: true, part });
-	}
+  function openEditModal(part: BackOfficePart) {
+    setFormError('');
+    setFormValues(formFromPart(part));
+    resetImageState();
+    setModalState({ open: true, part });
+  }
 
-	function closeModal() {
-		if (saving) {
-			return;
-		}
+  function closeModal() {
+    if (saving) {
+      return;
+    }
 
-		setModalState({ open: false });
-		setFormError("");
-		setFormValues(emptyForm());
-		resetImageState();
-	}
+    setModalState({ open: false });
+    setFormError('');
+    setFormValues(emptyForm());
+    resetImageState();
+  }
 
-	/**
-	 * Applique le changement de photo, une fois la Part enregistrée.
-	 *
-	 * Deux appels séparés du formulaire : à la création, l'identifiant de la
-	 * Part n'existe qu'après la réponse du POST.
-	 */
-	async function savePartImage(partId: number) {
-		if (imageFile) {
-			const body = new FormData();
-			body.append("image", imageFile);
+  /**
+   * Applique le changement de photo, une fois la Part enregistrée.
+   *
+   * Deux appels séparés du formulaire : à la création, l'identifiant de la
+   * Part n'existe qu'après la réponse du POST.
+   */
+  async function savePartImage(partId: number) {
+    if (imageFile) {
+      const body = new FormData();
+      body.append('image', imageFile);
 
-			await context.api.post(partImageUrl(partId), body);
+      await context.api.post(partImageUrl(partId), body);
 
-			return;
-		}
+      return;
+    }
 
-		if (removeImage) {
-			await context.api.delete(partImageUrl(partId));
-		}
-	}
+    if (removeImage) {
+      await context.api.delete(partImageUrl(partId));
+    }
+  }
 
-	async function savePart() {
-		setSaving(true);
-		setFormError("");
+  async function savePart() {
+    setSaving(true);
+    setFormError('');
 
-		try {
-			const payload = {
-				NOI: formValues.NOI.trim(),
-				name: formValues.name.trim(),
-				description: formValues.description.trim(),
-				link: formValues.link.trim(),
-				active: formValues.active,
-				salable: formValues.salable,
-				virtual: formValues.virtual,
-				is_rentable: formValues.is_rentable,
-				consommable: formValues.consommable,
-				poids: formValues.poids,
-				seuil_alerte_bas: formValues.seuil_alerte_bas,
-				seuil_alerte_haut: formValues.seuil_alerte_haut,
-				alertes_desactivees: formValues.alertes_desactivees,
-				stock_initial: formValues.stock_initial,
-			};
+    try {
+      const payload = {
+        NOI: formValues.NOI.trim(),
+        name: formValues.name.trim(),
+        description: formValues.description.trim(),
+        link: formValues.link.trim(),
+        active: formValues.active,
+        salable: formValues.salable,
+        virtual: formValues.virtual,
+        is_rentable: formValues.is_rentable,
+        consommable: formValues.consommable,
+        poids: formValues.poids,
+        seuil_alerte_bas: formValues.seuil_alerte_bas,
+        seuil_alerte_haut: formValues.seuil_alerte_haut,
+        alertes_desactivees: formValues.alertes_desactivees,
+        stock_initial: formValues.stock_initial
+      };
 
-			let partId = modalState.part?.id;
+      let partId = modalState.part?.id;
 
-			if (partId != null) {
-				await context.api.patch(`${PARTS_URL}${partId}/`, payload);
-			} else {
-				const response = await context.api.post(PARTS_URL, payload);
-				partId = response.data?.id;
-			}
+      if (partId != null) {
+        await context.api.patch(`${PARTS_URL}${partId}/`, payload);
+      } else {
+        const response = await context.api.post(PARTS_URL, payload);
+        partId = response.data?.id;
+      }
 
-			if (partId != null && (imageFile || removeImage)) {
-				try {
-					await savePartImage(partId);
-				} catch (error: unknown) {
-					// La Part est enregistrée : le dire, sinon l'utilisateur croit avoir
-					// tout perdu et ressaisit le formulaire.
-					await partsQuery.refetch();
-					setFormError(
-						apiErrorMessage(
-							error,
-							"La Part est enregistrée, mais la photo n'a pas pu être déposée.",
-						),
-					);
+      if (partId != null && (imageFile || removeImage)) {
+        try {
+          await savePartImage(partId);
+        } catch (error: unknown) {
+          // La Part est enregistrée : le dire, sinon l'utilisateur croit avoir
+          // tout perdu et ressaisit le formulaire.
+          await partsQuery.refetch();
+          setFormError(
+            apiErrorMessage(
+              error,
+              "La Part est enregistrée, mais la photo n'a pas pu être déposée."
+            )
+          );
 
-					return;
-				}
-			}
+          return;
+        }
+      }
 
-			await partsQuery.refetch();
-			closeModal();
-		} catch (error: unknown) {
-			setFormError(apiErrorMessage(error, "Impossible d'enregistrer la Part."));
-		} finally {
-			setSaving(false);
-		}
-	}
+      await partsQuery.refetch();
+      closeModal();
+    } catch (error: unknown) {
+      setFormError(apiErrorMessage(error, "Impossible d'enregistrer la Part."));
+    } finally {
+      setSaving(false);
+    }
+  }
 
-	async function toggleActive(part: BackOfficePart) {
-		try {
-			await context.api.patch(`${PARTS_URL}${part.id}/`, {
-				active: !part.active,
-			});
+  async function toggleActive(part: BackOfficePart) {
+    try {
+      await context.api.patch(`${PARTS_URL}${part.id}/`, {
+        active: !part.active
+      });
 
-			setFormError("");
-			await partsQuery.refetch();
-		} catch (error: unknown) {
-			setFormError(
-				apiErrorMessage(error, "Impossible de modifier l'état de la Part."),
-			);
-		}
-	}
+      setFormError('');
+      await partsQuery.refetch();
+    } catch (error: unknown) {
+      setFormError(
+        apiErrorMessage(error, "Impossible de modifier l'état de la Part.")
+      );
+    }
+  }
 
-	if (!canAccess) {
-		return (
-			<Alert color="red" title="Accès refusé">
-				Cette interface est réservée aux administrateurs du module.
-			</Alert>
-		);
-	}
+  if (!canAccess) {
+    return (
+      <Alert color='red' title='Accès refusé'>
+        Cette interface est réservée aux administrateurs du module.
+      </Alert>
+    );
+  }
 
-	return (
-		<Stack gap="md">
-			<Group justify="space-between">
-				<Title order={4} c={context.theme.primaryColor}>
-					Back-office Parts
-				</Title>
+  return (
+    <Stack gap='md'>
+      <Group justify='space-between'>
+        <Title order={4} c={context.theme.primaryColor}>
+          Back-office Parts
+        </Title>
 
-				<Button onClick={openCreateModal}>Créer une Part</Button>
-			</Group>
+        <Button onClick={openCreateModal}>Créer une Part</Button>
+      </Group>
 
-			<TextInput
-				label="Recherche"
-				placeholder="Nom, NOI, description…"
-				value={search}
-				onChange={(event) => updateSearch(event.currentTarget.value)}
-				w={320}
-			/>
+      <TextInput
+        label='Recherche'
+        placeholder='Nom, NOI, description…'
+        value={search}
+        onChange={(event) => updateSearch(event.currentTarget.value)}
+        w={320}
+      />
 
-			{formError && (
-				<Alert color="red" title="Erreur">
-					{formError}
-				</Alert>
-			)}
+      {formError && (
+        <Alert color='red' title='Erreur'>
+          {formError}
+        </Alert>
+      )}
 
-			{partsQuery.isError && (
-				<Alert color="red" title="Erreur">
-					Impossible de charger les Parts.
-				</Alert>
-			)}
+      {partsQuery.isError && (
+        <Alert color='red' title='Erreur'>
+          Impossible de charger les Parts.
+        </Alert>
+      )}
 
-			{partsQuery.isLoading ? (
-				<Group justify="center" p="xl">
-					<Loader />
-				</Group>
-			) : rows.length === 0 ? (
-				<Text c="dimmed">Aucune Part trouvée.</Text>
-			) : (
-				<Table striped highlightOnHover>
-					<Table.Thead>
-						<Table.Tr>
-							<Table.Th>Nom</Table.Th>
-							<Table.Th>NOI</Table.Th>
-							<Table.Th>État</Table.Th>
-							<Table.Th>Type</Table.Th>
-							<Table.Th>Stock InvenTree</Table.Th>
-							<Table.Th>Seuil bas</Table.Th>
-							<Table.Th>Actions</Table.Th>
-						</Table.Tr>
-					</Table.Thead>
+      {partsQuery.isLoading ? (
+        <Group justify='center' p='xl'>
+          <Loader />
+        </Group>
+      ) : rows.length === 0 ? (
+        <Text c='dimmed'>Aucune Part trouvée.</Text>
+      ) : (
+        <Table striped highlightOnHover>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Nom</Table.Th>
+              <Table.Th>NOI</Table.Th>
+              <Table.Th>État</Table.Th>
+              <Table.Th>Type</Table.Th>
+              <Table.Th>Stock InvenTree</Table.Th>
+              <Table.Th>Seuil bas</Table.Th>
+              <Table.Th>Actions</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
 
-					<Table.Tbody>
-						{rows.map((part) => (
-							<Table.Tr key={part.id}>
-								<Table.Td>
-									<Stack gap={0}>
-										<Text fw={600}>{part.name}</Text>
-										<Text size="xs" c="dimmed">
-											{part.description || "—"}
-										</Text>
-									</Stack>
-								</Table.Td>
+          <Table.Tbody>
+            {rows.map((part) => (
+              <Table.Tr key={part.id}>
+                <Table.Td>
+                  <Stack gap={0}>
+                    <Text fw={600}>{part.name}</Text>
+                    <Text size='xs' c='dimmed'>
+                      {part.description || '—'}
+                    </Text>
+                  </Stack>
+                </Table.Td>
 
-								<Table.Td>{part.NOI || "—"}</Table.Td>
+                <Table.Td>{part.NOI || '—'}</Table.Td>
 
-								<Table.Td>
-									<Badge color={part.active ? "green" : "red"}>
-										{part.active ? "Actif" : "Inactif"}
-									</Badge>
-								</Table.Td>
+                <Table.Td>
+                  <Badge color={part.active ? 'green' : 'red'}>
+                    {part.active ? 'Actif' : 'Inactif'}
+                  </Badge>
+                </Table.Td>
 
-								<Table.Td>
-									<Group gap="xs">
-										{part.pack && <Badge color="violet">PACK</Badge>}
-										{part.virtual && <Badge color="blue">Virtuel</Badge>}
-										{part.consommable && (
-											<Badge color="orange">Consommable</Badge>
-										)}
-										{part.is_rentable && !part.consommable && (
-											<Badge color="green">Louable</Badge>
-										)}
-										{part.salable && <Badge color="teal">Vendable</Badge>}
-									</Group>
-								</Table.Td>
+                <Table.Td>
+                  <Group gap='xs'>
+                    {part.pack && <Badge color='violet'>PACK</Badge>}
+                    {part.virtual && <Badge color='blue'>Virtuel</Badge>}
+                    {part.consommable && (
+                      <Badge color='orange'>Consommable</Badge>
+                    )}
+                    {part.is_rentable && !part.consommable && (
+                      <Badge color='green'>Louable</Badge>
+                    )}
+                    {part.salable && <Badge color='teal'>Vendable</Badge>}
+                  </Group>
+                </Table.Td>
 
-								<Table.Td>{part.stock_total}</Table.Td>
+                <Table.Td>{part.stock_total}</Table.Td>
 
-								<Table.Td>{part.seuil_alerte_bas ?? "—"}</Table.Td>
+                <Table.Td>{part.seuil_alerte_bas ?? '—'}</Table.Td>
 
-								<Table.Td>
-									<Group gap="xs">
-										<Button
-											size="xs"
-											variant="light"
-											onClick={() => openEditModal(part)}
-										>
-											Éditer
-										</Button>
+                <Table.Td>
+                  <Group gap='xs'>
+                    <Button
+                      size='xs'
+                      variant='light'
+                      onClick={() => openEditModal(part)}
+                    >
+                      Éditer
+                    </Button>
 
-										<Button
-											size="xs"
-											variant="outline"
-											color={part.active ? "red" : "green"}
-											onClick={() => toggleActive(part)}
-										>
-											{part.active ? "Désactiver" : "Activer"}
-										</Button>
-									</Group>
-								</Table.Td>
-							</Table.Tr>
-						))}
-					</Table.Tbody>
-				</Table>
-			)}
+                    <Button
+                      size='xs'
+                      variant='outline'
+                      color={part.active ? 'red' : 'green'}
+                      onClick={() => toggleActive(part)}
+                    >
+                      {part.active ? 'Désactiver' : 'Activer'}
+                    </Button>
+                  </Group>
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      )}
 
-			<Group justify="space-between">
-				<Text size="sm" c="dimmed">
-					{count} Part(s)
-				</Text>
+      <Group justify='space-between'>
+        <Text size='sm' c='dimmed'>
+          {count} Part(s)
+        </Text>
 
-				{pages > 1 && (
-					<Pagination total={pages} value={page} onChange={setPage} />
-				)}
-			</Group>
+        {pages > 1 && (
+          <Pagination total={pages} value={page} onChange={setPage} />
+        )}
+      </Group>
 
-			<Modal
-				opened={modalState.open}
-				onClose={closeModal}
-				size="xl"
-				title={modalState.part ? "Modifier une Part" : "Créer une Part"}
-			>
-				<Stack gap="md">
-					{formError && (
-						<Alert color="red" title="Erreur">
-							{formError}
-						</Alert>
-					)}
+      <Modal
+        opened={modalState.open}
+        onClose={closeModal}
+        size='xl'
+        title={modalState.part ? 'Modifier une Part' : 'Créer une Part'}
+      >
+        <Stack gap='md'>
+          {formError && (
+            <Alert color='red' title='Erreur'>
+              {formError}
+            </Alert>
+          )}
 
-					<Group grow>
-						<TextInput
-							label="NOI"
-							placeholder="NOI-001"
-							value={formValues.NOI}
-							onChange={(event) =>
-								updateField("NOI", event.currentTarget.value)
-							}
-						/>
+          <Group grow>
+            <TextInput
+              label='NOI'
+              placeholder='NOI-001'
+              value={formValues.NOI}
+              onChange={(event) =>
+                updateField('NOI', event.currentTarget.value)
+              }
+            />
 
-						<TextInput
-							label="Nom"
-							placeholder="Table pliante"
-							required
-							value={formValues.name}
-							onChange={(event) =>
-								updateField("name", event.currentTarget.value)
-							}
-						/>
-					</Group>
+            <TextInput
+              label='Nom'
+              placeholder='Table pliante'
+              required
+              value={formValues.name}
+              onChange={(event) =>
+                updateField('name', event.currentTarget.value)
+              }
+            />
+          </Group>
 
-					<Textarea
-						label="Description"
-						placeholder="Description de la Part"
-						maxLength={500}
-						value={formValues.description}
-						onChange={(event) =>
-							updateField("description", event.currentTarget.value)
-						}
-					/>
+          <Textarea
+            label='Description'
+            placeholder='Description de la Part'
+            maxLength={500}
+            value={formValues.description}
+            onChange={(event) =>
+              updateField('description', event.currentTarget.value)
+            }
+          />
 
-					<TextInput
-						label="URL"
-						placeholder="https://example.com"
-						value={formValues.link}
-						onChange={(event) => updateField("link", event.currentTarget.value)}
-					/>
+          <TextInput
+            label='URL'
+            placeholder='https://example.com'
+            value={formValues.link}
+            onChange={(event) => updateField('link', event.currentTarget.value)}
+          />
 
-					{/* Photo de l'objet (CDC V06 : « un objet porte […] des photos »).
+          {/* Photo de l'objet (CDC V06 : « un objet porte […] des photos »).
               Elle est déposée par un appel distinct, après l'enregistrement du
               reste du formulaire. */}
-					<Group align="flex-end" gap="md" wrap="nowrap">
-						{modalState.part?.image_url && !removeImage && !imageFile && (
-							<Image
-								src={modalState.part.image_url}
-								alt={modalState.part.name}
-								fit="contain"
-								w={96}
-								h={96}
-							/>
-						)}
+          <Group align='flex-end' gap='md' wrap='nowrap'>
+            {modalState.part?.image_url && !removeImage && !imageFile && (
+              <Image
+                src={modalState.part.image_url}
+                alt={modalState.part.name}
+                fit='contain'
+                w={96}
+                h={96}
+              />
+            )}
 
-						<FileInput
-							label="Photo"
-							placeholder={
-								modalState.part?.image_url
-									? "Remplacer la photo…"
-									: "Choisir une image…"
-							}
-							accept="image/*"
-							clearable
-							value={imageFile}
-							onChange={(file) => {
-								setImageFile(file);
-								setRemoveImage(false);
-							}}
-							description="Déposée après l'enregistrement de l'objet."
-							style={{ flex: 1 }}
-						/>
+            <FileInput
+              label='Photo'
+              placeholder={
+                modalState.part?.image_url
+                  ? 'Remplacer la photo…'
+                  : 'Choisir une image…'
+              }
+              accept='image/*'
+              clearable
+              value={imageFile}
+              onChange={(file) => {
+                setImageFile(file);
+                setRemoveImage(false);
+              }}
+              description="Déposée après l'enregistrement de l'objet."
+              style={{ flex: 1 }}
+            />
 
-						{modalState.part?.image_url && !imageFile && (
-							<Button
-								variant="outline"
-								color="red"
-								onClick={() => setRemoveImage((current) => !current)}
-							>
-								{removeImage ? "Annuler le retrait" : "Retirer la photo"}
-							</Button>
-						)}
-					</Group>
+            {modalState.part?.image_url && !imageFile && (
+              <Button
+                variant='outline'
+                color='red'
+                onClick={() => setRemoveImage((current) => !current)}
+              >
+                {removeImage ? 'Annuler le retrait' : 'Retirer la photo'}
+              </Button>
+            )}
+          </Group>
 
-					{removeImage && (
-						<Text size="sm" c="red">
-							La photo sera retirée à l'enregistrement.
-						</Text>
-					)}
+          {removeImage && (
+            <Text size='sm' c='red'>
+              La photo sera retirée à l'enregistrement.
+            </Text>
+          )}
 
-					<Group grow>
-						<Checkbox
-							label="Actif"
-							checked={formValues.active}
-							onChange={(event) =>
-								updateField("active", event.currentTarget.checked)
-							}
-						/>
+          <Group grow>
+            <Checkbox
+              label='Actif'
+              checked={formValues.active}
+              onChange={(event) =>
+                updateField('active', event.currentTarget.checked)
+              }
+            />
 
-						<Checkbox
-							label="Vendable"
-							checked={formValues.salable}
-							onChange={(event) =>
-								updateField("salable", event.currentTarget.checked)
-							}
-						/>
+            <Checkbox
+              label='Vendable'
+              checked={formValues.salable}
+              onChange={(event) =>
+                updateField('salable', event.currentTarget.checked)
+              }
+            />
 
-						<Checkbox
-							label="Virtuel"
-							checked={formValues.virtual}
-							onChange={(event) =>
-								updateField("virtual", event.currentTarget.checked)
-							}
-						/>
-					</Group>
+            <Checkbox
+              label='Virtuel'
+              checked={formValues.virtual}
+              onChange={(event) =>
+                updateField('virtual', event.currentTarget.checked)
+              }
+            />
+          </Group>
 
-					<Group grow>
-						<Checkbox
-							label="Louable"
-							checked={formValues.is_rentable}
-							onChange={(event) =>
-								updateField("is_rentable", event.currentTarget.checked)
-							}
-						/>
+          <Group grow>
+            <Checkbox
+              label='Louable'
+              checked={formValues.is_rentable}
+              onChange={(event) =>
+                updateField('is_rentable', event.currentTarget.checked)
+              }
+            />
 
-						<Checkbox
-							label="Consommable"
-							checked={formValues.consommable}
-							onChange={(event) =>
-								updateField("consommable", event.currentTarget.checked)
-							}
-						/>
-					</Group>
+            <Checkbox
+              label='Consommable'
+              checked={formValues.consommable}
+              onChange={(event) =>
+                updateField('consommable', event.currentTarget.checked)
+              }
+            />
+          </Group>
 
-					{/* Recette Tassin du 07/09/2026, remarque 9 : « il ne semble pas
+          {/* Recette Tassin du 07/09/2026, remarque 9 : « il ne semble pas
               possible d'ajouter du stock à un produit suite à un inventaire ».
               C'est possible, mais il est passé par l'écran natif d'InvenTree,
               qui n'incrémente que des lignes de stock existantes — sur un
               article qui n'en a aucune, il affiche « aucun enregistrement ».
               Le libellé nomme donc explicitement ce cas d'usage. */}
-					<NumberInput
-						label={
-							modalState.part ? "Entrée de stock" : "Stock initial à ajouter"
-						}
-						min={0}
-						description={
-							modalState.part
-								? "Crée une ligne de stock InvenTree si > 0 (entrée d’inventaire, réassort). S’ajoute au stock existant, ne le remplace pas."
-								: "Crée le stock initial dans InvenTree si > 0."
-						}
-						value={formValues.stock_initial}
-						onChange={(value) =>
-							updateField("stock_initial", numberOrZero(value))
-						}
-					/>
+          <NumberInput
+            label={
+              modalState.part ? 'Entrée de stock' : 'Stock initial à ajouter'
+            }
+            min={0}
+            description={
+              modalState.part
+                ? 'Crée une ligne de stock InvenTree si > 0 (entrée d’inventaire, réassort). S’ajoute au stock existant, ne le remplace pas.'
+                : 'Crée le stock initial dans InvenTree si > 0.'
+            }
+            value={formValues.stock_initial}
+            onChange={(value) =>
+              updateField('stock_initial', numberOrZero(value))
+            }
+          />
 
-					<Checkbox
-						label="Alertes de seuil désactivées"
-						description="Conserve les seuils mais cesse de faire remonter cet article dans les alertes."
-						checked={formValues.alertes_desactivees}
-						onChange={(event) =>
-							updateField("alertes_desactivees", event.currentTarget.checked)
-						}
-					/>
+          <Checkbox
+            label='Alertes de seuil désactivées'
+            description='Conserve les seuils mais cesse de faire remonter cet article dans les alertes.'
+            checked={formValues.alertes_desactivees}
+            onChange={(event) =>
+              updateField('alertes_desactivees', event.currentTarget.checked)
+            }
+          />
 
-					{/* Les deux seuils n'alimentent une alerte que pour un consommable
+          {/* Les deux seuils n'alimentent une alerte que pour un consommable
               (US-09, CDC V06). Le dire ici évite de saisir une valeur inerte. */}
-					<Group grow>
-						<NumberInput
-							label="Poids unitaire (kg)"
-							description="Laisser vide si le poids est inconnu."
-							min={0}
-							step={0.1}
-							decimalScale={3}
-							value={formValues.poids ?? ""}
-							onChange={(value) =>
-								updateField("poids", value === "" ? null : String(value))
-							}
-						/>
+          <Group grow>
+            <NumberInput
+              label='Poids unitaire (kg)'
+              description='Laisser vide si le poids est inconnu.'
+              min={0}
+              step={0.1}
+              decimalScale={3}
+              value={formValues.poids ?? ''}
+              onChange={(value) =>
+                updateField('poids', value === '' ? null : String(value))
+              }
+            />
 
-						<NumberInput
-							label="Seuil bas"
-							description={
-								formValues.consommable
-									? undefined
-									: "Sans effet : les seuils ne valent que pour un consommable."
-							}
-							min={0}
-							value={formValues.seuil_alerte_bas ?? ""}
-							onChange={(value) =>
-								updateField("seuil_alerte_bas", nullableNumber(value))
-							}
-						/>
+            <NumberInput
+              label='Seuil bas'
+              description={
+                formValues.consommable
+                  ? undefined
+                  : 'Sans effet : les seuils ne valent que pour un consommable.'
+              }
+              min={0}
+              value={formValues.seuil_alerte_bas ?? ''}
+              onChange={(value) =>
+                updateField('seuil_alerte_bas', nullableNumber(value))
+              }
+            />
 
-						<NumberInput
-							label="Seuil haut"
-							description={
-								formValues.consommable
-									? undefined
-									: "Sans effet : les seuils ne valent que pour un consommable."
-							}
-							min={0}
-							value={formValues.seuil_alerte_haut ?? ""}
-							onChange={(value) =>
-								updateField("seuil_alerte_haut", nullableNumber(value))
-							}
-						/>
-					</Group>
+            <NumberInput
+              label='Seuil haut'
+              description={
+                formValues.consommable
+                  ? undefined
+                  : 'Sans effet : les seuils ne valent que pour un consommable.'
+              }
+              min={0}
+              value={formValues.seuil_alerte_haut ?? ''}
+              onChange={(value) =>
+                updateField('seuil_alerte_haut', nullableNumber(value))
+              }
+            />
+          </Group>
 
-					{modalState.part?.pack && (
-						<Alert color="violet" title="PACK détecté">
-							Cette Part est considérée comme un PACK via la BOM native
-							InvenTree. Elle ne doit pas être déclarée consommable.
-						</Alert>
-					)}
+          {modalState.part?.pack && (
+            <Alert color='violet' title='PACK détecté'>
+              Cette Part est considérée comme un PACK via la BOM native
+              InvenTree. Elle ne doit pas être déclarée consommable.
+            </Alert>
+          )}
 
-					<Group justify="flex-end">
-						<Button variant="default" onClick={closeModal} disabled={saving}>
-							Annuler
-						</Button>
+          <Group justify='flex-end'>
+            <Button variant='default' onClick={closeModal} disabled={saving}>
+              Annuler
+            </Button>
 
-						<Button onClick={savePart} loading={saving}>
-							Enregistrer
-						</Button>
-					</Group>
-				</Stack>
-			</Modal>
-		</Stack>
-	);
+            <Button onClick={savePart} loading={saving}>
+              Enregistrer
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </Stack>
+  );
 }

@@ -32,62 +32,62 @@
 // pas de racine unique, InvenTree monte chaque widget séparément. `WidgetScroll`
 // s'en charge pour les dix widgets de dashboard ; les trois entrées restantes
 // (`Panel`, `PartDetail`, `Settings`) l'appellent directement.
-import { DatesProvider } from "@mantine/dates";
-import { type ReactNode, useEffect } from "react";
-import "dayjs/locale/fr";
+import { DatesProvider } from '@mantine/dates';
+import { type ReactNode, useEffect } from 'react';
+import 'dayjs/locale/fr';
 
 /** Langue posée sur les profils par `dashboard_provisioning.apply_language`. */
-const LANGUE_PAR_DEFAUT = "fr";
+const LANGUE_PAR_DEFAUT = 'fr';
 
 /** Langue courte (« fr » depuis « fr-FR »), telle que l'attend dayjs. */
 function langueCourte(locale: string | undefined): string {
-	return (locale || LANGUE_PAR_DEFAUT).toLowerCase().split("-")[0];
+  return (locale || LANGUE_PAR_DEFAUT).toLowerCase().split('-')[0];
 }
 
 export function LocaleFrame({
-	children,
-	locale,
+  children,
+  locale
 }: {
-	children: ReactNode;
-	/** `context.locale` du point d'entrée. Absent, on retombe sur le défaut
-	 *  provisionné côté serveur. */
-	locale?: string;
+  children: ReactNode;
+  /** `context.locale` du point d'entrée. Absent, on retombe sur le défaut
+   *  provisionné côté serveur. */
+  locale?: string;
 }) {
-	const langue = langueCourte(locale);
+  const langue = langueCourte(locale);
 
-	// `<html lang>` est figé à « en » dans le gabarit d'InvenTree, et son
-	// interface React ne le remet pas à jour quand la langue de l'utilisateur
-	// change. Une page entièrement en français annoncée comme anglaise, c'est
-	// exactement ce qui déclenche la traduction automatique de Chrome — donc les
-	// « Annuleur », « Actions boursières », et la réécriture des données du
-	// client (recette du 07/09/2026, remarques 3, 9 et 12).
-	//
-	// Le `translate="no"` ci-dessous protège l'arbre du plugin, mais pas les
-	// écrans du cœur. On corrige donc l'attribut au niveau du document : ce
-	// n'est pas imposer une langue, c'est cesser d'en déclarer une fausse. La
-	// valeur vient de l'utilisateur (`context.locale`), jamais d'une supposition.
-	useEffect(() => {
-		const racine = document.documentElement;
+  // `<html lang>` est figé à « en » dans le gabarit d'InvenTree, et son
+  // interface React ne le remet pas à jour quand la langue de l'utilisateur
+  // change. Une page entièrement en français annoncée comme anglaise, c'est
+  // exactement ce qui déclenche la traduction automatique de Chrome — donc les
+  // « Annuleur », « Actions boursières », et la réécriture des données du
+  // client (recette du 07/09/2026, remarques 3, 9 et 12).
+  //
+  // Le `translate="no"` ci-dessous protège l'arbre du plugin, mais pas les
+  // écrans du cœur. On corrige donc l'attribut au niveau du document : ce
+  // n'est pas imposer une langue, c'est cesser d'en déclarer une fausse. La
+  // valeur vient de l'utilisateur (`context.locale`), jamais d'une supposition.
+  useEffect(() => {
+    const racine = document.documentElement;
 
-		if (racine.lang !== langue) {
-			racine.lang = langue;
-		}
-	}, [langue]);
+    if (racine.lang !== langue) {
+      racine.lang = langue;
+    }
+  }, [langue]);
 
-	return (
-		<div lang={langue} translate="no" className="notranslate">
-			<DatesProvider
-				settings={{
-					locale: langue,
-					// Lundi, et samedi/dimanche en week-end : les défauts de Mantine
-					// conviennent déjà, on les fixe pour ne pas dépendre d'eux.
-					firstDayOfWeek: 1,
-					weekendDays: [0, 6],
-					consistentWeeks: true,
-				}}
-			>
-				{children}
-			</DatesProvider>
-		</div>
-	);
+  return (
+    <div lang={langue} translate='no' className='notranslate'>
+      <DatesProvider
+        settings={{
+          locale: langue,
+          // Lundi, et samedi/dimanche en week-end : les défauts de Mantine
+          // conviennent déjà, on les fixe pour ne pas dépendre d'eux.
+          firstDayOfWeek: 1,
+          weekendDays: [0, 6],
+          consistentWeeks: true
+        }}
+      >
+        {children}
+      </DatesProvider>
+    </div>
+  );
 }

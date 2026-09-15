@@ -4,20 +4,20 @@
 // onglet dans les postes, et ne peut donc pas dépendre au runtime des globales
 // qu'InvenTree ne fournit qu'aux widgets.
 import {
-	checkPluginVersion,
-	type InvenTreePluginContext,
-} from "@inventreedb/ui";
+  checkPluginVersion,
+  type InvenTreePluginContext
+} from '@inventreedb/ui';
 
-import { StockAlertsList } from "./stock/StockAlertsList";
-import { WidgetScroll } from "./WidgetScroll";
+import { StockAlertsList } from './stock/StockAlertsList';
+import { WidgetScroll } from './WidgetScroll';
 
 export function renderInvenTreeLocationDashboardItem(
-	context: InvenTreePluginContext,
+  context: InvenTreePluginContext
 ) {
-	checkPluginVersion(context);
-	return (
-		<WidgetScroll locale={context.locale}>
-			<StockAlertsList context={context} />
-		</WidgetScroll>
-	);
+  checkPluginVersion(context);
+  return (
+    <WidgetScroll locale={context.locale}>
+      <StockAlertsList context={context} />
+    </WidgetScroll>
+  );
 }
