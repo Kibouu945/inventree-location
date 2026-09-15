@@ -14,12 +14,14 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from inventree_location import roles
 from inventree_location.models import (
     Client,
+    Contact,
     Manifestation,
     Prestation,
     Reservation,
     StatutManifestation,
     StatutReservation,
 )
+from inventree_location.serializers import ManifestationSerializer
 from inventree_location.views import (
     ClientListView,
     ManifestationDetailView,
@@ -546,3 +548,66 @@ class TestFiltreParClient:
             self._noms(factory, gestionnaire, client=jambville.pk, search="Gala")
             == set()
         )
+
+class TestDesactivation:
+    """Désactiver n'est pas supprimer : l'existant survit, le neuf est refusé."""
+
+    def test_refuse_un_client_desactive(self, db):
+        client = Client.objects.create(nom="Association dissoute", actif=False)
+        serializer = ManifestationSerializer(
+            data={
+                "nom": "Camp d'hiver",
+                "client": client.pk,
+                "date_debut": "2026-12-01T08:00:00Z",
+                "date_fin": "2026-12-05T18:00:00Z",
+                "statut": "brouillon",
+            }
+        )
+
+        assert not serializer.is_valid()
+        assert "désactivé" in str(serializer.errors["client"][0])
+
+    def test_refuse_un_contact_desactive(self, db):
+        client = Client.objects.create(nom="Mairie", actif=True)
+        contact = Contact.objects.create(
+            client=client, nom="Parti", prenom="Jean", actif=False
+        )
+        serializer = ManifestationSerializer(
+            data={
+                "nom": "Séminaire",
+                "client": client.pk,
+                "contact": contact.pk,
+                "date_debut": "2026-12-01T08:00:00Z",
+                "date_fin": "2026-12-02T18:00:00Z",
+                "statut": "brouillon",
+            }
+        )
+
+        assert not serializer.is_valid()
+        assert "désactivé" in str(serializer.errors["contact"][0])
+
+    def test_une_manifestation_existante_reste_modifiable(self, db):
+        """Le cas qui compte : l'historique ne se verrouille pas.
+
+        Le client est désactivé après coup ; sa manifestation doit continuer de
+        s'éditer, sans quoi désactiver un client gèlerait tout son passé.
+        """
+
+        client = Client.objects.create(nom="Association dissoute", actif=True)
+        manifestation = Manifestation.objects.create(
+            nom="Camp d'été",
+            client=client,
+            date_debut=timezone.now(),
+            date_fin=timezone.now() + timedelta(days=2),
+        )
+        client.actif = False
+        client.save(update_fields=["actif"])
+
+        serializer = ManifestationSerializer(
+            manifestation,
+            data={"nom": "Camp d'été 2026", "client": client.pk},
+            partial=True,
+        )
+
+        assert serializer.is_valid(), serializer.errors
+        assert serializer.save().nom == "Camp d'été 2026"

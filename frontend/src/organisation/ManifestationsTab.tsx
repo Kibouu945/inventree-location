@@ -21,6 +21,7 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { optionsDeContacts } from '../backoffice/contactLogic';
+import { optionsActives } from '../backoffice/optionsActives';
 import { DateTimeField } from '../DateTimeField';
 
 import { canWriteOrganisation } from '../roles';
@@ -106,7 +107,7 @@ export function ManifestationsTab({
   );
 
   const clientsQuery = useQuery<{
-    results: Array<{ id: number; nom: string }>;
+    results: Array<{ id: number; nom: string; actif: boolean }>;
   }>(
     {
       queryKey: ['clients'],
@@ -147,10 +148,23 @@ export function ManifestationsTab({
     ? listQuery.data
     : (listQuery.data?.results ?? []);
 
-  const clientOptions = (clientsQuery.data?.results ?? []).map((c) => ({
+  const clients = clientsQuery.data?.results ?? [];
+
+  // Le filtre de la liste garde les clients désactivés : on cherche aussi les
+  // manifestations passées d'un client qui n'est plus en service.
+  const clientOptionsFiltre = clients.map((c) => ({
     value: String(c.id),
-    label: c.nom
+    label: c.actif ? c.nom : `${c.nom} (inactif)`
   }));
+
+  // Le formulaire, lui, ne propose que les clients en service — sauf celui que
+  // porte déjà la manifestation qu'on édite. C'est la règle annoncée par le
+  // back-office, et le serveur la refuse aussi.
+  const clientOptionsFormulaire = optionsActives(
+    clients,
+    (client) => client.nom,
+    form.values.client
+  );
 
   const contactOptions = optionsDeContacts(
     contactsQuery.data?.results ?? [],
@@ -244,7 +258,7 @@ export function ManifestationsTab({
         <Select
           label='Client'
           placeholder='Tous les clients'
-          data={clientOptions}
+          data={clientOptionsFiltre}
           value={clientFiltre}
           onChange={setClientFiltre}
           clearable
@@ -354,7 +368,7 @@ export function ManifestationsTab({
               <Select
                 label='Client'
                 required
-                data={clientOptions}
+                data={clientOptionsFormulaire}
                 searchable
                 {...form.getInputProps('client')}
               />

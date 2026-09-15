@@ -1982,7 +1982,17 @@ class ManifestationSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
-        """La date de fin doit être postérieure ou égale à la date de début."""
+        """Dates cohérentes, et interlocuteurs encore en service.
+
+        La désactivation d'un client ou d'un contact n'est pas une suppression :
+        l'existant reste consultable et modifiable — sinon une manifestation
+        passée deviendrait inéditable le jour où son interlocuteur quitte
+        l'association. Ce qui est refusé, c'est de **rattacher** une
+        manifestation à quelqu'un qui n'est plus en service.
+
+        D'où la comparaison à l'instance : on ne refuse que le changement, pas
+        la conservation.
+        """
 
         def effective(field):
             if field in attrs:
@@ -1999,7 +2009,36 @@ class ManifestationSerializer(serializers.ModelSerializer):
                 )
             })
 
+        self._refuser_si_desactive(attrs, "client")
+        self._refuser_si_desactive(attrs, "contact")
+
         return attrs
+
+    def _refuser_si_desactive(self, attrs, champ):
+        """Refuse un rattachement à un client ou un contact désactivé."""
+
+        nouveau = attrs.get(champ)
+
+        if nouveau is None:
+            return
+
+        ancien = getattr(self.instance, champ, None) if self.instance else None
+
+        if ancien is not None and ancien.pk == nouveau.pk:
+            return
+
+        if not nouveau.actif:
+            libelles = {
+                "client": (
+                    f"« {nouveau} » est désactivé : on ne rattache plus de "
+                    "manifestation à ce client. Il reste consultable."
+                ),
+                "contact": (
+                    f"« {nouveau} » est désactivé : cet interlocuteur n'est plus "
+                    "en service. Il reste lisible sur les pièces qu'il a signées."
+                ),
+            }
+            raise serializers.ValidationError({champ: libelles[champ]})
 
     @transaction.atomic
     def update(self, instance, validated_data):
