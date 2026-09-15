@@ -43,15 +43,24 @@ async function dernierBon() {
   return (d.results ?? d)[0]?.numero ?? '';
 }
 
+/** mm:ss — le format dans lequel on raisonne quand on minute une soutenance. */
+function mmss(ms) {
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 async function etape(titre, fn) {
   console.log(`\n▶ ${titre}`);
+  const depart = performance.now();
   try {
     const r = await fn();
-    console.log(`   ✓ ${r ?? 'ok'}`);
-    bilan.push(['✓', titre, r ?? '']);
+    const duree = performance.now() - depart;
+    console.log(`   ✓ ${r ?? 'ok'}  —  ${mmss(duree)}`);
+    bilan.push(['✓', titre, r ?? '', duree]);
   } catch (e) {
+    const duree = performance.now() - depart;
     console.log('   ✗', String(e.stack).split('\n').slice(0, 2).join(' | ').slice(0, 260));
-    bilan.push(['✗', titre, String(e).split('\n')[0].slice(0, 120)]);
+    bilan.push(['✗', titre, String(e).split('\n')[0].slice(0, 120), duree]);
     await page.screenshot({ path: `${process.env.SHOTS_DIR ?? '.'}/echec-${bilan.length}.png` });
     await page.keyboard.press('Escape').catch(() => {});
     await T(800);
@@ -245,7 +254,13 @@ await etape('9. Retour complet : les 4 bancs rendus', async () => {
 });
 
 console.log('\n════ bilan ════');
-for (const [s, t, d] of bilan) console.log(` ${s} ${t}${d ? ' — ' + d : ''}`);
+let cumul = 0;
+for (const [statut, titre, detail, duree] of bilan) {
+  cumul += duree;
+  console.log(` ${statut} ${String(titre).padEnd(46)} ${mmss(duree).padStart(5)}   cumul ${mmss(cumul)}`);
+  if (detail) console.log(`     ${detail}`);
+}
+console.log(`\n   parcours complet : ${mmss(cumul)} (hors connexion)`);
 console.log('\n--- erreurs ---');
 console.log(errors.length ? errors.slice(0, 12).join('\n') : '  aucune');
 if (LENT) await T(30000);
