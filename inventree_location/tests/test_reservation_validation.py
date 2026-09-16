@@ -17,6 +17,7 @@ from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from inventree_location.models import (
+    Contact,
     Prestation,
     RentableItem,
 )
@@ -181,6 +182,37 @@ class TestSoumissionStricte:
         assert response.data["numero"]
 
     @pytest.mark.django_db
+    def test_reservation_existante_reste_modifiable_si_client_devient_inactif(
+        self, factory, user, prestation, materiel, article_virtuel
+    ):
+        from inventree_location.models import LigneReservation, Reservation
+
+        reservation = Reservation.objects.create(
+            prestation=prestation,
+            demandeur=user,
+            date_demande=timezone.now(),
+            date_retrait_prevue=prestation.date_debut,
+            date_retour_prevue=prestation.date_fin,
+        )
+        LigneReservation.objects.create(
+            reservation=reservation, part=materiel, quantite_demandee=2
+        )
+        LigneReservation.objects.create(
+            reservation=reservation, part=article_virtuel, quantite_demandee=1
+        )
+
+        prestation.manifestation.client.actif = False
+        prestation.manifestation.client.save(update_fields=["actif"])
+
+        request = factory.patch(
+            f"{RESA_URL}{reservation.pk}/", {"statut": "soumise"}, format="json"
+        )
+        force_authenticate(request, user=user)
+        response = ReservationDetailView.as_view()(request, pk=reservation.pk)
+
+        assert response.status_code == status.HTTP_200_OK
+
+    @pytest.mark.django_db
     def test_patch_brouillon_vers_soumise_reutilise_lignes_existantes(
         self, factory, user, prestation, materiel, article_virtuel
     ):
@@ -208,3 +240,53 @@ class TestSoumissionStricte:
 
         assert response.status_code == status.HTTP_200_OK
         assert response.data["statut"] == "soumise"
+
+
+class TestClientContactDesactive:
+    """Le bon engage réellement du matériel : la garde porte donc jusqu'ici,
+    même en brouillon — contrairement aux autres règles de cette méthode,
+    permissives en brouillon."""
+
+    @pytest.mark.django_db
+    def test_refuse_meme_en_brouillon_si_client_inactif(
+        self, factory, user, prestation
+    ):
+        prestation.manifestation.client.actif = False
+        prestation.manifestation.client.save(update_fields=["actif"])
+
+        payload = {
+            "statut": "brouillon",
+            "prestation": prestation.pk,
+            "demandeur": user.pk,
+            "date_demande": timezone.now().isoformat(),
+        }
+        request = factory.post(RESA_URL, payload, format="json")
+        force_authenticate(request, user=user)
+        response = ReservationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "prestation" in response.data
+
+    @pytest.mark.django_db
+    def test_refuse_si_contact_inactif(self, factory, user, prestation):
+        contact = Contact.objects.create(
+            client=prestation.manifestation.client,
+            nom="Vasseur",
+            prenom="Hélène",
+            actif=False,
+        )
+        prestation.manifestation.contact = contact
+        prestation.manifestation.save(update_fields=["contact"])
+
+        payload = {
+            "statut": "brouillon",
+            "prestation": prestation.pk,
+            "demandeur": user.pk,
+            "date_demande": timezone.now().isoformat(),
+        }
+        request = factory.post(RESA_URL, payload, format="json")
+        force_authenticate(request, user=user)
+        response = ReservationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "prestation" in response.data

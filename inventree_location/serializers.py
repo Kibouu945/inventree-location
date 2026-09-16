@@ -606,6 +606,35 @@ class ReservationSerializer(serializers.ModelSerializer):
         objets référencés doivent être actifs et louables.
         """
 
+        # Le bon est le cœur métier : le geste qui engage réellement du
+        # matériel. Un client ou un contact désactivé ne doit plus pouvoir en
+        # recevoir de nouveau, brouillon compris — contrairement aux autres
+        # règles de cette méthode, qui sont permissives en brouillon. Comme
+        # pour Manifestation et Prestation, seule la création est concernée :
+        # un bon déjà existant reste modifiable si son client/contact a été
+        # désactivé depuis.
+        if self.instance is None:
+            prestation_a_creer = attrs.get("prestation")
+
+            if prestation_a_creer is not None:
+                manifestation = prestation_a_creer.manifestation
+
+                if not manifestation.client.actif:
+                    raise serializers.ValidationError({
+                        "prestation": (
+                            "Impossible de créer une réservation : le client de "
+                            "cette manifestation est désactivé."
+                        )
+                    })
+
+                if manifestation.contact_id and not manifestation.contact.actif:
+                    raise serializers.ValidationError({
+                        "prestation": (
+                            "Impossible de créer une réservation : le contact "
+                            "référent de cette manifestation est désactivé."
+                        )
+                    })
+
         statut = attrs.get(
             "statut", getattr(self.instance, "statut", StatutReservation.BROUILLON)
         )
@@ -1721,17 +1750,28 @@ class PrestationSerializer(serializers.ModelSerializer):
 
         errors = {}
 
-        # Nouvelle prestation seulement sur une manif pas encore démarrée.
-        if (
-            self.instance is None
-            and manifestation
-            and not manifestation.accepte_nouvelles_prestations
-        ):
-            errors["manifestation"] = (
-                "Impossible d'ajouter une prestation : la manifestation est "
-                f"« {manifestation.get_statut_display().lower()} » "
-                f"(statut effectif : {manifestation.statut_effectif})."
-            )
+        # Nouvelle prestation seulement sur une manif pas encore démarrée, et
+        # dont le client (et le contact référent, s'il y en a un) sont encore
+        # actifs. Une manifestation déjà « planifiée » avant la désactivation
+        # de son client reste, elle, pleinement gérable : seule la création
+        # d'un nouvel engagement est refusée.
+        if self.instance is None and manifestation:
+            if not manifestation.accepte_nouvelles_prestations:
+                errors["manifestation"] = (
+                    "Impossible d'ajouter une prestation : la manifestation est "
+                    f"« {manifestation.get_statut_display().lower()} » "
+                    f"(statut effectif : {manifestation.statut_effectif})."
+                )
+            elif not manifestation.client.actif:
+                errors["manifestation"] = (
+                    "Impossible d'ajouter une prestation : le client de cette "
+                    "manifestation est désactivé."
+                )
+            elif manifestation.contact_id and not manifestation.contact.actif:
+                errors["manifestation"] = (
+                    "Impossible d'ajouter une prestation : le contact référent "
+                    "de cette manifestation est désactivé."
+                )
 
         if date_debut and date_fin and date_debut > date_fin:
             errors["date_fin"] = (
@@ -2013,6 +2053,19 @@ class ManifestationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "client": (
                     "Ce client est désactivé : impossible de lui associer une "
+                    "manifestation."
+                )
+            })
+
+        # Même règle, même raison, pour le contact référent : désactivé, il
+        # sort des sélecteurs (cf. `optionsDeContacts`), mais une manifestation
+        # qui le porte déjà reste modifiable tant qu'on ne touche pas ce champ.
+        contact = attrs.get("contact")
+
+        if contact is not None and not contact.actif:
+            raise serializers.ValidationError({
+                "contact": (
+                    "Ce contact est désactivé : impossible de l'associer à une "
                     "manifestation."
                 )
             })

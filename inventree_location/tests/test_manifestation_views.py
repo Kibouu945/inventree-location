@@ -14,6 +14,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from inventree_location import roles
 from inventree_location.models import (
     Client,
+    Contact,
     Manifestation,
     Prestation,
     Reservation,
@@ -133,6 +134,42 @@ class TestManifestationCrud:
         )
         client.actif = False
         client.save(update_fields=["actif"])
+
+        request = factory.patch(
+            f"{MANIF_URL}{manif.pk}/", {"nom": "Renommée"}, format="json"
+        )
+        force_authenticate(request, user=gestionnaire)
+        response = ManifestationDetailView.as_view()(request, pk=manif.pk)
+
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_contact_inactif_refuse_a_la_creation(self, factory, gestionnaire, client):
+        contact = Contact.objects.create(
+            client=client, nom="Vasseur", prenom="Hélène", actif=False
+        )
+        payload = _payload(client)
+        payload["contact"] = contact.pk
+
+        request = factory.post(MANIF_URL, payload, format="json")
+        force_authenticate(request, user=gestionnaire)
+        response = ManifestationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "contact" in response.data
+
+    def test_manifestation_existante_reste_modifiable_si_contact_devient_inactif(
+        self, factory, gestionnaire, client
+    ):
+        contact = Contact.objects.create(client=client, nom="Vasseur", prenom="Hélène")
+        manif = Manifestation.objects.create(
+            nom="Déjà planifiée",
+            date_debut=timezone.now(),
+            date_fin=timezone.now() + timedelta(days=1),
+            client=client,
+            contact=contact,
+        )
+        contact.actif = False
+        contact.save(update_fields=["actif"])
 
         request = factory.patch(
             f"{MANIF_URL}{manif.pk}/", {"nom": "Renommée"}, format="json"
