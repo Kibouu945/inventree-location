@@ -111,6 +111,37 @@ class TestManifestationCrud:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "date_fin" in response.data
 
+    def test_client_inactif_refuse_a_la_creation(self, factory, gestionnaire, client):
+        client.actif = False
+        client.save(update_fields=["actif"])
+
+        request = factory.post(MANIF_URL, _payload(client), format="json")
+        force_authenticate(request, user=gestionnaire)
+        response = ManifestationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "client" in response.data
+
+    def test_manifestation_existante_reste_modifiable_si_client_devient_inactif(
+        self, factory, gestionnaire, client
+    ):
+        manif = Manifestation.objects.create(
+            nom="Déjà planifiée",
+            date_debut=timezone.now(),
+            date_fin=timezone.now() + timedelta(days=1),
+            client=client,
+        )
+        client.actif = False
+        client.save(update_fields=["actif"])
+
+        request = factory.patch(
+            f"{MANIF_URL}{manif.pk}/", {"nom": "Renommée"}, format="json"
+        )
+        force_authenticate(request, user=gestionnaire)
+        response = ManifestationDetailView.as_view()(request, pk=manif.pk)
+
+        assert response.status_code == status.HTTP_200_OK
+
     def test_update_and_delete(self, factory, gestionnaire, client):
         manif = Manifestation.objects.create(
             nom="À renommer",
@@ -289,6 +320,31 @@ class TestClientList:
         request = factory.get("/plugin/inventree-location/groupes/")
         response = ClientListView.as_view()(request)
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_actif_non_filtre_par_defaut(self, factory, gestionnaire, client):
+        client.actif = False
+        client.save(update_fields=["actif"])
+
+        request = factory.get("/plugin/inventree-location/clients/")
+        force_authenticate(request, user=gestionnaire)
+        response = ClientListView.as_view()(request)
+
+        # Sans le paramètre, la gestion des clients doit pouvoir en retrouver
+        # un désactivé pour le réactiver.
+        assert [item["nom"] for item in response.data["results"]] == ["Jambville"]
+
+    def test_filtre_actif_true_exclut_les_desactives(self, factory, gestionnaire, client):
+        client.actif = False
+        client.save(update_fields=["actif"])
+        Client.objects.create(nom="Autre maison", email="autre@exemple.test")
+
+        request = factory.get(
+            "/plugin/inventree-location/clients/", {"actif": "true"}
+        )
+        force_authenticate(request, user=gestionnaire)
+        response = ClientListView.as_view()(request)
+
+        assert [item["nom"] for item in response.data["results"]] == ["Autre maison"]
 
 
 @pytest.mark.django_db

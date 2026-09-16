@@ -2832,6 +2832,10 @@ class ClientListView(generics.ListAPIView):
         retrouver ses clients pendant un appel téléphonique sans connaître son
         propre identifiant. Une valeur inconnue est ignorée, pas refusée : un
         400 sur un écran de liste serait pire.
+
+        `actif` est un filtre optionnel, pas un défaut : la gestion des
+        clients et les filtres de recherche (manifestations, contacts) ont
+        besoin de retrouver aussi les clients désactivés.
         """
 
         queryset = Client.objects.select_related("gestionnaire").order_by("nom")
@@ -2849,6 +2853,11 @@ class ClientListView(generics.ListAPIView):
             queryset = queryset.filter(gestionnaire=self.request.user)
         elif gestionnaire and gestionnaire.isdigit():
             queryset = queryset.filter(gestionnaire_id=int(gestionnaire))
+
+        actif = self.request.query_params.get("actif")
+
+        if actif is not None:
+            queryset = queryset.filter(actif=actif.lower() in ("true", "1"))
 
         return queryset
 

@@ -2002,6 +2002,21 @@ class ManifestationSerializer(serializers.ModelSerializer):
                 )
             })
 
+        # Un client désactivé reste consultable (manifestations passées), mais
+        # ne doit plus en recevoir de nouvelles. Contrôlé sur `attrs` et non
+        # `effective()` : une manifestation existante déjà rattachée à un
+        # client désormais inactif doit rester modifiable tant qu'on ne
+        # touche pas au client.
+        client = attrs.get("client")
+
+        if client is not None and not client.actif:
+            raise serializers.ValidationError({
+                "client": (
+                    "Ce client est désactivé : impossible de lui associer une "
+                    "manifestation."
+                )
+            })
+
         return attrs
 
     @transaction.atomic

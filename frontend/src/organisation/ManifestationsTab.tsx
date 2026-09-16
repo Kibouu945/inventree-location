@@ -20,6 +20,7 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { optionsDeClients } from '../backoffice/clientLogic';
 import { optionsDeContacts } from '../backoffice/contactLogic';
 import { DateTimeField } from '../DateTimeField';
 
@@ -106,7 +107,7 @@ export function ManifestationsTab({
   );
 
   const clientsQuery = useQuery<{
-    results: Array<{ id: number; nom: string }>;
+    results: Array<{ id: number; nom: string; actif: boolean }>;
   }>(
     {
       queryKey: ['clients'],
@@ -147,10 +148,19 @@ export function ManifestationsTab({
     ? listQuery.data
     : (listQuery.data?.results ?? []);
 
+  // Filtre de recherche : tous les clients, y compris désactivés, pour
+  // retrouver les manifestations passées d'un client qui a fermé depuis.
   const clientOptions = (clientsQuery.data?.results ?? []).map((c) => ({
     value: String(c.id),
     label: c.nom
   }));
+
+  // Formulaire : un client désactivé ne doit plus recevoir de nouvelle
+  // manifestation, sauf s'il est déjà celui de la manifestation éditée.
+  const clientFormOptions = optionsDeClients(
+    clientsQuery.data?.results ?? [],
+    form.values.client
+  );
 
   const contactOptions = optionsDeContacts(
     contactsQuery.data?.results ?? [],
@@ -354,7 +364,7 @@ export function ManifestationsTab({
               <Select
                 label='Client'
                 required
-                data={clientOptions}
+                data={clientFormOptions}
                 searchable
                 {...form.getInputProps('client')}
               />
