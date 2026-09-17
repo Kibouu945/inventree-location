@@ -66,6 +66,11 @@ await cas('A. Ramassage : récupérer PLUS que ce qui est sorti', async () => {
   try {
     await page.getByRole('tab', { name: 'Ramassages' }).first().click();
     await T(page, 4500);
+    // L'écran s'ouvre sur l'arborescence (F7) ; le bouton « Voir » vit sur la
+    // ligne plate de la vue « Liste ». `SegmentedControl` de Mantine rend un
+    // `label`, pas un `button`.
+    await page.locator('label').filter({ hasText: /^Liste$/ }).first().click();
+    await T(page, 3000);
     // Toutes les lignes n'ont pas de bon de ramassage : un bon qui ne porte
     // qu'un service n'a rien à récupérer, donc pas de bouton.
     const ligne = page.locator('tr').filter({ has: page.getByRole('button', { name: /Voir/ }) }).first();

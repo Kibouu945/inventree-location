@@ -111,3 +111,38 @@ make manage cmd="provision_dashboards"         # sinon le tableau de bord est vi
 - **« Manifestations » nomme deux onglets** — la navigation du poste et un
   onglet interne de l'écran Fiches. La navigation du poste porte
   `data-placement="left"`.
+
+### `complet.mjs` — le cycle entier, conflit compris
+
+Le scénario de démonstration. Il crée un client, son contact, une manifestation,
+**deux prestations sur deux lieux**, puis des bons jusqu'à mettre le parc en
+tension — et montre ce qu'un tableur ne sait pas faire.
+
+| Étape | Ce qu'elle démontre |
+|---|---|
+| 1 – 4 | Client, contact, manifestation, deux prestations |
+| 5 | Deux bons sur le même article rare, créés depuis l'arbre **et** depuis l'écran Réservations |
+| 6 | **Le serveur refuse d'engager au-delà du stock** — et chiffre le manque |
+| 7 | Un troisième bon de trop : le refus à l'écran, avec le taux d'occupation |
+| 8 | Le gestionnaire complète le parc, le bon passe |
+| 9 | Le livreur accepte, démarre, livre |
+| 10 | Le magasinier ouvre l'arborescence de ramassage jusqu'au bon |
+
+Deux points de méthode qui rendent le scénario rejouable sur n'importe quelle
+base. La quantité par bon se **calcule sur le stock du jour** — une constante en
+dur cessait d'être juste dès qu'on ajoutait du matériel. Et chaque lot de stock
+créé en cours de route est **rendu à la fin** : le scénario ne laisse que le
+client et sa manifestation.
+
+Les `HTTP 400` sur `/transition/` dans le journal sont **attendus** : ce sont les
+refus de validation que le scénario provoque exprès.
+
+Ce que le scénario a appris sur le produit, et qui mérite d'être su :
+
+- **Un conflit ne naît pas d'une validation** : le serveur l'interdit au-delà du
+  stock (`Validation refusée : conflit de stock détecté`, forçable avec trace).
+  Le registre « Conflits actuels » recense les pénuries sur des bons **déjà
+  engagés**, quand le parc diminue après coup.
+- **L'état d'une livraison et le statut d'un bon sont deux choses.** Le livreur
+  fait avancer l'état — assignée, en cours, livrée ; le statut du bon bascule,
+  lui, par le bouton de sa ligne.
