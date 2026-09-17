@@ -18,6 +18,7 @@ from .conflicts import (
     register_location_conflict_history,
     register_stock_conflict_history,
 )
+from .execution import quantite_deposee, quantite_restant_a_livrer
 from .models import (
     EtatLivraison,
     Client,
@@ -1191,8 +1192,22 @@ class LieuSerializer(serializers.ModelSerializer):
 
 
 class DeliveryLigneSerializer(serializers.ModelSerializer):
+    """Une ligne de la tournée, avec ce qui a été déposé et ce qui reste.
+
+    `quantite_deposee` somme les passages de la table d'exécution, remplie
+    depuis le lot L7 : c'est le « livrée » de la maquette Livraison.
+    `quantite_restante` est la différence avec ce qui doit partir — calculée,
+    jamais stockée (R27), puisqu'un passage supplémentaire la changerait.
+
+    `quantite_livree` reste exposée : c'est la colonne du bon, qu'aucun endpoint
+    n'écrit (cf. `retours.py`) et que l'écran lit encore. Elle vaut 0 partout, et
+    disparaîtra du contrat quand la maquette aura basculé sur `quantite_deposee`.
+    """
+
     part_name = serializers.CharField(source="part.name", read_only=True)
     is_virtual = serializers.SerializerMethodField()
+    quantite_deposee = serializers.SerializerMethodField()
+    quantite_restante = serializers.SerializerMethodField()
 
     class Meta:
         model = LigneReservation
@@ -1202,6 +1217,8 @@ class DeliveryLigneSerializer(serializers.ModelSerializer):
             "part_name",
             "quantite_demandee",
             "quantite_livree",
+            "quantite_deposee",
+            "quantite_restante",
             "quantite_retournee",
             "is_virtual",
         ]
@@ -1210,6 +1227,12 @@ class DeliveryLigneSerializer(serializers.ModelSerializer):
     def get_is_virtual(self, obj) -> bool:
         rentable = getattr(obj.part, "rentable_info", None)
         return bool(rentable and rentable.is_virtual)
+
+    def get_quantite_deposee(self, obj) -> int:
+        return quantite_deposee(obj)
+
+    def get_quantite_restante(self, obj) -> int:
+        return quantite_restant_a_livrer(obj)
 
 
 class LivraisonStatusLogSerializer(serializers.ModelSerializer):

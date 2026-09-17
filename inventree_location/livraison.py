@@ -6,6 +6,13 @@ commencée, puis la faire avancer — en route, livrée, ou problème signalé.
 
 Logique isolée de `views.py` pour rester testable : `core.py` n'est pas
 importable hors InvenTree, comme `conflicts.py` ou `roles.py`.
+
+**Premier point d'écriture des tables d'exécution (lot L7).** Les colonnes du
+bon restent la vérité ; chacune des trois fonctions ci-dessous réaligne
+`Livraison` et `Ramassage` sur elles avant de rendre la main, dans sa propre
+transaction. Les tables suivent donc le terrain en direct au lieu d'attendre
+`projeter_execution`, et `verifier_projection` doit dire « aucune divergence »
+juste après chaque appel — c'est la preuve de la greffe.
 """
 
 from __future__ import annotations
@@ -14,6 +21,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from . import roles
+from .execution import projeter_le_bon
 from .models import (
     EtatLivraison,
     LivraisonStatusLog,
@@ -77,6 +85,23 @@ def _journaliser(reservation, *, depuis, vers, user, commentaire="", photo=None)
     )
 
 
+def _refleter_l_execution(reservation) -> None:
+    """Réaligne les tables d'exécution sur les colonnes du bon.
+
+    À appeler **après** que les colonnes du bon ont pris leur valeur finale, et
+    non après le seul changement d'état de livraison : la projection lit le
+    `statut` du bon en premier (`livraison_attendue`), si bien qu'un appel
+    placé avant la transition de statut lirait encore « validée » et n'écrirait
+    rien.
+
+    Dans la transaction de l'appelant : une table d'exécution qui survivrait à
+    un changement d'état annulé serait précisément la divergence que le lot L6
+    s'est donné les moyens de détecter.
+    """
+
+    projeter_le_bon(reservation)
+
+
 @transaction.atomic
 def accepter_livraison(reservation_id: int, user) -> Reservation:
     """Attribue une livraison du pool commun à `user`.
@@ -114,6 +139,7 @@ def accepter_livraison(reservation_id: int, user) -> Reservation:
     )
 
     _journaliser(reservation, depuis=LIBRE, vers=EtatLivraison.ASSIGNEE, user=user)
+    _refleter_l_execution(reservation)
 
     return reservation
 
@@ -154,6 +180,7 @@ def relacher_livraison(reservation_id: int, user) -> Reservation:
     )
 
     _journaliser(reservation, depuis=EtatLivraison.ASSIGNEE, vers=LIBRE, user=user)
+    _refleter_l_execution(reservation)
 
     return reservation
 
@@ -165,7 +192,8 @@ def changer_etat_livraison(
     """Fait avancer une livraison assignée, en journalisant le passage.
 
     Arriver à « livrée » vaut livraison au sens métier : la réservation suit et
-    passe au statut `livrée`, par la même voie que le bouton du gestionnaire.
+    passe au statut `livrée`, par la même voie que le bouton du gestionnaire —
+    et c'est le moment où l'heure réelle du dépôt est connue.
     """
 
     reservation = (
@@ -196,7 +224,18 @@ def changer_etat_livraison(
         )
 
     reservation.etat_livraison = etat
-    reservation.save(update_fields=["etat_livraison"])
+    colonnes = ["etat_livraison"]
+
+    # `date_retrait_reelle` n'avait aucun écrivain : l'heure du dépôt ne vivait
+    # que dans le journal, et `Livraison.date_reelle` restait vide sur un bon
+    # pourtant sorti. Elle n'est connue qu'ici. Écrite sans garde d'idempotence,
+    # parce que « livrée » est un état terminal (`TRANSITIONS_ETAT`) : on n'y
+    # passe qu'une fois, et un second appel est refusé plus haut.
+    if etat == EtatLivraison.LIVREE:
+        reservation.date_retrait_reelle = timezone.now()
+        colonnes.append("date_retrait_reelle")
+
+    reservation.save(update_fields=colonnes)
 
     _journaliser(
         reservation,
@@ -216,5 +255,11 @@ def changer_etat_livraison(
         )
 
     reservation.refresh_from_db()
+
+    # Pas redondant avec la greffe du service, qui vient de projeter si le
+    # statut a bougé : un dépôt sur un bon déjà marqué livré par le gestionnaire
+    # ne change aucun statut, mais écrit `date_retrait_reelle` — et c'est cette
+    # heure-là que le passage doit porter.
+    _refleter_l_execution(reservation)
 
     return reservation

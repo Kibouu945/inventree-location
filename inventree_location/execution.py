@@ -35,6 +35,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from .models import (
+    LigneReservation,
     Livraison,
     LivraisonLigne,
     Ramassage,
@@ -66,6 +67,46 @@ STATUTS_RAMASSES = (
 PREMIER_PASSAGE = 1
 
 
+def _lignes_du_bon(reservation_id: int):
+    """Les lignes du bon, relues en base plutôt que prises sur l'instance.
+
+    Recalculer, c'est relire. Un appelant qui a préchargé ses lignes
+    (`prefetch_related`) puis modifié leurs quantités par d'autres instances —
+    c'est mot pour mot ce que fait la saisie de ramassage — porte un cache
+    périmé, et la projection écrivait alors des zéros là où la vérité disait
+    quatre. Le cas s'est produit, il est couvert par un test.
+    """
+
+    return LigneReservation.objects.filter(reservation_id=reservation_id)
+
+
+def quantite_deposee(ligne) -> int:
+    """Ce que tous les passages ont déposé sur cette ligne.
+
+    Le chiffre que l'écran de livraison affiche en « livrée », et la seule
+    source juste : la colonne `quantite_livree` du bon n'a aucun écrivain (cf.
+    `retours.py`), et plusieurs passages ne tiendraient de toute façon pas dans
+    une colonne (R23).
+
+    Deux chemins pour le même résultat. Quand l'appelant a préchargé la relation
+    (`prefetch_related("lignes__livraisons")`), on somme son cache : une liste de
+    bons coûte alors une requête, pas une par ligne. Sinon on agrège par
+    identifiant — jamais par instance, pour la raison donnée en tête de module.
+    """
+
+    cache = getattr(ligne, "_prefetched_objects_cache", None) or {}
+
+    if "livraisons" in cache:
+        return sum(passage.quantite_livree for passage in cache["livraisons"])
+
+    return (
+        LivraisonLigne.objects.filter(ligne_id=ligne.pk).aggregate(
+            total=Sum("quantite_livree")
+        )["total"]
+        or 0
+    )
+
+
 def quantite_restant_a_livrer(ligne) -> int:
     """Ce qu'il reste à déposer sur cette ligne, tous passages confondus.
 
@@ -73,14 +114,7 @@ def quantite_restant_a_livrer(ligne) -> int:
     passage supplémentaire.
     """
 
-    livre = (
-        LivraisonLigne.objects.filter(ligne_id=ligne.pk).aggregate(
-            total=Sum("quantite_livree")
-        )["total"]
-        or 0
-    )
-
-    return max(quantite_attendue_au_retour(ligne) - livre, 0)
+    return max(quantite_attendue_au_retour(ligne) - quantite_deposee(ligne), 0)
 
 
 def livraison_attendue(reservation) -> dict | None:
@@ -110,7 +144,7 @@ def livraison_attendue(reservation) -> dict | None:
         else [],
         "lignes": {
             ligne.pk: quantite_attendue_au_retour(ligne)
-            for ligne in reservation.lignes.all()
+            for ligne in _lignes_du_bon(reservation.pk)
         },
     }
 
@@ -134,7 +168,7 @@ def ramassage_attendu(reservation) -> dict | None:
 
     articles = {}
 
-    for ligne in reservation.lignes.all():
+    for ligne in _lignes_du_bon(reservation.pk):
         quantites = quantites_du_retour(ligne)
 
         articles[ligne.pk] = {
@@ -159,12 +193,32 @@ def ramassage_attendu(reservation) -> dict | None:
     }
 
 
+def _retracter(modele, reservation_id: int) -> None:
+    """Retire le passage projeté d'un bon qui n'en attend plus.
+
+    Borné au passage **projeté** (`PREMIER_PASSAGE`) et non à tous les passages
+    du bon : le jour où la saisie partielle en créera d'autres, ceux-là seront de
+    la vérité saisie, et les retirer serait une perte de données — ce sera un
+    arbitrage, pas une suppression.
+
+    Les lignes et les articles partent avec, par cascade.
+    """
+
+    modele.objects.filter(
+        reservation_id=reservation_id, sequence=PREMIER_PASSAGE
+    ).delete()
+
+
 @transaction.atomic
 def projeter_le_bon(reservation) -> dict:
     """Aligne les tables d'exécution d'un bon sur la vérité actuelle.
 
     Idempotent : la clé d'identité du passage est `(bon, séquence)`, donc
     rejouer la projection met à jour au lieu de dupliquer.
+
+    Aligner, c'est aussi **retirer** : un bon livré puis annulé n'attend plus
+    aucun passage, et le laisser en place était une divergence que
+    `divergences_du_bon` signalait sans que rien ne puisse la corriger.
     """
 
     resultat = {"livraison": None, "ramassage": None}
@@ -194,6 +248,8 @@ def projeter_le_bon(reservation) -> dict:
             ligne_id__in=attendue["lignes"]
         ).delete()
         resultat["livraison"] = livraison
+    else:
+        _retracter(Livraison, reservation.pk)
 
     attendu = ramassage_attendu(reservation)
 
@@ -219,6 +275,8 @@ def projeter_le_bon(reservation) -> dict:
             ligne_id__in=attendu["articles"]
         ).delete()
         resultat["ramassage"] = ramassage
+    else:
+        _retracter(Ramassage, reservation.pk)
 
     return resultat
 
@@ -246,6 +304,16 @@ def divergences_du_bon(reservation) -> list[str]:
                 f"lieu de livraison : {livraison.lieu_id} au lieu de "
                 f"{attendue['lieu'].pk}"
             )
+
+        # Les dates se comparent depuis le 17/09/2026 : un passage sans heure
+        # réelle sur un bon livré est passé inaperçu parce que seuls le lieu et
+        # les quantités étaient confrontés.
+        for champ in ("date_prevue", "date_reelle"):
+            if getattr(livraison, champ) != attendue[champ]:
+                ecarts.append(
+                    f"{champ} de livraison : {getattr(livraison, champ)} "
+                    f"au lieu de {attendue[champ]}"
+                )
 
         projetees = dict(
             LivraisonLigne.objects.filter(livraison_id=livraison.pk).values_list(
@@ -346,7 +414,11 @@ def tournee_du_jour(jour, queryset=None) -> dict:
                 "part": ligne.part_id,
                 "part_nom": ligne.part.name,
                 "quantite_demandee": ligne.quantite_demandee,
+                # `quantite_livree` est la colonne du bon, que personne n'écrit ;
+                # `quantite_deposee` est ce que les passages disent. Les deux
+                # cohabitent le temps que les écrans basculent sur la seconde.
                 "quantite_livree": ligne.quantite_livree,
+                "quantite_deposee": quantite_deposee(ligne),
                 "quantite_attendue": attendue,
                 "quantite_restante": quantite_restant_a_livrer(ligne),
             })

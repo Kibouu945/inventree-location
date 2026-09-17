@@ -599,9 +599,15 @@ class DeliveryListView(generics.ListAPIView):
                 "prestation__manifestation__contact",
                 "prestation__manifestation__client",
                 "livreur_assigne",
+                # `demandeur_nom` du sérialiseur lit ce compte : sans jointure,
+                # c'est une requête par bon de la tournée.
+                "demandeur",
             )
             .prefetch_related(
                 "lignes__part__rentable_info",
+                # Sans ce préchargement, `quantite_deposee` et sa restante
+                # coûtent une requête par ligne de chaque bon de la tournée.
+                "lignes__livraisons",
                 "livraison_status_logs__changed_by",
             )
             .all()
