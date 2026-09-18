@@ -2,7 +2,9 @@
 //
 // Deux écrans les partagent : l'onglet Contacts du back-office, qui les gère,
 // et le sélecteur « Contact référent » de l'écran Manifestations, qui les
-// consomme.
+// consomme. La règle de désactivation elle-même vit dans `optionsActives` :
+// elle vaut aussi pour les clients.
+import { optionsActives } from './optionsActives';
 
 /** Ce qu'il faut d'un contact pour l'afficher : le reste ne regarde pas ces règles. */
 export interface ContactAffichable {
@@ -29,12 +31,5 @@ export function optionsDeContacts(
   contacts: ContactAffichable[],
   selectionne: string | null = null
 ): Array<{ value: string; label: string }> {
-  return contacts
-    .filter((contact) => contact.actif || String(contact.id) === selectionne)
-    .map((contact) => ({
-      value: String(contact.id),
-      label: contact.actif
-        ? nomComplet(contact)
-        : `${nomComplet(contact)} (inactif)`
-    }));
+  return optionsActives(contacts, nomComplet, selectionne);
 }

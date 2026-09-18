@@ -20,8 +20,8 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { optionsDeClients } from '../backoffice/clientLogic';
 import { optionsDeContacts } from '../backoffice/contactLogic';
+import { optionsActives } from '../backoffice/optionsActives';
 import { DateTimeField } from '../DateTimeField';
 
 import { canWriteOrganisation } from '../roles';
@@ -148,17 +148,21 @@ export function ManifestationsTab({
     ? listQuery.data
     : (listQuery.data?.results ?? []);
 
-  // Filtre de recherche : tous les clients, y compris désactivés, pour
-  // retrouver les manifestations passées d'un client qui a fermé depuis.
-  const clientOptions = (clientsQuery.data?.results ?? []).map((c) => ({
+  const clients = clientsQuery.data?.results ?? [];
+
+  // Le filtre de la liste garde les clients désactivés : on cherche aussi les
+  // manifestations passées d'un client qui n'est plus en service.
+  const clientOptionsFiltre = clients.map((c) => ({
     value: String(c.id),
-    label: c.nom
+    label: c.actif ? c.nom : `${c.nom} (inactif)`
   }));
 
-  // Formulaire : un client désactivé ne doit plus recevoir de nouvelle
-  // manifestation, sauf s'il est déjà celui de la manifestation éditée.
-  const clientFormOptions = optionsDeClients(
-    clientsQuery.data?.results ?? [],
+  // Le formulaire, lui, ne propose que les clients en service — sauf celui que
+  // porte déjà la manifestation qu'on édite. C'est la règle annoncée par le
+  // back-office, et le serveur la refuse aussi.
+  const clientOptionsFormulaire = optionsActives(
+    clients,
+    (client) => client.nom,
     form.values.client
   );
 
@@ -254,7 +258,7 @@ export function ManifestationsTab({
         <Select
           label='Client'
           placeholder='Tous les clients'
-          data={clientOptions}
+          data={clientOptionsFiltre}
           value={clientFiltre}
           onChange={setClientFiltre}
           clearable
@@ -364,7 +368,7 @@ export function ManifestationsTab({
               <Select
                 label='Client'
                 required
-                data={clientFormOptions}
+                data={clientOptionsFormulaire}
                 searchable
                 {...form.getInputProps('client')}
               />
