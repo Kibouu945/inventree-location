@@ -135,6 +135,9 @@ const RESERVATIONS = onglet(
 // L'ancien calendrier mensuel des réservations est remplacé — il montrait les
 // bons, pas les manifestations, et ni volume ni avancement.
 const PLANNING = onglet('planning', 'Planning', IconCalendarMonth, Planning);
+// Le fichier clients. Même écran que le back-office de l'admin, qui masque de
+// lui-même l'onglet Utilisateurs à qui ne gère pas les comptes.
+const CLIENTS = onglet('clients', 'Clients', IconUsersGroup, UsersBackOffice);
 const CATALOGUE = onglet('catalogue', 'Catalogue', IconListSearch, CatalogList);
 const CONFLITS = onglet(
   'conflits',
@@ -171,6 +174,7 @@ export const POSTES: Record<string, PosteDefinition> = {
     // n'existent pas, on ne pose pas d'onglet vide.
     onglets: [
       MANIFESTATIONS,
+      CLIENTS,
       PLANNING,
       FICHES,
       RESERVATIONS,

@@ -7,7 +7,7 @@ const LENT = process.env.LENT === '1';
 // Attendu, lu dans `postes/definitions.tsx`. L'ordre compte : le premier
 // onglet est l'écran sur lequel le poste s'ouvre.
 const ATTENDU = {
-  demo_gestionnaire: ['Manifestations', 'Planning', 'Fiches', 'Réservations', 'Catalogue', 'Conflits', 'Alertes stock'],
+  demo_gestionnaire: ['Manifestations', 'Clients', 'Planning', 'Fiches', 'Réservations', 'Catalogue', 'Conflits', 'Alertes stock'],
   demo_magasinier: ['Ramassages', 'Catalogue', 'Alertes stock', 'Réservations'],
   demo_livreur: ['Livraisons', 'Ramassages'],
   demo_acheteur: ['Alertes stock', 'Catalogue'],
