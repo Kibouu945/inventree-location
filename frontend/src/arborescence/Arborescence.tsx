@@ -23,7 +23,6 @@ import {
   Loader,
   Modal,
   Radio,
-  Select,
   Stack,
   Text,
   TextInput,
@@ -40,7 +39,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 
-import type { Manifestation, Page, Prestation } from '../organisation/types';
+import type { Client, Manifestation, Page, Prestation } from '../organisation/types';
 import { PrestationCreateModal } from '../reservation/PrestationCreateModal';
 import { ReservationForm } from '../reservation/ReservationForm';
 import type { Reservation } from '../reservation/types';
@@ -54,6 +53,7 @@ const CLIENTS_URL = '/plugin/inventree-location/clients/';
 
 /** Teintes des quatre niveaux, dans l'esprit de la maquette. */
 const FOND = {
+  client: 'var(--mantine-color-dark-0)',
   manifestation: 'var(--mantine-color-gray-3)',
   prestation: 'var(--mantine-color-blue-1)',
   bon: 'var(--mantine-color-red-0)',
@@ -209,10 +209,12 @@ function dateCourte(iso: string | null | undefined): string {
 /** Niveaux 3 et 4 : bons d'une prestation et leurs articles. */
 function BonsDeLaPrestation({
   context,
-  prestation
+  prestation,
+  indentationBase = 48
 }: {
   context: InvenTreePluginContext;
   prestation: Prestation;
+  indentationBase?: number;
 }) {
   const [ouverts, setOuverts] = useState<Set<number>>(new Set());
   // Ajouter un article à un bon, c'est modifier le bon : on ouvre le
@@ -235,14 +237,14 @@ function BonsDeLaPrestation({
   );
 
   if (query.isLoading) {
-    return <Loader size='xs' ml={60} my={4} />;
+    return <Loader size='xs' ml={indentationBase + 12} my={4} />;
   }
 
   const bons = query.data?.results ?? [];
 
   if (bons.length === 0) {
     return (
-      <Text size='xs' c='dimmed' ml={60} my={4}>
+      <Text size='xs' c='dimmed' ml={indentationBase + 12} my={4}>
         Aucun bon de réservation sur cette prestation.
       </Text>
     );
@@ -263,7 +265,7 @@ function BonsDeLaPrestation({
 
         return (
           <Box key={bon.id}>
-            <Ligne fond={FOND.bon} indentation={48}>
+            <Ligne fond={FOND.bon} indentation={indentationBase}>
               <Group justify='space-between' wrap='nowrap'>
                 <UnstyledButton
                   onClick={() =>
@@ -308,7 +310,7 @@ function BonsDeLaPrestation({
 
             {ouvert &&
               lignes.map((ligne) => (
-                <Ligne key={ligne.id} fond={FOND.article} indentation={72}>
+                <Ligne key={ligne.id} fond={FOND.article} indentation={indentationBase + 24}>
                   <Group justify='space-between' wrap='nowrap'>
                     <Box>
                       <Text size='sm' fw={600}>
@@ -381,10 +383,12 @@ function BonsDeLaPrestation({
 /** Niveau 2 : les prestations d'une manifestation. */
 function PrestationsDeLaManifestation({
   context,
-  manifestation
+  manifestation,
+  indentationBase = 24
 }: {
   context: InvenTreePluginContext;
   manifestation: Manifestation;
+  indentationBase?: number;
 }) {
   const [ouvertes, setOuvertes] = useState<Set<number>>(new Set());
   const [prestationDuBon, setPrestationDuBon] = useState<Prestation | null>(
@@ -406,14 +410,14 @@ function PrestationsDeLaManifestation({
   );
 
   if (query.isLoading) {
-    return <Loader size='xs' ml={36} my={4} />;
+    return <Loader size='xs' ml={indentationBase + 12} my={4} />;
   }
 
   const prestations = query.data?.results ?? [];
 
   if (prestations.length === 0) {
     return (
-      <Text size='xs' c='dimmed' ml={36} my={4}>
+      <Text size='xs' c='dimmed' ml={indentationBase + 12} my={4}>
         Aucune prestation sur cette manifestation.
       </Text>
     );
@@ -426,7 +430,7 @@ function PrestationsDeLaManifestation({
 
         return (
           <Box key={prestation.id}>
-            <Ligne fond={FOND.prestation} indentation={24}>
+            <Ligne fond={FOND.prestation} indentation={indentationBase}>
               <Group justify='space-between' wrap='nowrap'>
                 <UnstyledButton
                   onClick={() =>
@@ -462,7 +466,11 @@ function PrestationsDeLaManifestation({
             </Ligne>
 
             {ouverte && (
-              <BonsDeLaPrestation context={context} prestation={prestation} />
+              <BonsDeLaPrestation
+                context={context}
+                prestation={prestation}
+                indentationBase={indentationBase + 24}
+              />
             )}
           </Box>
         );
@@ -491,64 +499,43 @@ function PrestationsDeLaManifestation({
   );
 }
 
-/** Niveau 1 : les manifestations, filtrées par recherche et période. */
-export function Arborescence({ context }: { context: InvenTreePluginContext }) {
-  const [recherche, setRecherche] = useState('');
-  const [periode, setPeriode] = useState('futur');
-  const [client, setClient] = useState<string | null>(null);
-  const [ouvertes, setOuvertes] = useState<Set<number>>(new Set());
-  const [manifestationDeLaPrestation, setManifestationDeLaPrestation] =
-    useState<Manifestation | null>(null);
-  const peutEcrireOrganisation = canWriteOrganisation(context);
-
+/** Niveau 1 : les manifestations d'un client, chargées au dépliage. */
+function ManifestationsDuClient({
+  context,
+  client,
+  recherche,
+  periode,
+  ouvertes,
+  setOuvertes,
+  onAjouterPrestation
+}: {
+  context: InvenTreePluginContext;
+  client: Client;
+  recherche: string;
+  periode: string;
+  ouvertes: Set<number>;
+  setOuvertes: React.Dispatch<React.SetStateAction<Set<number>>>;
+  onAjouterPrestation: (manifestation: Manifestation) => void;
+}) {
   const params = useMemo(() => {
-    const valeurs: Record<string, string> = {};
+    const valeurs: Record<string, string> = {
+      client: String(client.id)
+    };
 
     if (recherche.trim()) {
       valeurs.search = recherche.trim();
     }
 
-    // « Tout » est l'absence de filtre côté serveur, pas une valeur.
     if (periode === 'futur' || periode === 'passe') {
       valeurs.periode = periode;
     }
 
-    // « Retrouver les manifestations d'un client au téléphone » (09/09). La
-    // recherche texte porte sur le nom de la manifestation : sans ce filtre,
-    // il fallait connaître le nom de l'évènement pour retrouver le client.
-    if (client) {
-      valeurs.client = client;
-    }
-
     return valeurs;
-  }, [recherche, periode, client]);
-
-  // Le sélecteur de client se remplit une fois : la liste ne bouge pas au fil
-  // des filtres, et elle est partagée avec les autres écrans qui la lisent.
-  const clientsQuery = useQuery<Page<{ id: number; nom: string }>>(
-    {
-      queryKey: ['clients'],
-      queryFn: async () => {
-        const reponse = await context.api.get(CLIENTS_URL);
-        return reponse.data as Page<{ id: number; nom: string }>;
-      }
-    },
-    context.queryClient
-  );
-
-  // Clés possédées, préfixées (cf. `urlState`).
-  const own = new URLSearchParams();
-  if (periode !== 'futur') {
-    own.set('arbo_periode', periode);
-  }
-  if (client) {
-    own.set('arbo_client', client);
-  }
-  syncOwnedParams(ownsKeys(['arbo_periode', 'arbo_client']), own);
+  }, [client.id, recherche, periode]);
 
   const query = useQuery<Page<Manifestation>>(
     {
-      queryKey: ['arbo-manifestations', params],
+      queryKey: ['arbo-manifestations-client', client.id, params],
       queryFn: async () => {
         const reponse = await context.api.get(MANIFESTATIONS_URL, { params });
         return reponse.data as Page<Manifestation>;
@@ -558,6 +545,115 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
   );
 
   const manifestations = query.data?.results ?? [];
+
+  if (query.isLoading) {
+    return <Loader size='xs' ml={36} my={4} />;
+  }
+
+  if (manifestations.length === 0) {
+    return (
+      <Text size='xs' c='dimmed' ml={36} my={4}>
+        Aucune manifestation pour ce client sur cette période.
+      </Text>
+    );
+  }
+
+  return (
+    <>
+      {manifestations.map((manifestation) => {
+        const ouverte = ouvertes.has(manifestation.id);
+
+        return (
+          <Box key={manifestation.id} mb={4}>
+            <Ligne fond={FOND.manifestation} indentation={24}>
+              <Group justify='space-between' wrap='nowrap'>
+                <UnstyledButton
+                  onClick={() =>
+                    setOuvertes((precedent) => {
+                      const suivant = new Set(precedent);
+                      suivant.has(manifestation.id)
+                        ? suivant.delete(manifestation.id)
+                        : suivant.add(manifestation.id);
+                      return suivant;
+                    })
+                  }
+                >
+                  <Group gap='xs' wrap='nowrap'>
+                    <Chevron ouvert={ouverte} />
+                    <Text size='sm' fw={700}>
+                      {manifestation.nom}
+                    </Text>
+                    <Text size='xs' c='dimmed'>
+                      {dateCourte(manifestation.date_debut)} →{' '}
+                      {dateCourte(manifestation.date_fin)}
+                    </Text>
+                    <Text size='xs' c='dimmed'>
+                      {manifestation.organisateur_nom}
+                    </Text>
+                    <Badge size='xs' variant='light'>
+                      {manifestation.statut_effectif}
+                    </Badge>
+                    <Text size='xs' c='dimmed'>
+                      {manifestation.prestations_count} prestation
+                      {manifestation.prestations_count > 1 ? 's' : ''}
+                    </Text>
+                  </Group>
+                </UnstyledButton>
+
+                <Ajouter
+                  quoi='une prestation'
+                  autorise={canWriteOrganisation(context)}
+                  onClick={() => onAjouterPrestation(manifestation)}
+                />
+              </Group>
+            </Ligne>
+
+            {ouverte && (
+              <PrestationsDeLaManifestation
+                context={context}
+                manifestation={manifestation}
+                indentationBase={48}
+              />
+            )}
+          </Box>
+        );
+      })}
+    </>
+  );
+}
+
+/** Arborescence F3 : client → manifestation → prestation → bon → articles. */
+export function Arborescence({ context }: { context: InvenTreePluginContext }) {
+  const [recherche, setRecherche] = useState('');
+  const [periode, setPeriode] = useState('futur');
+  const [clientsOuverts, setClientsOuverts] = useState<Set<number>>(new Set());
+  const [ouvertes, setOuvertes] = useState<Set<number>>(new Set());
+  const [manifestationDeLaPrestation, setManifestationDeLaPrestation] =
+    useState<Manifestation | null>(null);
+
+  const clientsQuery = useQuery<Page<Client>>(
+    {
+      queryKey: ['clients-arborescence'],
+      queryFn: async () => {
+        const reponse = await context.api.get(CLIENTS_URL, {
+          params: { page_size: 200 }
+        });
+        return reponse.data as Page<Client>;
+      }
+    },
+    context.queryClient
+  );
+
+  // Clé possédée, préfixée (cf. `urlState`).
+  const own = new URLSearchParams();
+
+  if (periode !== 'futur') {
+    own.set('arbo_periode', periode);
+  }
+
+  syncOwnedParams(ownsKeys(['arbo_periode']), own);
+
+  const clients = clientsQuery.data?.results ?? [];
 
   /** Une prestation vient de naître : la manifestation la montre aussitôt. */
   function prestationCreee() {
@@ -572,20 +668,18 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
     context.queryClient.invalidateQueries({
       queryKey: ['arbo-prestations', parente.id]
     });
-    // Le compteur « N prestations » de la ligne parente vit dans la liste des
-    // manifestations : sans cette seconde invalidation, la prestation
-    // apparaît mais le compteur au-dessus d'elle ment.
+
     context.queryClient.invalidateQueries({
-      queryKey: ['arbo-manifestations']
+      queryKey: ['arbo-manifestations-client']
     });
-    // Et on déplie, pour qu'elle se voie sans clic de plus.
+
     setOuvertes((precedent) => new Set(precedent).add(parente.id));
   }
 
   return (
     <Stack gap='sm'>
       <Title order={4} c={context.theme.primaryColor}>
-        Manifestation, prestation &amp; lieu
+        Client, manifestation, prestation &amp; lieu
       </Title>
 
       <Group justify='space-between' align='flex-end' wrap='wrap'>
@@ -596,31 +690,18 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
           onChange={(evenement) => setRecherche(evenement.currentTarget.value)}
           w={280}
         />
-        <Select
-          placeholder='Tous les clients'
-          data={(clientsQuery.data?.results ?? []).map((c) => ({
-            value: String(c.id),
-            label: c.nom
-          }))}
-          value={client}
-          onChange={setClient}
-          clearable
-          searchable
-          w={220}
-          aria-label='Client'
-        />
+
         <Radio.Group value={periode} onChange={setPeriode}>
           <Group gap='md'>
             <Radio value='futur' label='Futur' />
             <Radio value='passe' label='Passé' />
             <Radio value='tout' label='Tout' />
-            {/* Tables créées, montants non : montré mais désactivé, pour que
-                l'écart avec la maquette se voie. */}
             <Tooltip label='À venir : la facturation est au modèle, pas encore aux écrans'>
               <Radio value='facturer' label='À facturer' disabled />
             </Tooltip>
           </Group>
         </Radio.Group>
+
         <Group gap={6}>
           <Pastille lettre='L' etat='partiel' libelle='Livraison' />
           <Text size='xs' c='dimmed'>
@@ -641,68 +722,62 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
         </Group>
       </Group>
 
-      {query.isLoading && <Loader size='sm' />}
+      {clientsQuery.isLoading && <Loader size='sm' />}
 
-      {!query.isLoading && manifestations.length === 0 && (
+      {!clientsQuery.isLoading && clients.length === 0 && (
         <Text size='sm' c='dimmed'>
-          Aucune manifestation sur cette période.
+          Aucun client disponible.
         </Text>
       )}
 
       <Box>
-        {manifestations.map((manifestation) => {
-          const ouverte = ouvertes.has(manifestation.id);
+        {clients.map((client) => {
+          const ouvert = clientsOuverts.has(client.id);
 
           return (
-            <Box key={manifestation.id} mb={4}>
-              <Ligne fond={FOND.manifestation} indentation={0}>
+            <Box key={client.id} mb={4}>
+              <Ligne fond={FOND.client} indentation={0}>
                 <Group justify='space-between' wrap='nowrap'>
                   <UnstyledButton
                     onClick={() =>
-                      setOuvertes((precedent) => {
+                      setClientsOuverts((precedent) => {
                         const suivant = new Set(precedent);
-                        suivant.has(manifestation.id)
-                          ? suivant.delete(manifestation.id)
-                          : suivant.add(manifestation.id);
+                        suivant.has(client.id)
+                          ? suivant.delete(client.id)
+                          : suivant.add(client.id);
                         return suivant;
                       })
                     }
                   >
                     <Group gap='xs' wrap='nowrap'>
-                      <Chevron ouvert={ouverte} />
+                      <Chevron ouvert={ouvert} />
                       <Text size='sm' fw={700}>
-                        {manifestation.nom}
+                        Client — {client.nom}
                       </Text>
-                      <Text size='xs' c='dimmed'>
-                        {dateCourte(manifestation.date_debut)} →{' '}
-                        {dateCourte(manifestation.date_fin)}
-                      </Text>
-                      <Text size='xs' c='dimmed'>
-                        {manifestation.organisateur_nom}
-                      </Text>
-                      <Badge size='xs' variant='light'>
-                        {manifestation.statut_effectif}
-                      </Badge>
-                      <Text size='xs' c='dimmed'>
-                        {manifestation.prestations_count} prestation
-                        {manifestation.prestations_count > 1 ? 's' : ''}
-                      </Text>
+                      {client.email && (
+                        <Text size='xs' c='dimmed'>
+                          {client.email}
+                        </Text>
+                      )}
+                      {client.gestionnaire_nom && (
+                        <Text size='xs' c='dimmed'>
+                          Gestionnaire : {client.gestionnaire_nom}
+                        </Text>
+                      )}
                     </Group>
                   </UnstyledButton>
-                  <Ajouter
-                    quoi='une prestation'
-                    autorise={peutEcrireOrganisation}
-                    onClick={() =>
-                      setManifestationDeLaPrestation(manifestation)
-                    }
-                  />
                 </Group>
               </Ligne>
 
-              {ouverte && (
-                <PrestationsDeLaManifestation
+              {ouvert && (
+                <ManifestationsDuClient
                   context={context}
-                  manifestation={manifestation}
+                  client={client}
+                  recherche={recherche}
+                  periode={periode}
+                  ouvertes={ouvertes}
+                  setOuvertes={setOuvertes}
+                  onAjouterPrestation={setManifestationDeLaPrestation}
                 />
               )}
             </Box>
