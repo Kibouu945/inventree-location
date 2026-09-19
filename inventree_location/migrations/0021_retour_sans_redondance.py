@@ -113,6 +113,7 @@ def normaliser_etat_retour(apps):
 
 
 class Migration(migrations.Migration):
+    atomic = False
     """Reprise des données puis suppression des colonnes."""
 
     dependencies = [
