@@ -1,19 +1,10 @@
-// Écran « Manifestation, prestation & lieu » — l'arborescence de la maquette
-// du cahier des charges (annexe « Idées de design ») : manifestation →
-// prestation → bon de réservation → articles, avec par ligne la quantité
-// réservée, livrée et ramassée, et les pastilles d'état.
+// Écran « Client, manifestation, prestation & lieu » — arborescence F3.
 //
-// C'est la « navigation hiérarchique sans ressaisie » demandée le 09/09/2026.
+// Navigation hiérarchique : client → manifestation → prestation →
+// bon de réservation → articles.
 //
-// Le niveau client manque toujours, mais plus faute de table : `Client` et
-// `Contact` existent depuis le lot L2 (09/09). C'est la tâche F3 — poser le
-// client au-dessus, dépliable sur ses manifestations. À ne pas confondre avec
-// le sélecteur de client posé ici (A3) : il **filtre** la liste, il ne
-// l'imbrique pas, et il devra disparaître quand le niveau arrivera — sinon on
-// filtrera deux fois la même chose, une fois par le haut et une par le côté.
-//
-// Chargement **au dépliage**, un niveau à la fois : l'arbre entier aurait
-// demandé un endpoint dédié et ramené toute la base à chaque affichage.
+// Chargement au dépliage, un niveau à la fois, pour éviter de charger
+// toute l'arborescence en une seule requête.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   ActionIcon,
@@ -39,7 +30,12 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 
-import type { Client, Manifestation, Page, Prestation } from '../organisation/types';
+import type {
+  Client,
+  Manifestation,
+  Page,
+  Prestation
+} from '../organisation/types';
 import { PrestationCreateModal } from '../reservation/PrestationCreateModal';
 import { ReservationForm } from '../reservation/ReservationForm';
 import type { Reservation } from '../reservation/types';
@@ -51,9 +47,9 @@ const PRESTATIONS_URL = '/plugin/inventree-location/prestations/';
 const RESERVATIONS_URL = '/plugin/inventree-location/reservations/';
 const CLIENTS_URL = '/plugin/inventree-location/clients/';
 
-/** Teintes des quatre niveaux, dans l'esprit de la maquette. */
+/** Teintes des cinq niveaux, dans l'esprit de la maquette. */
 const FOND = {
-  client: 'var(--mantine-color-dark-0)',
+  client: 'var(--mantine-color-blue-9)',
   manifestation: 'var(--mantine-color-gray-3)',
   prestation: 'var(--mantine-color-blue-1)',
   bon: 'var(--mantine-color-red-0)',
@@ -132,12 +128,7 @@ function Chevron({ ouvert }: { ouvert: boolean }) {
  *
  * Il ouvre le formulaire existant plutôt qu'un formulaire de plus : la
  * création d'une prestation et celle d'un bon vivent déjà dans
- * `PrestationCreateModal` et `ReservationForm`, tous deux écrits pour être
- * montés ailleurs. Rien n'est dupliqué — une règle de saisie corrigée l'est
- * partout à la fois.
- *
- * Rendu `null` sans le droit d'écriture : un bouton qu'on ne peut pas suivre
- * n'apprend rien à qui n'a pas le rôle.
+ * `PrestationCreateModal` et `ReservationForm`.
  */
 function Ajouter({
   quoi,
@@ -206,7 +197,7 @@ function dateCourte(iso: string | null | undefined): string {
   });
 }
 
-/** Niveaux 3 et 4 : bons d'une prestation et leurs articles. */
+/** Niveaux 4 et 5 : bons d'une prestation et leurs articles. */
 function BonsDeLaPrestation({
   context,
   prestation,
@@ -218,8 +209,7 @@ function BonsDeLaPrestation({
 }) {
   const [ouverts, setOuverts] = useState<Set<number>>(new Set());
   // Ajouter un article à un bon, c'est modifier le bon : on ouvre le
-  // formulaire de réservation sur lui, où la liste d'articles se saisit déjà,
-  // avec ses contrôles de stock et de statut.
+  // formulaire de réservation sur lui.
   const [bonEdite, setBonEdite] = useState<Reservation | null>(null);
   const peutEcrire = canWriteReservations(context);
 
@@ -288,6 +278,7 @@ function BonsDeLaPrestation({
                     </Text>
                   </Group>
                 </UnstyledButton>
+
                 <Group gap={6} wrap='nowrap'>
                   <Pastille
                     lettre='L'
@@ -310,7 +301,11 @@ function BonsDeLaPrestation({
 
             {ouvert &&
               lignes.map((ligne) => (
-                <Ligne key={ligne.id} fond={FOND.article} indentation={indentationBase + 24}>
+                <Ligne
+                  key={ligne.id}
+                  fond={FOND.article}
+                  indentation={indentationBase + 24}
+                >
                   <Group justify='space-between' wrap='nowrap'>
                     <Box>
                       <Text size='sm' fw={600}>
@@ -320,6 +315,7 @@ function BonsDeLaPrestation({
                         Réf. {ligne.part_noi || '—'}
                       </Text>
                     </Box>
+
                     <Group gap='lg' wrap='nowrap'>
                       <Text size='xs'>
                         Qté réservée : <b>{ligne.quantite_demandee}</b>
@@ -365,9 +361,6 @@ function BonsDeLaPrestation({
             context={context}
             reservationId={bonEdite.id}
             onSaved={() => {
-              // Les lignes voyagent dans la charge du bon : c'est la liste des
-              // bons de la prestation qu'il faut relire, pas une liste
-              // d'articles qui n'existe pas.
               context.queryClient.invalidateQueries({
                 queryKey: ['arbo-reservations', prestation.id]
               });
@@ -380,7 +373,7 @@ function BonsDeLaPrestation({
   );
 }
 
-/** Niveau 2 : les prestations d'une manifestation. */
+/** Niveau 3 : les prestations d'une manifestation. */
 function PrestationsDeLaManifestation({
   context,
   manifestation,
@@ -457,6 +450,7 @@ function PrestationsDeLaManifestation({
                     </Text>
                   </Group>
                 </UnstyledButton>
+
                 <Ajouter
                   quoi='une réservation'
                   autorise={peutEcrire}
@@ -499,7 +493,7 @@ function PrestationsDeLaManifestation({
   );
 }
 
-/** Niveau 1 : les manifestations d'un client, chargées au dépliage. */
+/** Niveau 2 : les manifestations d'un client, chargées au dépliage. */
 function ManifestationsDuClient({
   context,
   client,
@@ -751,16 +745,18 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
                   >
                     <Group gap='xs' wrap='nowrap'>
                       <Chevron ouvert={ouvert} />
-                      <Text size='sm' fw={700}>
+                      <Text size='sm' fw={700} c='white'>
                         Client — {client.nom}
                       </Text>
+
                       {client.email && (
-                        <Text size='xs' c='dimmed'>
+                        <Text size='xs' c='gray.2'>
                           {client.email}
                         </Text>
                       )}
+
                       {client.gestionnaire_nom && (
-                        <Text size='xs' c='dimmed'>
+                        <Text size='xs' c='gray.2'>
                           Gestionnaire : {client.gestionnaire_nom}
                         </Text>
                       )}
