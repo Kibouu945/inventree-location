@@ -35,14 +35,21 @@ ramassage → retour, en neuf étapes **indépendantes** : une étape qui casse
 n'empêche pas les suivantes, chacune laisse une capture en cas d'échec, et le
 bilan final dit laquelle est tombée.
 
-Trois règles font échouer une saisie improvisée, et ce n'est pas un bug :
+Quatre règles font échouer une saisie improvisée, et ce n'est pas un bug :
 
 1. **Le gérant interne est obligatoire** sur un bon — « Le demandeur est
    obligatoire » au moment de soumettre.
 2. **Un article virtuel est obligatoire à la soumission**, en plus du matériel.
 3. **L'écran Livraisons s'ouvre sur la tournée du jour** : une manifestation
    datée de la semaine prochaine n'y apparaît pas. Le scénario date donc sa
-   manifestation sur *aujourd'hui*.
+   manifestation sur *aujourd'hui* — et ses dates se **calculent**, elles ne se
+   figent pas : datées en dur, elles tombent dans le passé quelques jours plus
+   tard et six étapes échouent d'un coup sur une application saine.
+4. **L'arborescence part du client** (F3), et les clients s'ouvrent repliés. Le
+   filtre client d'autrefois a disparu — il faisait doublon avec le niveau. Le
+   scénario passe donc par la recherche, qui ne garde que les clients portant
+   une manifestation correspondante et les déplie. Elle est différée de 300 ms :
+   remplir le champ puis chercher aussitôt ne trouve rien.
 
 ### `alternatifs.mjs` — ce qui doit être refusé, toléré ou masqué
 
@@ -56,25 +63,51 @@ Trois règles font échouer une saisie improvisée, et ce n'est pas un bug :
 | Manifestation dont la fin précède le début | refusé, HTTP 400 |
 
 **Deux de ces cas écrivent** sur un bon livré : ils le passent en `retournee`
-avec des quantités de test. Remettre en état après coup, sinon la base de
-démonstration ment :
+avec des quantités de test — dont un ramassage de 99 pour 4 sortis, qui est
+tout l'objet du cas B.
+
+Le bon visé n'est pas fixe : `cibleRamassable()` prend le **premier** bon
+`livree` ou `retournee` rendu par `/reservations/`, et ce tri est
+`-date_demande`. C'est donc le bon le plus récemment demandé — en pratique
+celui que `nominal.mjs` vient de créer, si on l'a joué juste avant.
+
+Remettre en état après coup, sinon la base de démonstration ment. La commande
+ci-dessous retrouve le bon par la même règle que le scénario, plutôt que par un
+numéro écrit en dur qui cesserait d'être le bon dès la démonstration suivante :
 
 ```bash
-make manage cmd='shell -c "
-from inventree_location.models import Reservation, ReturnIncident
-from inventree_location import models as m
-b = Reservation.objects.get(numero=\"RES-2026-0003\")
-for l in b.lignes.all():
-    l.quantite_ramassee = l.quantite_sav = l.quantite_detruite = 0
-    l.quantite_manquante = l.quantite_retournee = 0
-    l.save()
-ReturnIncident.objects.filter(line__reservation=b).delete()
-m.Ramassage.objects.filter(reservation=b).delete()
-b.statut = \"livree\"; b.save()
-"'
+docker compose exec -T inventree bash -lc \
+  'cd /home/inventree/src/backend/InvenTree && python manage.py shell' <<'EOF'
+from inventree_location.models import Reservation, Ramassage, ReturnIncident
+
+bon = Reservation.objects.filter(statut__in=["livree", "retournee"]).first()
+
+for ligne in bon.lignes.all():
+    ligne.quantite_retournee = 0
+    ligne.etat_retour = ""
+    ligne.save(update_fields=["quantite_retournee", "etat_retour"])
+
+ReturnIncident.objects.filter(line__reservation=bon).delete()
+Ramassage.objects.filter(reservation=bon).delete()
+bon.statut = "livree"
+bon.save(update_fields=["statut"])
+print("remis en état :", bon.numero)
+EOF
+
 make manage cmd="projeter_execution"
 make manage cmd="verifier_projection"   # doit dire « Aucune divergence. »
 ```
+
+Deux pièges payés ici. Le passage par `make manage cmd='shell -c "..."'`
+n'encaisse pas un script sur plusieurs lignes : les guillemets se perdent en
+route et Django répond `argument -c/--command: expected one argument`. Un
+`heredoc` dans le conteneur passe sans échappement.
+
+Et les quantités de retour **ne sont plus portées par la ligne** : la migration
+`0021` a supprimé `quantite_ramassee`, `quantite_sav`, `quantite_detruite` et
+`quantite_manquante` au profit du registre `ReturnIncident`, qui fait foi. Il
+reste `quantite_livree`, `quantite_retournee` et `etat_retour`. Les incidents,
+eux, se comptent en `type` et `qty`.
 
 ### `roles.mjs` — un poste par rôle
 
@@ -85,6 +118,10 @@ et erreurs.
 
 Attendu : six rôles au vert, zéro erreur. `demo_sav` n'a pas de poste : aucun
 écran ne lui est déclaré, son widget reste vide. Manque connu, pas panne.
+
+Il relève en plus deux `HTTP 403 /api/news/`. C'est un point d'API natif
+d'InvenTree, pas du plugin, et le rôle n'y a pas droit : ne pas le chercher de
+notre côté.
 
 ## Si la base vient d'être réinitialisée
 
