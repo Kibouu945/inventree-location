@@ -77,7 +77,8 @@ export function ConflictsList({
   const [blocages, setBlocages] = useState<Record<number, string>>({});
   const [historyTypeFilter, setHistoryTypeFilter] = useState<string>('all');
 
-  // Le lecteur voit les conflits mais ne peut pas éditer les réservations.
+  // Le lecteur voit les conflits mais ne peut pas éditer les réservations ;
+  // « Résoudre » passe par le même endpoint, donc la même barrière de rôle.
   const canWrite = canWriteReservations(context);
 
   const query = useQuery<ConflictItem[]>(
@@ -340,7 +341,7 @@ export function ConflictsList({
                   {new Date(item.created_at).toLocaleString()}
                 </Table.Td>
                 <Table.Td>
-                  {item.state === 'open' ? (
+                  {item.state === 'open' && canWrite ? (
                     <Stack gap={4}>
                       <Button
                         size='xs'
@@ -357,7 +358,7 @@ export function ConflictsList({
                     </Stack>
                   ) : (
                     <Text c='dimmed' size='sm'>
-                      {item.resolved_by || '—'}
+                      {item.state === 'open' ? '—' : item.resolved_by || '—'}
                     </Text>
                   )}
                 </Table.Td>
