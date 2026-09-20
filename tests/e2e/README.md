@@ -62,52 +62,42 @@ Quatre règles font échouer une saisie improvisée, et ce n'est pas un bug :
 | Conflits de stock | l'écran liste le conflit |
 | Manifestation dont la fin précède le début | refusé, HTTP 400 |
 
-**Deux de ces cas écrivent** sur un bon livré : ils le passent en `retournee`
-avec des quantités de test — dont un ramassage de 99 pour 4 sortis, qui est
-tout l'objet du cas B.
+**Ce scénario fabrique son propre bon** — manifestation, prestation, bon,
+conduit jusqu'à « livrée » — et ne travaille que sur celui-là. Il n'y a donc
+plus rien à remettre en état après coup.
 
-Le bon visé n'est pas fixe : `cibleRamassable()` prend le **premier** bon
-`livree` ou `retournee` rendu par `/reservations/`, et ce tri est
-`-date_demande`. C'est donc le bon le plus récemment demandé — en pratique
-celui que `nominal.mjs` vient de créer, si on l'a joué juste avant.
+Il attrapait autrefois le premier bon `livree` ou `retournee` rendu par
+`/reservations/`, trié `-date_demande` : le plus récent, c'est-à-dire celui que
+`nominal.mjs` venait de créer, ou n'importe lequel de la base de démonstration.
+Il lui écrivait 99 récupérés dessus, et la base mentait jusqu'à ce qu'on pense
+au nettoyage — dont la commande, elle-même périmée, échouait.
 
-Remettre en état après coup, sinon la base de démonstration ment. La commande
-ci-dessous retrouve le bon par la même règle que le scénario, plutôt que par un
-numéro écrit en dur qui cesserait d'être le bon dès la démonstration suivante :
+Ce qu'il laisse : le bon fabriqué, **clôturé**. On ne peut pas le supprimer, le
+serveur ne supprimant qu'un brouillon ; clôturé, il sort des écrans Livraisons
+et Ramassages, dont la requête exclut `cloturee`. Sa manifestation s'appelle
+« Cas alternatifs <horodatage> », pour qu'on sache d'où il sort. Une exécution
+laisse donc une manifestation, une prestation et un bon clos — aucun autre bon
+n'est touché, ce qui était tout l'objet de la réécriture.
+
+Pour les faire disparaître d'une base de démonstration, quand elles se sont
+accumulées :
 
 ```bash
 docker compose exec -T inventree bash -lc \
   'cd /home/inventree/src/backend/InvenTree && python manage.py shell' <<'EOF'
-from inventree_location.models import Reservation, Ramassage, ReturnIncident
+from inventree_location.models import Reservation, Prestation, Manifestation
 
-bon = Reservation.objects.filter(statut__in=["livree", "retournee"]).first()
-
-for ligne in bon.lignes.all():
-    ligne.quantite_retournee = 0
-    ligne.etat_retour = ""
-    ligne.save(update_fields=["quantite_retournee", "etat_retour"])
-
-ReturnIncident.objects.filter(line__reservation=bon).delete()
-Ramassage.objects.filter(reservation=bon).delete()
-bon.statut = "livree"
-bon.save(update_fields=["statut"])
-print("remis en état :", bon.numero)
+vise = {"prestation__manifestation__nom__startswith": "Cas alternatifs"}
+Reservation.objects.filter(**vise).delete()
+Prestation.objects.filter(manifestation__nom__startswith="Cas alternatifs").delete()
+Manifestation.objects.filter(nom__startswith="Cas alternatifs").delete()
+print("campagnes de test effacées")
 EOF
-
-make manage cmd="projeter_execution"
-make manage cmd="verifier_projection"   # doit dire « Aucune divergence. »
 ```
 
-Deux pièges payés ici. Le passage par `make manage cmd='shell -c "..."'`
-n'encaisse pas un script sur plusieurs lignes : les guillemets se perdent en
-route et Django répond `argument -c/--command: expected one argument`. Un
-`heredoc` dans le conteneur passe sans échappement.
-
-Et les quantités de retour **ne sont plus portées par la ligne** : la migration
-`0021` a supprimé `quantite_ramassee`, `quantite_sav`, `quantite_detruite` et
-`quantite_manquante` au profit du registre `ReturnIncident`, qui fait foi. Il
-reste `quantite_livree`, `quantite_retournee` et `etat_retour`. Les incidents,
-eux, se comptent en `type` et `qty`.
+L'ORM passe outre le refus de l'API, qui ne supprime qu'un brouillon — c'est
+voulu côté métier, et c'est pour cela que le scénario clôture au lieu de
+supprimer.
 
 ### `roles.mjs` — un poste par rôle
 
