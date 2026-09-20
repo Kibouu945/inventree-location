@@ -830,7 +830,7 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
                     <Group gap='xs' wrap='nowrap'>
                       <Chevron ouvert={ouvert} />
                       <Text size='sm' fw={700} c='white'>
-                        Client — {client.nom}
+                        {client.nom}
                       </Text>
 
                       {client.email && (
