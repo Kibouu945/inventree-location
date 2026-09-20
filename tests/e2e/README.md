@@ -36,7 +36,7 @@ ramassage → retour, en neuf étapes **indépendantes** : une étape qui casse
 n'empêche pas les suivantes, chacune laisse une capture en cas d'échec, et le
 bilan final dit laquelle est tombée.
 
-Quatre règles font échouer une saisie improvisée, et ce n'est pas un bug :
+Cinq règles font échouer une saisie improvisée, et ce n'est pas un bug :
 
 1. **Le gérant interne est obligatoire** sur un bon — « Le demandeur est
    obligatoire » au moment de soumettre.
@@ -51,6 +51,11 @@ Quatre règles font échouer une saisie improvisée, et ce n'est pas un bug :
    scénario passe donc par la recherche, qui ne garde que les clients portant
    une manifestation correspondante et les déplie. Elle est différée de 300 ms :
    remplir le champ puis chercher aussitôt ne trouve rien.
+5. **Livraisons et Ramassages s'ouvrent sur leur table hiérarchique** (F6, F7),
+   où le numéro du bon ne paraît qu'après dépliage. Les scénarios basculent sur
+   la vue « Liste », qui garde la ligne plate et ses boutons. Sans cette
+   bascule, l'étape 8 cherchait une ligne absente, épuisait trente secondes
+   d'attente, puis se déclarait bonne : elle ne vérifiait plus rien.
 
 ### `alternatifs.mjs` — ce qui doit être refusé, toléré ou masqué
 
@@ -210,3 +215,11 @@ Attendre que `/api/` réponde ne suffit pas.
 - **« Manifestations » nomme deux onglets** — la navigation du poste et un
   onglet interne de l'écran Fiches. La navigation du poste porte
   `data-placement="left"`.
+- **Le sélecteur Arborescence / Liste est un `SegmentedControl`** : Mantine le
+  rend en `label`, pas en `button`. `getByRole('button', { name: 'Liste' })` ne
+  le trouve jamais ; le cibler par
+  `page.locator('label').filter({ hasText: /^Liste$/ })`.
+- **Un `catch` sur un localisateur rend une étape muette.** Écrite
+  `…allInnerTexts().catch(() => [])`, l'étape 8 passait au vert sur un écran
+  qu'elle n'avait pas trouvé. Faire échouer — `waitFor`, puis une assertion —
+  plutôt que d'avaler : une étape qui ne peut pas tomber ne prouve rien.

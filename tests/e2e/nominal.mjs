@@ -255,11 +255,34 @@ await etape('7. Livraison : marquer livrée', async () => {
 await etape('8. Ramassage : les quatre compteurs', async () => {
   await page.getByRole('tab', { name: 'Ramassages' }).first().click();
   await T(4000);
-  const txt = await page.locator('body').innerText();
+  // L'écran s'ouvre sur l'arborescence (F7), où le numéro du bon ne paraît
+  // qu'une fois l'arbre déplié : la vue « Liste » garde la ligne plate et ses
+  // boutons. Sans cette bascule, l'étape cherchait une ligne absente, épuisait
+  // trente secondes d'attente, et se déclarait bonne — elle ne vérifiait rien.
+  await page.locator('label').filter({ hasText: /^Liste$/ }).first().click();
+  await T(3000);
+
   const ligne = page.locator('tr', { hasText: NUMERO }).first();
-  console.log('     bons à ramasser :', (await ligne.innerText().catch(() => '— absent de la liste')).replace(/\n/g, ' · ').slice(0, 160));
-  const boutons = await ligne.getByRole('button').allInnerTexts().catch(() => []);
-  return `actions : ${boutons.join(', ') || 'aucune'}`;
+  // `waitFor` plutôt qu'un `catch` : une ligne absente doit faire échouer
+  // l'étape, pas la rendre muette.
+  await ligne.waitFor({ timeout: 15000 });
+  console.log('     bon à ramasser :', (await ligne.innerText()).replace(/\n/g, ' · ').slice(0, 160));
+
+  const boutons = await ligne.getByRole('button').allInnerTexts();
+
+  // Et le titre de l'étape se vérifie : on ouvre le bon et on compte ses
+  // compteurs — récupéré, SAV, détruit, manquant.
+  await ligne.getByRole('button', { name: /Voir/ }).click();
+  await T(3500);
+  const compteurs = await page.locator('input.mantine-NumberInput-input:visible').count();
+  await page.keyboard.press('Escape');
+  await T(1200);
+
+  if (compteurs !== 4) {
+    throw new Error(`${compteurs} compteur(s) sur la ligne, quatre attendus`);
+  }
+
+  return `actions : ${boutons.join(', ')} · ${compteurs} compteurs`;
 });
 
 await etape('9. Retour complet : les 4 bancs rendus', async () => {
