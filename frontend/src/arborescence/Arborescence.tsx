@@ -21,6 +21,7 @@ import {
   Tooltip,
   UnstyledButton
 } from '@mantine/core';
+import { useDebouncedValue } from '@mantine/hooks';
 import {
   IconChevronDown,
   IconChevronRight,
@@ -28,7 +29,7 @@ import {
   IconSearch
 } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import type {
   Client,
@@ -41,11 +42,15 @@ import { ReservationForm } from '../reservation/ReservationForm';
 import type { Reservation } from '../reservation/types';
 import { canWriteOrganisation, canWriteReservations } from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
+import { clientsDuReperage, filtresManifestations } from './arborescenceLogic';
 
 const MANIFESTATIONS_URL = '/plugin/inventree-location/manifestations/';
 const PRESTATIONS_URL = '/plugin/inventree-location/prestations/';
 const RESERVATIONS_URL = '/plugin/inventree-location/reservations/';
 const CLIENTS_URL = '/plugin/inventree-location/clients/';
+
+/** Plafond de page du serveur (`max_page_size`) : demander plus est ramené ici. */
+const PAGE_MAX = 100;
 
 /** Teintes des cinq niveaux, dans l'esprit de la maquette. */
 const FOND = {
@@ -511,21 +516,10 @@ function ManifestationsDuClient({
   setOuvertes: React.Dispatch<React.SetStateAction<Set<number>>>;
   onAjouterPrestation: (manifestation: Manifestation) => void;
 }) {
-  const params = useMemo(() => {
-    const valeurs: Record<string, string> = {
-      client: String(client.id)
-    };
-
-    if (recherche.trim()) {
-      valeurs.search = recherche.trim();
-    }
-
-    if (periode === 'futur' || periode === 'passe') {
-      valeurs.periode = periode;
-    }
-
-    return valeurs;
-  }, [client.id, recherche, periode]);
+  const params = useMemo(
+    () => filtresManifestations(recherche, periode, client.id),
+    [client.id, recherche, periode]
+  );
 
   const query = useQuery<Page<Manifestation>>(
     {
@@ -625,18 +619,84 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
   const [manifestationDeLaPrestation, setManifestationDeLaPrestation] =
     useState<Manifestation | null>(null);
 
+  const [rechercheDifferee] = useDebouncedValue(recherche, 300);
+  const rechercheActive = rechercheDifferee.trim().length > 0;
+
   const clientsQuery = useQuery<Page<Client>>(
     {
       queryKey: ['clients-arborescence'],
       queryFn: async () => {
         const reponse = await context.api.get(CLIENTS_URL, {
-          params: { page_size: 200 }
+          params: { page_size: PAGE_MAX }
         });
         return reponse.data as Page<Client>;
       }
     },
     context.queryClient
   );
+
+  // Repérage : quels clients portent une manifestation qui corresponde ?
+  //
+  // Les manifestations vivent un niveau sous des clients tous repliés. Sans ce
+  // repérage, taper dans la recherche ne changeait rien à l'écran — il aurait
+  // fallu déplier les clients un par un sans savoir lequel. Un seul appel
+  // répond pour tout l'arbre ; interroger chaque client en aurait fait un par
+  // client, et autant de fois qu'on tape une lettre.
+  const filtresReperage = useMemo(
+    () => filtresManifestations(rechercheDifferee, periode),
+    [rechercheDifferee, periode]
+  );
+
+  const reperage = useQuery<Page<Manifestation>>(
+    {
+      queryKey: ['arbo-reperage', filtresReperage],
+      enabled: rechercheActive,
+      queryFn: async () => {
+        const reponse = await context.api.get(MANIFESTATIONS_URL, {
+          params: { ...filtresReperage, page_size: PAGE_MAX }
+        });
+        return reponse.data as Page<Manifestation>;
+      }
+    },
+    context.queryClient
+  );
+
+  /** Clients à montrer, ou `null` hors recherche : l'arbre entier. */
+  const clientsTrouves = useMemo(() => {
+    if (!rechercheActive) {
+      return null;
+    }
+
+    return clientsDuReperage(reperage.data?.results ?? []);
+  }, [rechercheActive, reperage.data]);
+
+  // Une recherche qui aboutit ouvre d'elle-même les clients trouvés : ce qu'on
+  // cherche est un niveau plus bas, laisser replié reviendrait à le cacher.
+  // L'ouverture passe par l'état plutôt que par un `ouvert` forcé au rendu,
+  // sinon le chevron devient un bouton mort — ici, on peut encore replier un
+  // client sans quitter sa recherche. On ajoute au lieu de remplacer : ce que
+  // l'utilisateur avait déplié avant de chercher lui est rendu intact.
+  useEffect(() => {
+    if (!rechercheActive || !reperage.data) {
+      return;
+    }
+
+    setClientsOuverts((precedent) => {
+      const suivant = new Set(precedent);
+      reperage.data.results.forEach((m) => suivant.add(m.client));
+      return suivant;
+    });
+  }, [rechercheActive, reperage.data]);
+
+  // Les deux listes tiennent sur une page. Au-delà, il manque des lignes à
+  // l'écran : mieux vaut le dire que laisser croire la liste complète.
+  const reperageTronque =
+    rechercheActive &&
+    (reperage.data?.count ?? 0) > (reperage.data?.results.length ?? 0);
+
+  const clientsTronques =
+    !rechercheActive &&
+    (clientsQuery.data?.count ?? 0) > (clientsQuery.data?.results.length ?? 0);
 
   // Clé possédée, préfixée (cf. `urlState`).
   const own = new URLSearchParams();
@@ -648,6 +708,9 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
   syncOwnedParams(ownsKeys(['arbo_periode']), own);
 
   const clients = clientsQuery.data?.results ?? [];
+  const clientsAffiches = clientsTrouves
+    ? clients.filter((client) => clientsTrouves.has(client.id))
+    : clients;
 
   /** Une prestation vient de naître : la manifestation la montre aussitôt. */
   function prestationCreee() {
@@ -716,16 +779,37 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
         </Group>
       </Group>
 
-      {clientsQuery.isLoading && <Loader size='sm' />}
+      {(clientsQuery.isLoading || (rechercheActive && reperage.isLoading)) && (
+        <Loader size='sm' />
+      )}
 
-      {!clientsQuery.isLoading && clients.length === 0 && (
-        <Text size='sm' c='dimmed'>
-          Aucun client disponible.
+      {reperageTronque && (
+        <Text size='xs' c='dimmed'>
+          Plus de {PAGE_MAX} manifestations correspondent : affinez la recherche
+          pour tous les voir.
         </Text>
       )}
 
+      {clientsTronques && (
+        <Text size='xs' c='dimmed'>
+          Les {PAGE_MAX} premiers clients sont affichés sur{' '}
+          {clientsQuery.data?.count} : cherchez une manifestation pour atteindre
+          les autres.
+        </Text>
+      )}
+
+      {!clientsQuery.isLoading &&
+        !(rechercheActive && reperage.isLoading) &&
+        clientsAffiches.length === 0 && (
+          <Text size='sm' c='dimmed'>
+            {rechercheActive
+              ? 'Aucune manifestation ne correspond à cette recherche.'
+              : 'Aucun client disponible.'}
+          </Text>
+        )}
+
       <Box>
-        {clients.map((client) => {
+        {clientsAffiches.map((client) => {
           const ouvert = clientsOuverts.has(client.id);
 
           return (
@@ -769,7 +853,7 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
                 <ManifestationsDuClient
                   context={context}
                   client={client}
-                  recherche={recherche}
+                  recherche={rechercheDifferee}
                   periode={periode}
                   ouvertes={ouvertes}
                   setOuvertes={setOuvertes}
