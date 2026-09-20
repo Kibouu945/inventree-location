@@ -668,9 +668,15 @@ class DeliveryListView(generics.ListAPIView):
                 "prestation__manifestation__contact",
                 "prestation__manifestation__client",
                 "livreur_assigne",
+                # `demandeur_nom` du sérialiseur lit ce compte : sans jointure,
+                # c'est une requête par bon de la tournée.
+                "demandeur",
             )
             .prefetch_related(
                 "lignes__part__rentable_info",
+                # Sans ce préchargement, `quantite_deposee` et sa restante
+                # coûtent une requête par ligne de chaque bon de la tournée.
+                "lignes__livraisons",
                 "livraison_status_logs__changed_by",
             )
             .all()
@@ -2919,6 +2925,10 @@ class ClientListView(generics.ListAPIView):
         retrouver ses clients pendant un appel téléphonique sans connaître son
         propre identifiant. Une valeur inconnue est ignorée, pas refusée : un
         400 sur un écran de liste serait pire.
+
+        `actif` est un filtre optionnel, pas un défaut : la gestion des
+        clients et les filtres de recherche (manifestations, contacts) ont
+        besoin de retrouver aussi les clients désactivés.
         """
 
         queryset = Client.objects.select_related("gestionnaire").order_by("nom")
@@ -2936,6 +2946,11 @@ class ClientListView(generics.ListAPIView):
             queryset = queryset.filter(gestionnaire=self.request.user)
         elif gestionnaire and gestionnaire.isdigit():
             queryset = queryset.filter(gestionnaire_id=int(gestionnaire))
+
+        actif = self.request.query_params.get("actif")
+
+        if actif is not None:
+            queryset = queryset.filter(actif=actif.lower() in ("true", "1"))
 
         return queryset
 

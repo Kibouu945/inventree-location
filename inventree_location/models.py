@@ -1653,10 +1653,12 @@ class Livraison(TimestampedModel):
     séquence ; le regroupement par lieu et par journée que voit le livreur est
     une vue, calculée à la lecture (R25, R30).
 
-    **Table de projection.** Aucun écran ne l'écrit à ce stade : les colonnes du
-    bon restent la vérité, `projeter_execution` alimente cette table et
-    `verifier_projection` la compare sans rien écrire. Le renversement de la
-    vérité est post-soutenance.
+    **Table alimentée, pas encore faisant foi.** Les colonnes du bon restent la
+    vérité. Depuis le lot L7, le journal de livraison (`livraison.py`) réaligne
+    cette table à chaque changement d'état, dans la même transaction ;
+    `projeter_execution` reste là pour rattraper l'existant et
+    `verifier_projection` pour prouver que les deux concordent. Le renversement
+    de la vérité — la saisie qui écrit ici d'abord — est post-soutenance.
     """
 
     id = models.BigAutoField(primary_key=True)

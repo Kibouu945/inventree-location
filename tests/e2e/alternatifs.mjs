@@ -174,6 +174,11 @@ await cas('A. Ramassage : récupérer PLUS que ce qui est sorti', async () => {
   try {
     await page.getByRole('tab', { name: 'Ramassages' }).first().click();
     await T(page, 4500);
+    // L'écran s'ouvre sur l'arborescence (F7) ; le bouton « Voir » vit sur la
+    // ligne plate de la vue « Liste ». `SegmentedControl` de Mantine rend un
+    // `label`, pas un `button`.
+    await page.locator('label').filter({ hasText: /^Liste$/ }).first().click();
+    await T(page, 3000);
     // Sa ligne à lui, repérée par son numéro : prendre la première venue
     // faisait écrire 99 récupérés sur un bon de la démonstration.
     const numero = cible.bon.numero;
@@ -243,7 +248,15 @@ await cas('E. Conflits de stock', async () => {
     const lignes = await page.locator('table tbody tr').count();
     const txt = (await page.locator('body').innerText()).replace(/\n+/g, ' | ');
     await page.screenshot({ path: `${process.env.SHOTS_DIR ?? '.'}/alt-e-conflits.png` });
-    return { ok: lignes > 0, detail: `${lignes} ligne(s) — ${txt.slice(txt.indexOf('Conflits'), txt.indexOf('Conflits') + 180)}` };
+    // Compter les lignes ne prouvait rien : n'importe quel tableau non vide
+    // passait. Le registre doit nommer un bon et chiffrer le manque, sinon
+    // l'écran n'a pas fait son travail.
+    const nomme = /RES-\d{4}-\d{4}/.test(txt);
+    return {
+      ok: lignes > 0 && nomme,
+      detail: `${lignes} ligne(s), bon ${nomme ? 'nommé' : 'ABSENT'} — `
+        + txt.slice(txt.indexOf('Conflits'), txt.indexOf('Conflits') + 150)
+    };
   } finally { await browser.close(); }
 });
 

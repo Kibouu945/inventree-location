@@ -33,7 +33,11 @@ export async function apiToken() {
  * sans symptôme visible. Le filtre ignore `/auth/session`, qui répond 401 avant
  * login par construction.
  */
-export async function session({ headless = true, width = 1700, height = 1300 } = {}) {
+export async function session({
+  headless = true,
+  width = 1700,
+  height = 1300
+} = {}) {
   const browser = await chromium.launch({ headless });
   const ctx = await browser.newContext({
     viewport: { width, height },
@@ -97,14 +101,22 @@ export async function addWidget(page, titre) {
   const buttons = page.locator('button');
   let target = null;
   for (let i = 0; i < (await buttons.count()); i++) {
-    const b = await buttons.nth(i).boundingBox().catch(() => null);
-    if (b && Math.abs(b.y - box.y) < 40 && b.x > box.x + 800) target = buttons.nth(i);
+    const b = await buttons
+      .nth(i)
+      .boundingBox()
+      .catch(() => null);
+    if (b && Math.abs(b.y - box.y) < 40 && b.x > box.x + 800)
+      target = buttons.nth(i);
   }
   if (!target) throw new Error('menu ⋮ du dashboard introuvable');
 
   await target.click();
   await page.waitForTimeout(1500);
-  await page.locator('[role="menuitem"]').filter({ hasText: /add widget/i }).first().click();
+  await page
+    .locator('[role="menuitem"]')
+    .filter({ hasText: /add widget/i })
+    .first()
+    .click();
   await page.waitForTimeout(2500);
 
   await page.getByPlaceholder(/Filter dashboard widgets/i).fill(titre);

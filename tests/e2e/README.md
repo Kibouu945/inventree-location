@@ -1,7 +1,7 @@
 # Scénarios navigateur
 
 `pytest` et `vitest` passent au vert sur un écran qui ne se monte pas : ils ne
-rendent rien. Ces trois scénarios pilotent l'application comme un utilisateur —
+rendent rien. Ces quatre scénarios pilotent l'application comme un utilisateur —
 c'est le seul filet qui voit un écran cassé, un droit manquant ou une règle que
 l'interface applique à l'envers du serveur.
 
@@ -22,6 +22,7 @@ npm run nominal                # le parcours complet, ~2 min
 LENT=1 npm run nominal         # fenêtre visible et ralentie, pour montrer
 npm run alternatifs            # les cas limites
 npm run roles                  # une connexion par rôle
+npm run complet                # le cycle entier, conflit compris
 ```
 
 `SHOTS_DIR` dit où écrire les captures (défaut : le dossier courant).
@@ -35,7 +36,7 @@ ramassage → retour, en neuf étapes **indépendantes** : une étape qui casse
 n'empêche pas les suivantes, chacune laisse une capture en cas d'échec, et le
 bilan final dit laquelle est tombée.
 
-Quatre règles font échouer une saisie improvisée, et ce n'est pas un bug :
+Cinq règles font échouer une saisie improvisée, et ce n'est pas un bug :
 
 1. **Le gérant interne est obligatoire** sur un bon — « Le demandeur est
    obligatoire » au moment de soumettre.
@@ -50,6 +51,11 @@ Quatre règles font échouer une saisie improvisée, et ce n'est pas un bug :
    scénario passe donc par la recherche, qui ne garde que les clients portant
    une manifestation correspondante et les déplie. Elle est différée de 300 ms :
    remplir le champ puis chercher aussitôt ne trouve rien.
+5. **Livraisons et Ramassages s'ouvrent sur leur table hiérarchique** (F6, F7),
+   où le numéro du bon ne paraît qu'après dépliage. Les scénarios basculent sur
+   la vue « Liste », qui garde la ligne plate et ses boutons. Sans cette
+   bascule, l'étape 8 cherchait une ligne absente, épuisait trente secondes
+   d'attente, puis se déclarait bonne : elle ne vérifiait plus rien.
 
 ### `alternatifs.mjs` — ce qui doit être refusé, toléré ou masqué
 
@@ -113,6 +119,41 @@ Il relève en plus deux `HTTP 403 /api/news/`. C'est un point d'API natif
 d'InvenTree, pas du plugin, et le rôle n'y a pas droit : ne pas le chercher de
 notre côté.
 
+### `complet.mjs` — le cycle entier, conflit compris
+
+Le scénario de démonstration. Il crée un client, son contact, une manifestation,
+**deux prestations sur deux lieux**, puis des bons jusqu'à mettre le parc en
+tension — et montre ce qu'un tableur ne sait pas faire.
+
+| Étape | Ce qu'elle démontre |
+|---|---|
+| 1 – 4 | Client, contact, manifestation, deux prestations |
+| 5 | Deux bons sur le même article rare, créés depuis l'arbre **et** depuis l'écran Réservations |
+| 6 | **Le serveur refuse d'engager au-delà du stock** — et chiffre le manque |
+| 7 | Un troisième bon de trop : le refus à l'écran, avec le taux d'occupation |
+| 8 | Le gestionnaire complète le parc, le bon passe |
+| 9 | Le livreur accepte, démarre, livre |
+| 10 | Le magasinier ouvre l'arborescence de ramassage jusqu'au bon |
+
+Deux points de méthode qui rendent le scénario rejouable sur n'importe quelle
+base. La quantité par bon se **calcule sur le stock du jour** — une constante en
+dur cessait d'être juste dès qu'on ajoutait du matériel. Et chaque lot de stock
+créé en cours de route est **rendu à la fin** : le scénario ne laisse que le
+client et sa manifestation.
+
+Les `HTTP 400` sur `/transition/` dans le journal sont **attendus** : ce sont les
+refus de validation que le scénario provoque exprès.
+
+Ce que le scénario a appris sur le produit, et qui mérite d'être su :
+
+- **Un conflit ne naît pas d'une validation** : le serveur l'interdit au-delà du
+  stock (`Validation refusée : conflit de stock détecté`, forçable avec trace).
+  Le registre « Conflits actuels » recense les pénuries sur des bons **déjà
+  engagés**, quand le parc diminue après coup.
+- **L'état d'une livraison et le statut d'un bon sont deux choses.** Le livreur
+  fait avancer l'état — assignée, en cours, livrée ; le statut du bon bascule,
+  lui, par le bouton de sa ligne.
+
 ## Si la base vient d'être réinitialisée
 
 `docker compose down -v` efface aussi ce qui n'est pas dans le code :
@@ -174,3 +215,21 @@ Attendre que `/api/` réponde ne suffit pas.
 - **« Manifestations » nomme deux onglets** — la navigation du poste et un
   onglet interne de l'écran Fiches. La navigation du poste porte
   `data-placement="left"`.
+- **Le sélecteur Arborescence / Liste est un `SegmentedControl`** : Mantine le
+  rend en `label`, pas en `button`. `getByRole('button', { name: 'Liste' })` ne
+  le trouve jamais ; le cibler par
+  `page.locator('label').filter({ hasText: /^Liste$/ })`.
+- **Un `catch` sur un localisateur rend une étape muette.** Écrite
+  `…allInnerTexts().catch(() => [])`, l'étape 8 passait au vert sur un écran
+  qu'elle n'avait pas trouvé. Faire échouer — `waitFor`, puis une assertion —
+  plutôt que d'avaler : une étape qui ne peut pas tomber ne prouve rien.
+- **`if (await X.count())` est la même faute déguisée.** « Si c'est là, je
+  clique » saute en silence quand ce n'est pas là. L'étape 10 de `complet.mjs`
+  cumulait deux de ces gardes et un ternaire qui rendait une phrase de succès
+  dans ses deux branches : elle se déclarait bonne sans avoir rien ouvert. Ce
+  garde ne vaut que pour ce qui est **vraiment** facultatif — une modale qui
+  peut ne pas s'ouvrir —, jamais pour l'objet de l'étape.
+- **Un scénario qu'on ne joue pas pourrit.** `complet.mjs` sélectionnait encore
+  le filtre client supprimé par F3 : sept étapes tombaient en cascade, et
+  personne ne l'avait vu parce qu'il n'était pas rejoué. Les quatre scénarios
+  se passent ensemble, ou l'un d'eux ment.

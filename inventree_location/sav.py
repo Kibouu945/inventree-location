@@ -1,4 +1,11 @@
-"""API SCRUM-112 — stock réel, retours ramassage et workflow SAV."""
+"""API SCRUM-112 — stock réel, retours ramassage et workflow SAV.
+
+**Troisième point d'écriture des tables d'exécution (lot L7).** `RamassageRetourView`
+fait passer le bon en « retournée » **à la main**, sans passer par
+`transition_reservation_status` : la greffe posée sur le service ne la couvre
+donc pas, et c'est pourquoi la saisie de ramassage est un point d'écriture à
+part entière.
+"""
 
 from django.db import transaction
 from django.db.models import Sum
@@ -8,6 +15,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .execution import projeter_le_bon
 from .models import (
     LigneReservation,
     RentableItem,
@@ -499,6 +507,13 @@ class RamassageRetourView(APIView):
             reservation.date_retour_reelle = timezone.now()
 
         reservation.save()
+
+        # Les quantités que la projection va lire viennent du registre
+        # d'incidents, écrit ligne par ligne plus haut : la greffe vient donc en
+        # dernier, une fois le statut posé et tous les incidents projetés. La vue
+        # est `@transaction.atomic`, la table d'exécution suit le même sort que
+        # la saisie.
+        projeter_le_bon(reservation)
 
         return Response(
             {

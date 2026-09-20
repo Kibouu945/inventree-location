@@ -24,6 +24,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Page, Ramassage } from '../ramassage/types';
 import { canMarquerLivree, hasAnyRole, LIVREUR } from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
+import { DeliveriesHierarchicalTable } from './DeliveriesHierarchicalTable';
 import { DeliveryCalendar } from './DeliveryCalendar';
 import { DeliveryNote } from './DeliveryNote';
 import { DeliveryStatusForm } from './DeliveryStatusForm';
@@ -56,6 +57,7 @@ const STATUT_OPTIONS = [
 ];
 
 const VIEW_OPTIONS = [
+  { value: 'hierarchique', label: 'Arborescence' },
   { value: 'liste', label: 'Liste' },
   { value: 'calendrier', label: 'Calendrier' },
   { value: 'carte', label: 'Tournée' }
@@ -210,6 +212,25 @@ export function DeliveriesList({
           title: 'Action impossible',
           message: "La réservation n'a pas pu être marquée livrée.",
           color: 'red'
+        });
+      }
+    },
+    context.queryClient
+  );
+
+  const batchLivrerMutation = useMutation(
+    {
+      mutationFn: async (ids: number[]) => {
+        await Promise.all(
+          ids.map((id) => context.api.post(`${DELIVERIES_URL}${id}/livrer/`))
+        );
+      },
+      onSuccess: () => {
+        context.queryClient.invalidateQueries({ queryKey: ['deliveries'] });
+        context.queryClient.invalidateQueries({ queryKey: ['reservations'] });
+        context.queryClient.invalidateQueries({ queryKey: ['ramassages'] });
+        context.queryClient.invalidateQueries({
+          queryKey: ['tournee-ramassages']
         });
       }
     },
@@ -434,6 +455,15 @@ export function DeliveriesList({
         <DeliveryCalendar
           deliveries={rows}
           onSelectDay={(day) => updateFilters({ dateRange: [day, day] })}
+        />
+      ) : filters.viewMode === 'hierarchique' ? (
+        <DeliveriesHierarchicalTable
+          context={context}
+          deliveries={rows}
+          onLivrerReservations={async (ids) => {
+            await batchLivrerMutation.mutateAsync(ids);
+          }}
+          onOpenNote={(delivery) => setNoteDelivery(delivery)}
         />
       ) : (
         <Table striped highlightOnHover>

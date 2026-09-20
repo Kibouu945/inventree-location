@@ -31,6 +31,10 @@ describe('optionsActives', () => {
     ]);
   });
 
+  it('rend une liste vide plutôt que de planter sans élément', () => {
+    expect(optionsActives([], nom)).toEqual([]);
+  });
+
   it('ne garde pas un autre désactivé que celui choisi', () => {
     const elements = [
       client({ id: 1, actif: false }),

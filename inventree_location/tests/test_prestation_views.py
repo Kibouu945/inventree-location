@@ -20,6 +20,7 @@ from inventree_location.tests.factories import (
     mettre_en_stock,
 )
 from inventree_location.models import (
+    Contact,
     LignePrestation,
     Lieu,
     Prestation,
@@ -215,6 +216,53 @@ class TestPrestationCreate:
         assert "manifestation" in response.data
         assert not Prestation.objects.filter(nom="Trop tard").exists()
 
+    def test_creation_blocked_when_client_inactif(
+        self, factory, user, manifestation, lieu
+    ):
+        # Manif toujours « planifiée » et pas démarrée : seul l'état du client
+        # doit bloquer la création.
+        manifestation.client.actif = False
+        manifestation.client.save(update_fields=["actif"])
+
+        payload = {
+            "manifestation": manifestation.pk,
+            "lieu": lieu.pk,
+            "nom": "Trop tard",
+            "date_debut": manifestation.date_debut.isoformat(),
+            "date_fin": (manifestation.date_debut + timedelta(hours=2)).isoformat(),
+        }
+        request = factory.post(PRESTATIONS_URL, payload, format="json")
+        force_authenticate(request, user=user)
+        response = PrestationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "manifestation" in response.data
+        assert not Prestation.objects.filter(nom="Trop tard").exists()
+
+    def test_creation_blocked_when_contact_inactif(
+        self, factory, user, manifestation, lieu
+    ):
+        contact = Contact.objects.create(
+            client=manifestation.client, nom="Vasseur", prenom="Hélène", actif=False
+        )
+        manifestation.contact = contact
+        manifestation.save(update_fields=["contact"])
+
+        payload = {
+            "manifestation": manifestation.pk,
+            "lieu": lieu.pk,
+            "nom": "Trop tard",
+            "date_debut": manifestation.date_debut.isoformat(),
+            "date_fin": (manifestation.date_debut + timedelta(hours=2)).isoformat(),
+        }
+        request = factory.post(PRESTATIONS_URL, payload, format="json")
+        force_authenticate(request, user=user)
+        response = PrestationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "manifestation" in response.data
+        assert not Prestation.objects.filter(nom="Trop tard").exists()
+
     def test_insufficient_stock_alerte_mais_nenregistre_pas_moins(
         self, factory, user, manifestation, lieu
     ):
@@ -301,6 +349,22 @@ class TestPrestationDetail:
 
         assert response.status_code == status.HTTP_200_OK, response.data
         assert prestation.lignes_prestation.count() == 1
+
+    def test_reste_modifiable_si_client_devient_inactif(
+        self, factory, user, prestation
+    ):
+        prestation.manifestation.client.actif = False
+        prestation.manifestation.client.save(update_fields=["actif"])
+
+        request = factory.patch(
+            f"{PRESTATIONS_URL}{prestation.pk}/",
+            {"nom": "Installation renommée"},
+            format="json",
+        )
+        force_authenticate(request, user=user)
+        response = PrestationDetailView.as_view()(request, pk=prestation.pk)
+
+        assert response.status_code == status.HTTP_200_OK, response.data
 
     def test_delete(self, factory, user, prestation):
         request = factory.delete(f"{PRESTATIONS_URL}{prestation.pk}/")

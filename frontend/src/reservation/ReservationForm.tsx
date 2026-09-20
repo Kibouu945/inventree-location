@@ -262,7 +262,7 @@ export function ReservationForm({
     // form est volontairement absent des deps : ce pré-remplissage ne doit
     // se déclencher qu'au chargement de la réservation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [existingQuery.data]);
+  }, [existingQuery.data, context.api.get, form.setValues]);
 
   const selectedPrestation = useMemo(
     () =>
@@ -326,7 +326,16 @@ export function ReservationForm({
     // `form` est volontairement absent des deps : la reprise suit la
     // prestation, pas chaque frappe de l'utilisateur.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPrestation, isEdit, effectiveReadOnly]);
+  }, [
+    selectedPrestation,
+    isEdit,
+    effectiveReadOnly, // Le drapeau « article virtuel » ne vient pas de la prestation : il est
+    // porté par le catalogue, et c'est lui que valide la règle « au moins un
+    // article virtuel » à la soumission.
+    context.api.get,
+    form.setFieldValue,
+    form.setValues
+  ]);
 
   const mutation = useMutation(
     {

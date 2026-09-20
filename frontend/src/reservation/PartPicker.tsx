@@ -120,12 +120,12 @@ export function PartPicker({
     return mapped;
     // optionFor est une fonction pure locale, pas une dépendance utile.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [results, selectedPart]);
+  }, [results, selectedPart, optionFor]);
 
   // La quantité par défaut retombe à 1 dès qu'un nouvel article est choisi.
   useEffect(() => {
     setQuantite(1);
-  }, [selectedId]);
+  }, []);
 
   // Dépassement du stock disponible : on le dit, on ne l'interdit pas.
   //

@@ -16,7 +16,8 @@ describe('ramassageParams', () => {
       lieu: 'Jambville',
       statuts: ['validee', 'livree'],
       dateRange: ['2026-06-01', '2026-06-30'] as [string, string],
-      page: 3
+      page: 3,
+      viewMode: 'hierarchique' as const
     };
 
     const query = serializeRamassageFilters(filters);
@@ -50,7 +51,8 @@ describe('ramassageParams', () => {
         lieu: '',
         statuts: ['soumise'],
         dateRange: [null, '2026-08-01'],
-        page: 2
+        page: 2,
+        viewMode: 'hierarchique'
       })
     ).toEqual({
       page: '2',
