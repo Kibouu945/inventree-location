@@ -9,6 +9,20 @@ const NOM_CLIENT = `Festival du Lac ${M}`;
 const NOM_MANIF = `Festival du Lac — édition ${M}`;
 const NOM_PRESTA = `Scène principale ${M}`;
 
+// Les dates se calculent, elles ne se figent pas. Datées en dur au 13 → 15, la
+// manifestation du scénario est tombée dans le passé le 16 : l'arborescence
+// s'ouvre sur « Futur », l'écran affiche « Aucune manifestation sur cette
+// période », et les six étapes suivantes échouaient sur une application saine.
+const AUJOURD_HUI = new Date().getDate();
+// Borné au mois courant : le sélecteur de jour n'ouvre pas la page suivante
+// tout seul, un 31 + 2 ne serait donc pas cliquable.
+const DERNIER_JOUR = new Date(
+  new Date().getFullYear(),
+  new Date().getMonth() + 1,
+  0
+).getDate();
+const DANS_DEUX_JOURS = Math.min(AUJOURD_HUI + 2, DERNIER_JOUR);
+
 const browser = await chromium.launch({ headless: !LENT, slowMo: LENT ? 300 : 0, args: ['--start-maximized'] });
 const ctx = await browser.newContext({ viewport: LENT ? null : { width: 1700, height: 1300 }, timezoneId: 'Europe/Paris', locale: 'fr-FR' });
 const page = await ctx.newPage();
@@ -125,7 +139,7 @@ await etape('2. Son contact référent', async () => {
   return page.getByText(/\d+ contact\(s\)/).first().innerText();
 });
 
-await etape('3. La manifestation, 13 → 15 septembre', async () => {
+await etape(`3. La manifestation, ${AUJOURD_HUI} → ${DANS_DEUX_JOURS}`, async () => {
   await page.getByRole('tab', { name: 'Fiches' }).first().click();
   await T(3000);
   await page.getByRole('button', { name: 'Nouvelle manifestation' }).click();
@@ -133,8 +147,8 @@ await etape('3. La manifestation, 13 → 15 septembre', async () => {
   const d = dlg();
   await d.locator('input.mantine-TextInput-input').first().fill(NOM_MANIF);
   const dates = d.locator('button.mantine-DateTimePicker-input');
-  await choisirDate(dates.nth(0), 13);
-  await choisirDate(dates.nth(1), 15);
+  await choisirDate(dates.nth(0), AUJOURD_HUI);
+  await choisirDate(dates.nth(1), DANS_DEUX_JOURS);
   const selects = d.locator('input.mantine-Select-input');
   await choisirOption(selects.nth(0), NOM_CLIENT);
   await choisirOption(selects.nth(1), `Vasseur${M}`);
@@ -146,8 +160,15 @@ await etape('3. La manifestation, 13 → 15 septembre', async () => {
 await etape('4. Une prestation, depuis l\'arborescence', async () => {
   await page.getByRole('tab', { name: 'Manifestations' }).first().click();
   await T(3000);
-  await choisirOption(page.locator('input[aria-label="Client"]').first(), NOM_CLIENT);
-  await T(2000);
+  // L'arbre part du client (F3) : le filtre client a disparu — il faisait
+  // doublon avec le niveau — et les clients s'ouvrent repliés. La recherche
+  // fait le chemin : elle ne garde que les clients portant une manifestation
+  // qui corresponde, et les déplie. Le délai couvre les 300 ms de saisie
+  // différée, puis l'appel de repérage.
+  await page
+    .getByPlaceholder(/Rechercher une manifestation/i)
+    .fill(NOM_MANIF);
+  await T(3500);
   await page.getByRole('button', { name: 'Ajouter une prestation' }).first().click();
   await T(3000);
   const d = dlg();
@@ -157,8 +178,8 @@ await etape('4. Une prestation, depuis l\'arborescence', async () => {
   console.log('     selects de la modale prestation :', await selects.count());
   await choisirOption(selects.nth(1));            // Lieu (0 = manifestation, pré-remplie)
   const dates = d.locator('button.mantine-DateTimePicker-input');
-  await choisirDate(dates.nth(0), 13);
-  await choisirDate(dates.nth(1), 15);
+  await choisirDate(dates.nth(0), AUJOURD_HUI);
+  await choisirDate(dates.nth(1), DANS_DEUX_JOURS);
   await d.getByRole('button', { name: /Créer la prestation|Créer/ }).click();
   await T(3500);
   return NOM_PRESTA;
