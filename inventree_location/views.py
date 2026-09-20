@@ -10,13 +10,14 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.mail import send_mail
 from django.db import transaction
+from django.db.models import ProtectedError
 from django.db.models import Count, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import generics, permissions, status
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.pagination import LimitOffsetPagination, PageNumberPagination
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
@@ -223,8 +224,76 @@ class LieuListCreateView(generics.ListCreateAPIView):
         return queryset
 
 
-class LieuDetailView(generics.RetrieveUpdateDestroyAPIView):
+class SuppressionRefusee(APIException):
+    """On a demandé de supprimer ce que d'autres objets retiennent encore."""
+
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = "Cet élément est encore référencé : suppression refusée."
+
+
+def _retenu_par(refus):
+    """Nomme, compte, et accorde ce qui retient la suppression.
+
+    `protected_objects` rend les instances qui référencent, pas leur type : on
+    regroupe par modèle pour dire « 2 prestations » plutôt que d'aligner deux
+    représentations d'objets que personne ne lit.
+
+    Rend aussi le verbe accordé. Le genre de ce qui bloque n'étant connu qu'à
+    l'exécution, la phrase l'évite : un verbe s'accorde en nombre seulement,
+    là où « rattachée » aurait demandé de savoir.
+    """
+
+    par_modele = {}
+
+    for objet in refus.protected_objects:
+        libelle = str(objet._meta.verbose_name)
+        par_modele[libelle] = par_modele.get(libelle, 0) + 1
+
+    morceaux = [
+        f"{nombre} {libelle}{'s' if nombre > 1 and not libelle.endswith('s') else ''}"
+        for libelle, nombre in sorted(par_modele.items())
+    ]
+
+    total = sum(par_modele.values())
+    verbe = "s'y rattache" if total == 1 else "s'y rattachent"
+
+    return f"{', '.join(morceaux)} {verbe} encore"
+
+
+class RefusDeSuppressionLisible:
+    """Traduit le verrou de la base en refus lisible.
+
+    Une clé étrangère en `PROTECT` interdit de supprimer ce qui est encore
+    référencé — un lieu qui porte des prestations, une manifestation qui porte
+    des bons. C'est la règle métier, pas un incident.
+
+    Sans interception, Django lève `ProtectedError`, que DRF ne sait pas
+    traduire : la requête ressort en **500**, journalisée comme une erreur
+    serveur, et l'écran annonce une panne là où il devrait dire ce qui retient.
+    On répond donc 409, avec le décompte de ce qui bloque.
+    """
+
+    #: Ce qu'on supprimait, au singulier, tel qu'il se lit dans la phrase.
+    objet_supprime = "cet élément"
+
+    def perform_destroy(self, instance):
+        try:
+            super().perform_destroy(instance)
+        except ProtectedError as refus:
+            # « ce qui en dépend » plutôt qu'un pronom : « les » ou « la »
+            # demanderait de connaître le genre et le nombre de ce qui bloque.
+            raise SuppressionRefusee(
+                f"Impossible de supprimer {self.objet_supprime} : "
+                f"{_retenu_par(refus)}. "
+                "Retirez d'abord ce qui en dépend, ou annulez plutôt que de "
+                "supprimer."
+            )
+
+
+class LieuDetailView(RefusDeSuppressionLisible, generics.RetrieveUpdateDestroyAPIView):
     """Retrieve, update or delete a place."""
+
+    objet_supprime = "ce lieu"
 
     permission_classes = [LieuPermission]
     serializer_class = LieuSerializer
@@ -642,8 +711,12 @@ class DeliveryListView(generics.ListAPIView):
         return queryset
 
 
-class ReservationDetailView(generics.RetrieveUpdateDestroyAPIView):
+class ReservationDetailView(
+    RefusDeSuppressionLisible, generics.RetrieveUpdateDestroyAPIView
+):
     """CRUD réservation — partie instance unique."""
+
+    objet_supprime = "ce bon"
 
     queryset = Reservation.objects.prefetch_related(
         "lignes",
@@ -672,7 +745,9 @@ class ReservationDetailView(generics.RetrieveUpdateDestroyAPIView):
             raise ValidationError({
                 "detail": "Seule une réservation en brouillon peut être supprimée."
             })
-        instance.delete()
+        # Par `super()`, et non `instance.delete()` : c'est ce qui laisse le
+        # mixin traduire un refus de la base en 409 plutôt qu'en 500.
+        super().perform_destroy(instance)
 
 
 class RamassageListView(generics.ListAPIView):
@@ -1292,8 +1367,12 @@ class ReturnIncidentHistoryView(generics.ListAPIView):
         return queryset
 
 
-class ReturnIncidentDetailView(generics.RetrieveUpdateDestroyAPIView):
+class ReturnIncidentDetailView(
+    RefusDeSuppressionLisible, generics.RetrieveUpdateDestroyAPIView
+):
     """Détail, mise à jour et suppression d'un incident de retour."""
+
+    objet_supprime = "cet incident"
 
     permission_classes = [ReturnCheckinPermission]
     serializer_class = ReturnIncidentSerializer
@@ -2665,8 +2744,12 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
         return queryset
 
 
-class ManifestationDetailView(generics.RetrieveUpdateDestroyAPIView):
+class ManifestationDetailView(
+    RefusDeSuppressionLisible, generics.RetrieveUpdateDestroyAPIView
+):
     """CRUD manifestation — instance unique (ORG-01)."""
+
+    objet_supprime = "cette manifestation"
 
     permission_classes = [ManifestationPermission]
     serializer_class = ManifestationSerializer
@@ -2741,8 +2824,12 @@ class PrestationListCreateView(generics.ListCreateAPIView):
         return queryset
 
 
-class PrestationDetailView(generics.RetrieveUpdateDestroyAPIView):
+class PrestationDetailView(
+    RefusDeSuppressionLisible, generics.RetrieveUpdateDestroyAPIView
+):
     """CRUD prestation — instance unique (ORG-01 / RES-09)."""
+
+    objet_supprime = "cette prestation"
 
     permission_classes = [PrestationPermission]
     serializer_class = PrestationSerializer

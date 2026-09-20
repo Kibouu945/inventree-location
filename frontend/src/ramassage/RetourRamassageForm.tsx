@@ -22,6 +22,7 @@ import { useState } from 'react';
 
 import { apiErrorMessage } from '../backoffice/apiError';
 import { canCheckinReturns } from '../roles';
+import { enSurplus, manquantExcessif, totalSaisi } from './retourRegles';
 import type {
   LigneBonRamassage,
   RetourRamassagePayload,
@@ -70,15 +71,6 @@ export function formFromLigne(ligne: LigneBonRamassage): RetourLineForm {
   };
 }
 
-export function totalSaisi(line: RetourLineForm): number {
-  return (
-    line.quantite_ramassee +
-    line.quantite_sav +
-    line.quantite_detruite +
-    line.quantite_manquante
-  );
-}
-
 export function buildRetourPayload(
   lines: RetourLineForm[],
   commentaire: string
@@ -122,9 +114,10 @@ export function RetourRamassageForm({
     return null;
   }
 
-  const enTrop = lines.filter(
-    (line) => totalSaisi(line) > line.quantiteAttendue
-  );
+  // R36 : le surplus est légitime et ne bloque pas — le serveur l'accepte
+  // depuis `be356a4`, l'écran le refusait encore. Seul le manquant est borné.
+  const manquantsEnTrop = manquantExcessif(lines);
+  const surplus = enSurplus(lines);
 
   function updateLine(index: number, patch: Partial<RetourLineForm>) {
     setLines((current) =>
@@ -194,7 +187,8 @@ export function RetourRamassageForm({
           <Table.Tbody>
             {lines.map((line, index) => {
               const total = totalSaisi(line);
-              const invalide = total > line.quantiteAttendue;
+              const refuse = line.quantite_manquante > line.quantiteAttendue;
+              const enPlus = total > line.quantiteAttendue;
 
               return (
                 <Table.Tr key={line.ligne}>
@@ -214,7 +208,14 @@ export function RetourRamassageForm({
                     <Table.Td key={champ}>
                       <NumberInput
                         min={0}
-                        max={line.quantiteAttendue}
+                        // Plafonner la saisie revient à la refuser en silence :
+                        // seul le manquant est borné, et par la même règle que
+                        // le serveur.
+                        max={
+                          champ === 'quantite_manquante'
+                            ? line.quantiteAttendue
+                            : undefined
+                        }
                         value={line[champ]}
                         onChange={(value) =>
                           updateLine(index, { [champ]: numberValue(value) })
@@ -251,7 +252,7 @@ export function RetourRamassageForm({
                   </Table.Td>
 
                   <Table.Td>
-                    <Badge color={invalide ? 'red' : 'green'}>
+                    <Badge color={refuse ? 'red' : enPlus ? 'yellow' : 'green'}>
                       {total} / {line.quantiteAttendue}
                     </Badge>
                   </Table.Td>
@@ -262,10 +263,18 @@ export function RetourRamassageForm({
         </Table>
       </Table.ScrollContainer>
 
-      {enTrop.length > 0 && (
-        <Alert color='red' title='Quantités invalides'>
-          {enTrop.map((line) => line.partNom).join(', ')} : le total saisi
-          dépasse la quantité attendue.
+      {manquantsEnTrop.length > 0 && (
+        <Alert color='red' title='Manquant impossible'>
+          {manquantsEnTrop.map((line) => line.partNom).join(', ')} : on ne peut
+          pas déclarer plus de manquant qu'il n'est sorti.
+        </Alert>
+      )}
+
+      {surplus.length > 0 && (
+        <Alert color='yellow' title='Plus que ce qui est sorti'>
+          {surplus.map((line) => line.partNom).join(', ')} : le total dépasse la
+          quantité attendue. C'est autorisé — du matériel circule d'un lieu à
+          l'autre —, mais cela vaut un contrôle du magasinier.
         </Alert>
       )}
 
@@ -282,7 +291,7 @@ export function RetourRamassageForm({
         <Button
           onClick={save}
           loading={saving}
-          disabled={enTrop.length > 0 || lines.length === 0}
+          disabled={manquantsEnTrop.length > 0 || lines.length === 0}
         >
           Enregistrer le retour
         </Button>

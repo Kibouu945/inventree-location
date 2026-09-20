@@ -160,8 +160,15 @@ await etape(`3. La manifestation, ${AUJOURD_HUI} → ${DANS_DEUX_JOURS}`, async 
 await etape('4. Une prestation, depuis l\'arborescence', async () => {
   await page.getByRole('tab', { name: 'Manifestations' }).first().click();
   await T(3000);
-  await choisirOption(page.locator('input[aria-label="Client"]').first(), NOM_CLIENT);
-  await T(2000);
+  // L'arbre part du client (F3) : le filtre client a disparu — il faisait
+  // doublon avec le niveau — et les clients s'ouvrent repliés. La recherche
+  // fait le chemin : elle ne garde que les clients portant une manifestation
+  // qui corresponde, et les déplie. Le délai couvre les 300 ms de saisie
+  // différée, puis l'appel de repérage.
+  await page
+    .getByPlaceholder(/Rechercher une manifestation/i)
+    .fill(NOM_MANIF);
+  await T(3500);
   await page.getByRole('button', { name: 'Ajouter une prestation' }).first().click();
   await T(3000);
   const d = dlg();
