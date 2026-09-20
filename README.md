@@ -31,7 +31,21 @@ make test      # Lance les tests du plugin
 make logs      # Affiche les logs en temps réel
 make shell     # Ouvre un shell dans le conteneur InvenTree
 make clean     # Arrête les services et supprime les volumes
+make static    # Recollecte le statique (habillage de la page de connexion)
 ```
+
+## Page de connexion
+
+Le premier écran porte le nom de l'outil, une image de fond et une phrase qui
+dit ce qu'il fait. Trois réglages du `docker-compose.yml` :
+`INVENTREE_CUSTOM_LOGO`, `INVENTREE_CUSTOM_SPLASH` — chacun dans **sa** variable,
+le dictionnaire `INVENTREE_CUSTOMIZE` ne sert qu'au titre et au message.
+
+Les images vivent dans `docker/branding/` et le Dockerfile les copie dans le
+dossier statique d'InvenTree. **Après toute reconstruction de l'image, lancer
+`make static`** : rien ne collecte le statique au démarrage, et une image
+introuvable ne lève aucune erreur — InvenTree reprend ses propres visuels sans
+le signaler.
 
 ## Architecture
 

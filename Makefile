@@ -1,4 +1,4 @@
-.PHONY: up down migrate test build build-frontend logs shell clean manage
+.PHONY: up down migrate test build build-frontend logs shell clean manage static
 
 up:
 	docker compose up --build -d
@@ -17,6 +17,13 @@ build:
 
 build-frontend:
 	docker compose run --rm frontend sh -c "npm install && npm run build"
+
+# Recollecte le statique servi par InvenTree — dont l'habillage de la page de
+# connexion (`docker/branding/`). À lancer après toute reconstruction de
+# l'image : `init.sh` ne collecte rien, et une image absente ne fait pas
+# d'erreur — InvenTree retombe sur ses propres visuels, sans le dire.
+static:
+	docker compose exec inventree bash -lc "cd /home/inventree/src/backend/InvenTree && python manage.py collectstatic --noinput"
 
 logs:
 	docker compose logs -f

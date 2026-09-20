@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Fond abstrait">
+  <title>InvenTree Location</title>
+  <defs>
+    <!-- Le fond : jamais un aplat. Une diagonale sombre, plus dense en bas à
+         droite, qui donne déjà une direction à la lumière. -->
+    <linearGradient id="fond" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0"    stop-color="#131c34"/>
+      <stop offset="0.45" stop-color="#0e1628"/>
+      <stop offset="1"    stop-color="#070b14"/>
+    </linearGradient>
+
+    <!-- Trois halos, pas davantage : au-delà, les couleurs se mélangent en
+         gris. Deux dans la famille du bleu de la marque, un chaud pour le
+         contrepoint. -->
+    <radialGradient id="halo-bleu" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4f7ae0" stop-opacity="0.50"/>
+      <stop offset="1" stop-color="#4f7ae0" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="halo-violet" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7d5ce8" stop-opacity="0.38"/>
+      <stop offset="1" stop-color="#7d5ce8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="halo-chaud" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#f2b96e" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#e8a24f" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="diffusion" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="90"/>
+    </filter>
+
+    <!-- Le grain : sans lui, de si grands dégradés se strient en bandes sur
+         un écran 8 bits. Il se voit à peine, et c'est le but. -->
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.055"/>
+      </feComponentTransfer>
+    </filter>
+
+    <linearGradient id="trame" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0"    stop-color="#9db5e2" stop-opacity="0"/>
+      <stop offset="0.16" stop-color="#9db5e2" stop-opacity="0.26"/>
+      <stop offset="0.42" stop-color="#9db5e2" stop-opacity="0.04"/>
+      <stop offset="0.62" stop-color="#9db5e2" stop-opacity="0.04"/>
+      <stop offset="0.86" stop-color="#9db5e2" stop-opacity="0.24"/>
+      <stop offset="1"    stop-color="#9db5e2" stop-opacity="0"/>
+    </linearGradient>
+
+    <radialGradient id="voile" cx="0.5" cy="0.47" r="0.55">
+      <stop offset="0"   stop-color="#05080f" stop-opacity="0.66"/>
+      <stop offset="0.7" stop-color="#05080f" stop-opacity="0.22"/>
+      <stop offset="1"   stop-color="#05080f" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1600" height="1000" fill="url(#fond)"/>
+
+  <!-- Les halos, largement débordants et très flous : c'est le débordement
+       qui les empêche de ressembler à des cercles posés. -->
+  <g filter="url(#diffusion)">
+    <ellipse cx="290"  cy="180"  rx="620" ry="470" fill="url(#halo-bleu)"/>
+    <ellipse cx="1420" cy="760"  rx="560" ry="440" fill="url(#halo-violet)"/>
+    <ellipse cx="1180" cy="90"   rx="380" ry="300" fill="url(#halo-chaud)"/>
+  </g>
+
+  <!-- Une trame fine, en diagonale : elle donne une échelle au vide sans
+       raconter quoi que ce soit. Les lignes s'éteignent avant les bords. -->
+  <g transform="rotate(-18 800 500)" stroke="url(#trame)" stroke-width="1.25">
+    <path d="M-200 180 H1800"/>
+    <path d="M-200 300 H1800"/>
+    <path d="M-200 420 H1800"/>
+    <path d="M-200 540 H1800"/>
+    <path d="M-200 660 H1800"/>
+    <path d="M-200 780 H1800"/>
+    <path d="M-200 900 H1800"/>
+  </g>
+
+  <!-- Deux arcs très ouverts : une respiration, pas un motif. -->
+  <g fill="none" stroke="#a8bde8" stroke-opacity="0.20" stroke-width="1.5">
+    <path d="M-120 900 Q 520 300 1760 560"/>
+    <path d="M-120 990 Q 560 420 1760 680"/>
+  </g>
+
+  <rect width="1600" height="1000" fill="url(#voile)"/>
+  <rect width="1600" height="1000" filter="url(#grain)" opacity="0.5"/>
+</svg>

@@ -21,3 +21,9 @@ RUN pip install -e /home/inventree/plugin/
 RUN test -f /home/inventree/src/backend/InvenTree/InvenTree/settings.py \
     && cat /home/inventree/plugin/docker/session_settings.py \
         >> /home/inventree/src/backend/InvenTree/InvenTree/settings.py
+
+# Habillage de la page de connexion : c'est le premier écran, et il ne disait
+# pas quel outil on ouvre. InvenTree sert `customize.logo` et `customize.splash`
+# depuis son propre dossier statique — d'où cette copie, plutôt que le statique
+# du plugin, que le build du frontend efface à chaque passage.
+COPY docker/branding/ /home/inventree/src/backend/InvenTree/InvenTree/static/location/

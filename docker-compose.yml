@@ -47,6 +47,21 @@ services:
       # jusqu'aux données saisies (« Zone émargement » affiché « Zone
       # d'émarrage »). Recette Tassin du 07/09/2026, remarques 3, 9 et 12.
       INVENTREE_LANGUAGE: fr
+      # Page de connexion : image de fond, marque et mot d'accueil. C'est le
+      # premier écran, et il ne nommait pas l'outil.
+      #
+      # Deux mécanismes, et non un : l'image et la marque se lisent dans leurs
+      # propres variables, tandis que `INVENTREE_CUSTOMIZE` ne sert qu'au
+      # message et au titre. Les poser dans le seul dictionnaire laissait
+      # `CUSTOM_LOGO` à la chaîne « None » et l'écran gardait les visuels
+      # d'InvenTree, sans rien signaler.
+      #
+      # Les chemins sont relatifs au statique collecté, alimenté par le
+      # Dockerfile depuis `docker/branding/`.
+      INVENTREE_CUSTOM_LOGO: location/logo.svg
+      INVENTREE_CUSTOM_SPLASH: location/splash.svg
+      INVENTREE_CUSTOMIZE: |-
+        {"site_header": "InvenTree Location", "login_message": "<div style='display:flex;gap:.85rem;align-items:flex-start;line-height:1.45'><img src='/static/location/logo.svg' alt='' width='38' height='38' style='flex:none;margin-top:.1rem'/><div><div style='font-weight:700;font-size:1.02rem'>InvenTree Location</div><div style='opacity:.72;font-size:.85rem;margin-top:.15rem'>Mat\u00e9riel \u00e9v\u00e9nementiel \u2014 manifestations, bons de r\u00e9servation, livraisons, ramassages et retours.</div></div></div>"}
       INVENTREE_ADMIN_USER: ${INVENTREE_ADMIN_USER:-admin}
       INVENTREE_ADMIN_PASSWORD: ${INVENTREE_ADMIN_PASSWORD:-admin123}
       INVENTREE_ADMIN_EMAIL: ${INVENTREE_ADMIN_EMAIL:-admin@example.com}
