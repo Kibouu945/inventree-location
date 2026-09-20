@@ -223,3 +223,13 @@ Attendre que `/api/` réponde ne suffit pas.
   `…allInnerTexts().catch(() => [])`, l'étape 8 passait au vert sur un écran
   qu'elle n'avait pas trouvé. Faire échouer — `waitFor`, puis une assertion —
   plutôt que d'avaler : une étape qui ne peut pas tomber ne prouve rien.
+- **`if (await X.count())` est la même faute déguisée.** « Si c'est là, je
+  clique » saute en silence quand ce n'est pas là. L'étape 10 de `complet.mjs`
+  cumulait deux de ces gardes et un ternaire qui rendait une phrase de succès
+  dans ses deux branches : elle se déclarait bonne sans avoir rien ouvert. Ce
+  garde ne vaut que pour ce qui est **vraiment** facultatif — une modale qui
+  peut ne pas s'ouvrir —, jamais pour l'objet de l'étape.
+- **Un scénario qu'on ne joue pas pourrit.** `complet.mjs` sélectionnait encore
+  le filtre client supprimé par F3 : sept étapes tombaient en cascade, et
+  personne ne l'avait vu parce qu'il n'était pas rejoué. Les quatre scénarios
+  se passent ensemble, ou l'un d'eux ment.

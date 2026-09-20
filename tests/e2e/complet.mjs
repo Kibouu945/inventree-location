@@ -245,6 +245,22 @@ await etape('3. La manifestation, sur trois jours à partir d\'aujourd\'hui', as
 });
 
 /** Crée une prestation depuis l'arborescence, sur la manifestation filtrée. */
+/** Amène l'arborescence sur la manifestation du scénario.
+ *
+ * L'arbre part du client depuis F3, et le filtre client d'autrefois a disparu —
+ * il faisait doublon avec le niveau. Ce scénario le sélectionnait encore :
+ * l'étape 4 attendait trente secondes un champ absent, puis tombait, et sept
+ * étapes suivaient en cascade. La recherche fait le même chemin : elle ne garde
+ * que les clients portant une manifestation qui corresponde, et les déplie.
+ * Elle est différée de 300 ms côté écran.
+ */
+async function ouvrirLaManifestation() {
+  await page.getByPlaceholder(/Rechercher une manifestation/i).fill(NOM_MANIF);
+  await T(3500);
+  const ligne = page.getByText(NOM_MANIF).first();
+  await ligne.waitFor({ timeout: 15000 });
+}
+
 async function creerPrestation(nom, indexLieu, debut, fin) {
   await page.getByRole('button', { name: 'Ajouter une prestation' }).first().click();
   await T(2800);
@@ -265,8 +281,7 @@ async function creerPrestation(nom, indexLieu, debut, fin) {
 await etape('4. Deux prestations, deux lieux, horaires serrés', async () => {
   await nav('Manifestations').click();
   await T(3000);
-  await choisirOption(page.locator('input[aria-label="Client"]').first(), NOM_CLIENT);
-  await T(2000);
+  await ouvrirLaManifestation();
   await creerPrestation(PRESTA_A, 0, DEBUT_A, FIN_A);
   await creerPrestation(PRESTA_B, 1, DEBUT_B, FIN_B);
 
@@ -398,8 +413,7 @@ await etape('6. Validation — le serveur refuse au-delà du stock, et dit de co
 await etape('7. Un troisième bon de trop : le refus, chiffré, à l\'écran', async () => {
   await nav('Manifestations').click();
   await T(3000);
-  await choisirOption(page.locator('input[aria-label="Client"]').first(), NOM_CLIENT);
-  await T(2000);
+  await ouvrirLaManifestation();
   const manif = page.locator('button').filter({ hasText: /prestations?$/ }).first();
   if (await manif.count()) { await manif.click(); await T(2500); }
   await bonPourPrestation(PRESTA_A);
@@ -637,21 +651,38 @@ await etape('10. Ramassage — poste magasinier', async () => {
   await connexion('demo_magasinier', 'Demo!2026');
   await nav('Ramassages').click();
   await T(4500);
+  // Déplier, et le dire quand ça ne déplie pas. La version d'avant sautait
+  // chaque niveau absent par un `if (count())`, puis rendait « arborescence
+  // dépliée » dans les deux branches de son ternaire : l'étape passait au vert
+  // sans avoir rien ouvert, et un écran de ramassage mort se serait lu comme
+  // un succès.
   const manif = page.getByText(NOM_MANIF).first();
-  if (await manif.count()) {
-    await manif.click();
-    await T(2500);
-  }
+  await manif.waitFor({ timeout: 15000 });
+  await manif.click();
+  await T(2500);
+
   const presta = page.getByText(PRESTA_A).first();
-  if (await presta.count()) {
-    await presta.click();
-    await T(2500);
-  }
+  await presta.waitFor({ timeout: 15000 });
+  await presta.click();
+  await T(2500);
+
   await page.screenshot({ path: `${process.env.SHOTS_DIR ?? '.'}/complet-ramassage.png` });
+
+  // Le bon doit paraître au bout de l'arbre : c'est toute la promesse de
+  // l'étape — le magasinier descend de la manifestation jusqu'à la pièce.
   const corps = await page.locator('body').innerText();
-  return corps.includes('Ramassage complet du lieu')
-    ? 'arborescence dépliée jusqu\'au bon, case « ramassage complet » offerte'
-    : 'arborescence dépliée';
+  const bonVu = BONS.filter((numero) => corps.includes(numero));
+
+  if (bonVu.length === 0) {
+    throw new Error(
+      `arbre déplié jusqu'à ${PRESTA_A}, mais aucun bon (${BONS.join(', ')}) n'y paraît`
+    );
+  }
+
+  const caseOfferte = corps.includes('Ramassage complet du lieu');
+
+  return `arbre déplié jusqu'à ${bonVu.join(', ')} · case « ramassage complet » `
+    + (caseOfferte ? 'offerte' : 'ABSENTE');
 });
 
 console.log('\n════ bilan ════');

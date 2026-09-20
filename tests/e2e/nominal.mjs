@@ -249,7 +249,17 @@ await etape('7. Livraison : marquer livrée', async () => {
   console.log('     ligne :', (await ligne.innerText().catch(() => '—')).replace(/\n/g, ' · ').slice(0, 160));
   await ligne.getByRole('button', { name: /Marquer livrée/ }).click();
   await T(3500);
-  return 'livrée';
+
+  // Rendre le statut relu, pas le mot « livrée » écrit d'avance : le clic
+  // pouvait réussir et le serveur refuser, l'étape l'annonçait quand même.
+  const apres = (await page.locator('tr', { hasText: NUMERO }).first().innerText())
+    .replace(/\n/g, ' · ');
+
+  if (!/LIVREE/i.test(apres)) {
+    throw new Error(`le bon n'est pas passé « livrée » : ${apres.slice(0, 120)}`);
+  }
+
+  return apres.slice(0, 120);
 });
 
 await etape('8. Ramassage : les quatre compteurs', async () => {
