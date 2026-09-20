@@ -9,6 +9,20 @@ const NOM_CLIENT = `Festival du Lac ${M}`;
 const NOM_MANIF = `Festival du Lac — édition ${M}`;
 const NOM_PRESTA = `Scène principale ${M}`;
 
+// Les dates se calculent, elles ne se figent pas. Datées en dur au 13 → 15, la
+// manifestation du scénario est tombée dans le passé le 16 : l'arborescence
+// s'ouvre sur « Futur », l'écran affiche « Aucune manifestation sur cette
+// période », et les six étapes suivantes échouaient sur une application saine.
+const AUJOURD_HUI = new Date().getDate();
+// Borné au mois courant : le sélecteur de jour n'ouvre pas la page suivante
+// tout seul, un 31 + 2 ne serait donc pas cliquable.
+const DERNIER_JOUR = new Date(
+  new Date().getFullYear(),
+  new Date().getMonth() + 1,
+  0
+).getDate();
+const DANS_DEUX_JOURS = Math.min(AUJOURD_HUI + 2, DERNIER_JOUR);
+
 const browser = await chromium.launch({ headless: !LENT, slowMo: LENT ? 300 : 0, args: ['--start-maximized'] });
 const ctx = await browser.newContext({ viewport: LENT ? null : { width: 1700, height: 1300 }, timezoneId: 'Europe/Paris', locale: 'fr-FR' });
 const page = await ctx.newPage();
@@ -43,15 +57,24 @@ async function dernierBon() {
   return (d.results ?? d)[0]?.numero ?? '';
 }
 
+/** mm:ss — le format dans lequel on raisonne quand on minute une soutenance. */
+function mmss(ms) {
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 async function etape(titre, fn) {
   console.log(`\n▶ ${titre}`);
+  const depart = performance.now();
   try {
     const r = await fn();
-    console.log(`   ✓ ${r ?? 'ok'}`);
-    bilan.push(['✓', titre, r ?? '']);
+    const duree = performance.now() - depart;
+    console.log(`   ✓ ${r ?? 'ok'}  —  ${mmss(duree)}`);
+    bilan.push(['✓', titre, r ?? '', duree]);
   } catch (e) {
+    const duree = performance.now() - depart;
     console.log('   ✗', String(e.stack).split('\n').slice(0, 2).join(' | ').slice(0, 260));
-    bilan.push(['✗', titre, String(e).split('\n')[0].slice(0, 120)]);
+    bilan.push(['✗', titre, String(e).split('\n')[0].slice(0, 120), duree]);
     await page.screenshot({ path: `${process.env.SHOTS_DIR ?? '.'}/echec-${bilan.length}.png` });
     await page.keyboard.press('Escape').catch(() => {});
     await T(800);
@@ -116,7 +139,7 @@ await etape('2. Son contact référent', async () => {
   return page.getByText(/\d+ contact\(s\)/).first().innerText();
 });
 
-await etape('3. La manifestation, 13 → 15 septembre', async () => {
+await etape(`3. La manifestation, ${AUJOURD_HUI} → ${DANS_DEUX_JOURS}`, async () => {
   await page.getByRole('tab', { name: 'Fiches' }).first().click();
   await T(3000);
   await page.getByRole('button', { name: 'Nouvelle manifestation' }).click();
@@ -124,8 +147,8 @@ await etape('3. La manifestation, 13 → 15 septembre', async () => {
   const d = dlg();
   await d.locator('input.mantine-TextInput-input').first().fill(NOM_MANIF);
   const dates = d.locator('button.mantine-DateTimePicker-input');
-  await choisirDate(dates.nth(0), 13);
-  await choisirDate(dates.nth(1), 15);
+  await choisirDate(dates.nth(0), AUJOURD_HUI);
+  await choisirDate(dates.nth(1), DANS_DEUX_JOURS);
   const selects = d.locator('input.mantine-Select-input');
   await choisirOption(selects.nth(0), NOM_CLIENT);
   await choisirOption(selects.nth(1), `Vasseur${M}`);
@@ -137,8 +160,15 @@ await etape('3. La manifestation, 13 → 15 septembre', async () => {
 await etape('4. Une prestation, depuis l\'arborescence', async () => {
   await page.getByRole('tab', { name: 'Manifestations' }).first().click();
   await T(3000);
-  await choisirOption(page.locator('input[aria-label="Client"]').first(), NOM_CLIENT);
-  await T(2000);
+  // L'arbre part du client (F3) : le filtre client a disparu — il faisait
+  // doublon avec le niveau — et les clients s'ouvrent repliés. La recherche
+  // fait le chemin : elle ne garde que les clients portant une manifestation
+  // qui corresponde, et les déplie. Le délai couvre les 300 ms de saisie
+  // différée, puis l'appel de repérage.
+  await page
+    .getByPlaceholder(/Rechercher une manifestation/i)
+    .fill(NOM_MANIF);
+  await T(3500);
   await page.getByRole('button', { name: 'Ajouter une prestation' }).first().click();
   await T(3000);
   const d = dlg();
@@ -148,8 +178,8 @@ await etape('4. Une prestation, depuis l\'arborescence', async () => {
   console.log('     selects de la modale prestation :', await selects.count());
   await choisirOption(selects.nth(1));            // Lieu (0 = manifestation, pré-remplie)
   const dates = d.locator('button.mantine-DateTimePicker-input');
-  await choisirDate(dates.nth(0), 13);
-  await choisirDate(dates.nth(1), 15);
+  await choisirDate(dates.nth(0), AUJOURD_HUI);
+  await choisirDate(dates.nth(1), DANS_DEUX_JOURS);
   await d.getByRole('button', { name: /Créer la prestation|Créer/ }).click();
   await T(3500);
   return NOM_PRESTA;
@@ -206,21 +236,63 @@ await etape('6. Validation du bon', async () => {
 await etape('7. Livraison : marquer livrée', async () => {
   await page.getByRole('tab', { name: 'Livraisons' }).first().click();
   await T(4000);
+  // L'écran s'ouvre sur la table hiérarchique (F6), où le numéro du bon
+  // n'apparaît qu'une fois l'arbre déplié. La vue « Liste » garde la ligne
+  // plate et son bouton : c'est elle que ce scénario pilote.
+  await page.getByText('Liste', { exact: true }).first().click();
+  await T(3000);
+  // Et le filtre de journée s'élargit : un créneau qui déborde sur demain
+  // sortirait de « Aujourd'hui », et la liste s'afficherait vide.
+  await page.locator('label').filter({ hasText: /^Tout$/ }).first().click();
+  await T(2500);
   const ligne = page.locator('tr', { hasText: NUMERO }).first();
   console.log('     ligne :', (await ligne.innerText().catch(() => '—')).replace(/\n/g, ' · ').slice(0, 160));
   await ligne.getByRole('button', { name: /Marquer livrée/ }).click();
   await T(3500);
-  return 'livrée';
+
+  // Rendre le statut relu, pas le mot « livrée » écrit d'avance : le clic
+  // pouvait réussir et le serveur refuser, l'étape l'annonçait quand même.
+  const apres = (await page.locator('tr', { hasText: NUMERO }).first().innerText())
+    .replace(/\n/g, ' · ');
+
+  if (!/LIVREE/i.test(apres)) {
+    throw new Error(`le bon n'est pas passé « livrée » : ${apres.slice(0, 120)}`);
+  }
+
+  return apres.slice(0, 120);
 });
 
 await etape('8. Ramassage : les quatre compteurs', async () => {
   await page.getByRole('tab', { name: 'Ramassages' }).first().click();
   await T(4000);
-  const txt = await page.locator('body').innerText();
+  // L'écran s'ouvre sur l'arborescence (F7), où le numéro du bon ne paraît
+  // qu'une fois l'arbre déplié : la vue « Liste » garde la ligne plate et ses
+  // boutons. Sans cette bascule, l'étape cherchait une ligne absente, épuisait
+  // trente secondes d'attente, et se déclarait bonne — elle ne vérifiait rien.
+  await page.locator('label').filter({ hasText: /^Liste$/ }).first().click();
+  await T(3000);
+
   const ligne = page.locator('tr', { hasText: NUMERO }).first();
-  console.log('     bons à ramasser :', (await ligne.innerText().catch(() => '— absent de la liste')).replace(/\n/g, ' · ').slice(0, 160));
-  const boutons = await ligne.getByRole('button').allInnerTexts().catch(() => []);
-  return `actions : ${boutons.join(', ') || 'aucune'}`;
+  // `waitFor` plutôt qu'un `catch` : une ligne absente doit faire échouer
+  // l'étape, pas la rendre muette.
+  await ligne.waitFor({ timeout: 15000 });
+  console.log('     bon à ramasser :', (await ligne.innerText()).replace(/\n/g, ' · ').slice(0, 160));
+
+  const boutons = await ligne.getByRole('button').allInnerTexts();
+
+  // Et le titre de l'étape se vérifie : on ouvre le bon et on compte ses
+  // compteurs — récupéré, SAV, détruit, manquant.
+  await ligne.getByRole('button', { name: /Voir/ }).click();
+  await T(3500);
+  const compteurs = await page.locator('input.mantine-NumberInput-input:visible').count();
+  await page.keyboard.press('Escape');
+  await T(1200);
+
+  if (compteurs !== 4) {
+    throw new Error(`${compteurs} compteur(s) sur la ligne, quatre attendus`);
+  }
+
+  return `actions : ${boutons.join(', ')} · ${compteurs} compteurs`;
 });
 
 await etape('9. Retour complet : les 4 bancs rendus', async () => {
@@ -245,7 +317,13 @@ await etape('9. Retour complet : les 4 bancs rendus', async () => {
 });
 
 console.log('\n════ bilan ════');
-for (const [s, t, d] of bilan) console.log(` ${s} ${t}${d ? ' — ' + d : ''}`);
+let cumul = 0;
+for (const [statut, titre, detail, duree] of bilan) {
+  cumul += duree;
+  console.log(` ${statut} ${String(titre).padEnd(46)} ${mmss(duree).padStart(5)}   cumul ${mmss(cumul)}`);
+  if (detail) console.log(`     ${detail}`);
+}
+console.log(`\n   parcours complet : ${mmss(cumul)} (hors connexion)`);
 console.log('\n--- erreurs ---');
 console.log(errors.length ? errors.slice(0, 12).join('\n') : '  aucune');
 if (LENT) await T(30000);

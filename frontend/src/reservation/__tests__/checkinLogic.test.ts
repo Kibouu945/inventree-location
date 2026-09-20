@@ -89,7 +89,13 @@ describe('summarizeCheckin', () => {
           manquant: 1,
           casse: 1
         }),
-        makeLigne({ id: 2, quantite_demandee: 4, ok: 2, manquant: 0, casse: 2 })
+        makeLigne({
+          id: 2,
+          quantite_demandee: 4,
+          ok: 2,
+          manquant: 0,
+          casse: 2
+        })
       ])
     ).toEqual({ manquant: 1, casse: 3 });
   });

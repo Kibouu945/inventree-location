@@ -79,17 +79,18 @@ export interface Ramassage {
   prestation: number;
   prestation_nom: string;
   manifestation_nom: string;
+  client_nom?: string;
   demandeur: number;
   demandeur_nom: string;
   statut: string;
   date_ramassage: string | null;
   date_retrait_prevue: string | null;
   date_retour_prevue: string | null;
-  /** ORG-02 : une prestation se déroule sur un seul lieu, nullable si brouillon. */
   lieu: LieuRamassage | null;
   nb_objets: number;
   quantite_totale: number;
   recap_par_vehicule: RecapVehicule[];
+  lignes?: LigneBonRamassage[];
 }
 
 export interface BonRamassageResponse {

@@ -18,6 +18,7 @@ from .conflicts import (
     register_location_conflict_history,
     register_stock_conflict_history,
 )
+from .execution import quantite_deposee, quantite_restant_a_livrer
 from .models import (
     EtatLivraison,
     Client,
@@ -606,6 +607,35 @@ class ReservationSerializer(serializers.ModelSerializer):
         objets référencés doivent être actifs et louables.
         """
 
+        # Le bon est le cœur métier : le geste qui engage réellement du
+        # matériel. Un client ou un contact désactivé ne doit plus pouvoir en
+        # recevoir de nouveau, brouillon compris — contrairement aux autres
+        # règles de cette méthode, qui sont permissives en brouillon. Comme
+        # pour Manifestation et Prestation, seule la création est concernée :
+        # un bon déjà existant reste modifiable si son client/contact a été
+        # désactivé depuis.
+        if self.instance is None:
+            prestation_a_creer = attrs.get("prestation")
+
+            if prestation_a_creer is not None:
+                manifestation = prestation_a_creer.manifestation
+
+                if not manifestation.client.actif:
+                    raise serializers.ValidationError({
+                        "prestation": (
+                            "Impossible de créer une réservation : le client de "
+                            "cette manifestation est désactivé."
+                        )
+                    })
+
+                if manifestation.contact_id and not manifestation.contact.actif:
+                    raise serializers.ValidationError({
+                        "prestation": (
+                            "Impossible de créer une réservation : le contact "
+                            "référent de cette manifestation est désactivé."
+                        )
+                    })
+
         statut = attrs.get(
             "statut", getattr(self.instance, "statut", StatutReservation.BROUILLON)
         )
@@ -831,12 +861,15 @@ class ReservationSerializer(serializers.ModelSerializer):
 
 
 class RamassageSerializer(serializers.ModelSerializer):
-    """Sérialiseur pour SCRUM-89 : liste des ramassages à effectuer."""
-
     prestation_nom = serializers.CharField(source="prestation.nom", read_only=True)
     manifestation_nom = serializers.CharField(
         source="prestation.manifestation.nom",
         read_only=True,
+    )
+    client_nom = serializers.CharField(
+        source="prestation.manifestation.client.nom",
+        read_only=True,
+        default="",
     )
     demandeur_nom = serializers.SerializerMethodField()
     date_ramassage = serializers.DateTimeField(
@@ -847,10 +880,9 @@ class RamassageSerializer(serializers.ModelSerializer):
     nb_objets = serializers.SerializerMethodField()
     quantite_totale = serializers.SerializerMethodField()
     recap_par_vehicule = serializers.SerializerMethodField()
+    lignes = serializers.SerializerMethodField()
 
     class Meta:
-        """Configuration du serializer Ramassage."""
-
         model = Reservation
         fields = [
             "id",
@@ -858,6 +890,7 @@ class RamassageSerializer(serializers.ModelSerializer):
             "prestation",
             "prestation_nom",
             "manifestation_nom",
+            "client_nom",
             "demandeur",
             "demandeur_nom",
             "statut",
@@ -868,18 +901,14 @@ class RamassageSerializer(serializers.ModelSerializer):
             "nb_objets",
             "quantite_totale",
             "recap_par_vehicule",
+            "lignes",
         ]
 
     def get_demandeur_nom(self, obj):
-        """Nom lisible du demandeur."""
-
         return ReservationSerializer._user_label(obj.demandeur)
 
     def get_lieu(self, obj):
-        """Lieu de la prestation, ou None (ORG-02 : un seul lieu, nullable)."""
-
         lieu = obj.prestation.lieu
-
         if lieu is None:
             return None
 
@@ -892,37 +921,43 @@ class RamassageSerializer(serializers.ModelSerializer):
         }
 
     def get_nb_objets(self, obj):
-        """Nombre de lignes à ramasser.
-
-        `len()` sur le prefetch plutôt que `.count()`, qui repartirait en base
-        une fois par ligne de la liste.
-        """
-
         return len(lignes_a_ramasser(obj))
 
     def get_quantite_totale(self, obj):
-        """Quantité totale à ramasser."""
-
         total = 0
-
         for ligne in lignes_a_ramasser(obj):
             total += quantite_attendue_au_retour(ligne)
-
         return total
 
     def get_recap_par_vehicule(self, obj):
-        """Récap quantité totale par véhicule.
-
-        MVP : aucun modèle véhicule n'existe encore.
-        On retourne donc un regroupement "Non attribué".
-        """
-
         return [
             {
                 "vehicule": "Non attribué",
                 "quantite_totale": self.get_quantite_totale(obj),
             }
         ]
+
+    def get_lignes(self, obj):
+        lignes = []
+        for ligne in lignes_a_ramasser(obj):
+            quantites = quantites_du_retour(ligne)
+            lignes.append({
+                "id": ligne.id,
+                "part": ligne.part_id,
+                "part_nom": ligne.part.name,
+                "quantite_demandee": ligne.quantite_demandee,
+                "quantite_livree": ligne.quantite_livree,
+                "quantite_a_ramasser": quantite_attendue_au_retour(ligne),
+                "quantite_retournee": quantites["revenue"],
+                "quantite_ramassee": quantites["ok"],
+                "quantite_sav": quantites["casse"],
+                "quantite_detruite": quantites["detruit"],
+                "quantite_manquante": quantites["manquant"],
+                "facturer_client": facturer_le_client(ligne),
+                "etat_retour": ligne.etat_retour,
+                "commentaire": ligne.commentaire,
+            })
+        return lignes
 
 
 class BonRamassageSerializer(RamassageSerializer):
@@ -1157,24 +1192,47 @@ class LieuSerializer(serializers.ModelSerializer):
 
 
 class DeliveryLigneSerializer(serializers.ModelSerializer):
-    """Ligne d'une livraison, avec le nom de l'article (lecture seule)."""
+    """Une ligne de la tournée, avec ce qui a été déposé et ce qui reste.
+
+    `quantite_deposee` somme les passages de la table d'exécution, remplie
+    depuis le lot L7 : c'est le « livrée » de la maquette Livraison.
+    `quantite_restante` est la différence avec ce qui doit partir — calculée,
+    jamais stockée (R27), puisqu'un passage supplémentaire la changerait.
+
+    `quantite_livree` reste exposée : c'est la colonne du bon, qu'aucun endpoint
+    n'écrit (cf. `retours.py`) et que l'écran lit encore. Elle vaut 0 partout, et
+    disparaîtra du contrat quand la maquette aura basculé sur `quantite_deposee`.
+    """
 
     part_name = serializers.CharField(source="part.name", read_only=True)
     is_virtual = serializers.SerializerMethodField()
+    quantite_deposee = serializers.SerializerMethodField()
+    quantite_restante = serializers.SerializerMethodField()
 
     class Meta:
-        """Configuration du serializer DeliveryLigne."""
-
         model = LigneReservation
-        fields = ["id", "part", "part_name", "quantite_demandee", "is_virtual"]
+        fields = [
+            "id",
+            "part",
+            "part_name",
+            "quantite_demandee",
+            "quantite_livree",
+            "quantite_deposee",
+            "quantite_restante",
+            "quantite_retournee",
+            "is_virtual",
+        ]
         read_only_fields = fields
 
     def get_is_virtual(self, obj) -> bool:
-        """Vrai pour un service, que le bon liste à part du matériel."""
-
         rentable = getattr(obj.part, "rentable_info", None)
-
         return bool(rentable and rentable.is_virtual)
+
+    def get_quantite_deposee(self, obj) -> int:
+        return quantite_deposee(obj)
+
+    def get_quantite_restante(self, obj) -> int:
+        return quantite_restant_a_livrer(obj)
 
 
 class LivraisonStatusLogSerializer(serializers.ModelSerializer):
@@ -1214,16 +1272,13 @@ class LivraisonStatusLogSerializer(serializers.ModelSerializer):
 
 
 class DeliverySerializer(serializers.ModelSerializer):
-    """Vue « tournée livreur » d'une réservation validée (US livreur).
-
-    Réutilise `Reservation` en lecture seule, enrichi des informations dont
-    un livreur a besoin pour organiser sa tournée : lieu géolocalisé,
-    contact de l'organisateur, matériel et quantité totale. Sérialiseur
-    dédié (plutôt qu'extension de `ReservationSerializer`) pour ne pas
-    changer la forme du payload consommé par le formulaire de réservation.
-    """
-
     prestation_nom = serializers.CharField(source="prestation.nom", read_only=True)
+    manifestation_nom = serializers.CharField(
+        source="prestation.manifestation.nom", read_only=True, default=""
+    )
+    client_nom = serializers.CharField(
+        source="prestation.manifestation.client.nom", read_only=True, default=""
+    )
     demandeur_nom = serializers.SerializerMethodField()
     lieu_detail = LieuSerializer(source="prestation.lieu", read_only=True)
     organisateur_nom = serializers.SerializerMethodField()
@@ -1235,14 +1290,14 @@ class DeliverySerializer(serializers.ModelSerializer):
     livraison_status_logs = LivraisonStatusLogSerializer(many=True, read_only=True)
 
     class Meta:
-        """Configuration du serializer Delivery."""
-
         model = Reservation
         fields = [
             "id",
             "numero",
             "statut",
             "prestation_nom",
+            "manifestation_nom",
+            "client_nom",
             "demandeur_nom",
             "lieu_detail",
             "organisateur_nom",
@@ -1718,17 +1773,28 @@ class PrestationSerializer(serializers.ModelSerializer):
 
         errors = {}
 
-        # Nouvelle prestation seulement sur une manif pas encore démarrée.
-        if (
-            self.instance is None
-            and manifestation
-            and not manifestation.accepte_nouvelles_prestations
-        ):
-            errors["manifestation"] = (
-                "Impossible d'ajouter une prestation : la manifestation est "
-                f"« {manifestation.get_statut_display().lower()} » "
-                f"(statut effectif : {manifestation.statut_effectif})."
-            )
+        # Nouvelle prestation seulement sur une manif pas encore démarrée, et
+        # dont le client (et le contact référent, s'il y en a un) sont encore
+        # actifs. Une manifestation déjà « planifiée » avant la désactivation
+        # de son client reste, elle, pleinement gérable : seule la création
+        # d'un nouvel engagement est refusée.
+        if self.instance is None and manifestation:
+            if not manifestation.accepte_nouvelles_prestations:
+                errors["manifestation"] = (
+                    "Impossible d'ajouter une prestation : la manifestation est "
+                    f"« {manifestation.get_statut_display().lower()} » "
+                    f"(statut effectif : {manifestation.statut_effectif})."
+                )
+            elif not manifestation.client.actif:
+                errors["manifestation"] = (
+                    "Impossible d'ajouter une prestation : le client de cette "
+                    "manifestation est désactivé."
+                )
+            elif manifestation.contact_id and not manifestation.contact.actif:
+                errors["manifestation"] = (
+                    "Impossible d'ajouter une prestation : le contact référent "
+                    "de cette manifestation est désactivé."
+                )
 
         if date_debut and date_fin and date_debut > date_fin:
             errors["date_fin"] = (
@@ -1982,7 +2048,17 @@ class ManifestationSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
-        """La date de fin doit être postérieure ou égale à la date de début."""
+        """Dates cohérentes, et interlocuteurs encore en service.
+
+        La désactivation d'un client ou d'un contact n'est pas une suppression :
+        l'existant reste consultable et modifiable — sinon une manifestation
+        passée deviendrait inéditable le jour où son interlocuteur quitte
+        l'association. Ce qui est refusé, c'est de **rattacher** une
+        manifestation à quelqu'un qui n'est plus en service.
+
+        D'où la comparaison à l'instance : on ne refuse que le changement, pas
+        la conservation.
+        """
 
         def effective(field):
             if field in attrs:
@@ -1999,7 +2075,36 @@ class ManifestationSerializer(serializers.ModelSerializer):
                 )
             })
 
+        self._refuser_si_desactive(attrs, "client")
+        self._refuser_si_desactive(attrs, "contact")
+
         return attrs
+
+    def _refuser_si_desactive(self, attrs, champ):
+        """Refuse un rattachement à un client ou un contact désactivé."""
+
+        nouveau = attrs.get(champ)
+
+        if nouveau is None:
+            return
+
+        ancien = getattr(self.instance, champ, None) if self.instance else None
+
+        if ancien is not None and ancien.pk == nouveau.pk:
+            return
+
+        if not nouveau.actif:
+            libelles = {
+                "client": (
+                    f"« {nouveau} » est désactivé : on ne rattache plus de "
+                    "manifestation à ce client. Il reste consultable."
+                ),
+                "contact": (
+                    f"« {nouveau} » est désactivé : cet interlocuteur n'est plus "
+                    "en service. Il reste lisible sur les pièces qu'il a signées."
+                ),
+            }
+            raise serializers.ValidationError({champ: libelles[champ]})
 
     @transaction.atomic
     def update(self, instance, validated_data):

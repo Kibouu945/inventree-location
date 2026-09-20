@@ -9,6 +9,7 @@ import {
   Modal,
   MultiSelect,
   Pagination,
+  SegmentedControl,
   Stack,
   Table,
   Text,
@@ -26,6 +27,7 @@ import {
   PrintableModalStyles
 } from '../print/printableModal';
 import { ownsKeys, syncOwnedParams } from '../urlState';
+import { RamassagesHierarchicalTable } from './RamassagesHierarchicalTable';
 import { RetourRamassageForm } from './RetourRamassageForm';
 import {
   buildRamassageQuery,
@@ -288,6 +290,19 @@ export function RamassagesList({
         <Title order={4} c={context.theme.primaryColor}>
           Mes ramassages
         </Title>
+        <SegmentedControl
+          size='xs'
+          value={filters.viewMode}
+          onChange={(value) =>
+            update({
+              viewMode: value as RamassageFiltersState['viewMode']
+            })
+          }
+          data={[
+            { label: 'Arborescence', value: 'hierarchique' },
+            { label: 'Liste', value: 'liste' }
+          ]}
+        />
       </Group>
 
       <Group align='flex-end' gap='md' wrap='wrap'>
@@ -340,6 +355,20 @@ export function RamassagesList({
         </Group>
       ) : rows.length === 0 ? (
         <Text c='dimmed'>Aucun ramassage à afficher.</Text>
+      ) : filters.viewMode === 'hierarchique' ? (
+        <RamassagesHierarchicalTable
+          context={context}
+          ramassages={rows}
+          onOpenBon={(ramassage) =>
+            setBonModal({
+              open: true,
+              reservationId: ramassage.id
+            })
+          }
+          onSaved={async () => {
+            await query.refetch();
+          }}
+        />
       ) : (
         <Table striped highlightOnHover>
           <Table.Thead>

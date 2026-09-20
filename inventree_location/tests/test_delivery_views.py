@@ -4,6 +4,9 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 
@@ -89,7 +92,9 @@ def prestation(db, manifestation, lieu):
     )
 
 
-def _make_reservation(prestation, part, *, statut, date_retrait, date_retour, quantite=1):
+def _make_reservation(
+    prestation, part, *, statut, date_retrait, date_retour, quantite=1
+):
     reservation = Reservation.objects.create(
         prestation=prestation,
         demandeur=User.objects.create_user(
@@ -210,7 +215,9 @@ class TestDeliveryListView:
         assert ids == [in_range.pk]
 
     @pytest.mark.django_db
-    def test_date_to_couvre_la_journee_entiere(self, factory, gestionnaire, prestation, part):
+    def test_date_to_couvre_la_journee_entiere(
+        self, factory, gestionnaire, prestation, part
+    ):
         """Filtrer sur « le 2 juin » doit montrer la tournée de ce jour-là.
 
         Une borne au jour est lue comme minuit : un retrait prévu à 8 h 30
@@ -235,7 +242,9 @@ class TestDeliveryListView:
         assert [row["id"] for row in response.data] == [du_jour.pk]
 
     @pytest.mark.django_db
-    def test_borne_horodatee_reste_exacte(self, factory, gestionnaire, prestation, part):
+    def test_borne_horodatee_reste_exacte(
+        self, factory, gestionnaire, prestation, part
+    ):
         """Une borne complète garde sa précision à l'heure près."""
 
         _make_reservation(
@@ -346,9 +355,7 @@ class TestDeliveryListView:
         assert row["organisateur_telephone"] == ""
 
     @pytest.mark.django_db
-    def test_quantite_totale_sums_lignes(
-        self, factory, gestionnaire, prestation, part
-    ):
+    def test_quantite_totale_sums_lignes(self, factory, gestionnaire, prestation, part):
         reservation = Reservation.objects.create(
             prestation=prestation,
             demandeur=User.objects.create_user(username="dem", password="pwd"),
@@ -499,3 +506,111 @@ class TestMarquerLivree:
         response = DeliveryMarquerLivreeView.as_view()(request, pk=999999)
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+class TestQuantitesDeLaTournee:
+    """Ce que la tournée dit d'une ligne : demandée, déposée, restante.
+
+    Les deux dernières viennent des tables d'exécution, remplies depuis le lot
+    L7 : avant, l'écran n'avait que `quantite_livree`, la colonne du bon qu'aucun
+    endpoint n'écrit — elle valait 0 même sur un bon livré la veille.
+    """
+
+    def _ligne(self, factory, user, reservation):
+        request = factory.get("/plugin/inventree-location/deliveries/")
+        force_authenticate(request, user=user)
+        response = DeliveryListView.as_view()(request)
+
+        assert response.status_code == status.HTTP_200_OK
+
+        row = next(r for r in response.data if r["id"] == reservation.pk)
+
+        return row["lignes"][0]
+
+    @pytest.mark.django_db
+    def test_avant_la_livraison_tout_reste_a_deposer(
+        self, factory, gestionnaire, prestation, part
+    ):
+        reservation = _make_reservation(
+            prestation,
+            part,
+            statut="validee",
+            date_retrait="2026-06-02T00:00:00Z",
+            date_retour="2026-06-03T00:00:00Z",
+            quantite=4,
+        )
+
+        ligne = self._ligne(factory, gestionnaire, reservation)
+
+        assert ligne["quantite_demandee"] == 4
+        assert ligne["quantite_deposee"] == 0
+        assert ligne["quantite_restante"] == 4
+
+    @pytest.mark.django_db
+    def test_apres_la_livraison_plus_rien_ne_reste(
+        self, factory, gestionnaire, livreur, prestation, part
+    ):
+        reservation = _make_reservation(
+            prestation,
+            part,
+            statut="validee",
+            date_retrait="2026-06-02T00:00:00Z",
+            date_retour="2026-06-03T00:00:00Z",
+            quantite=4,
+        )
+
+        request = factory.post(LIVRER_URL.format(pk=reservation.pk), {}, format="json")
+        force_authenticate(request, user=livreur)
+
+        assert (
+            DeliveryMarquerLivreeView.as_view()(request, pk=reservation.pk).status_code
+            == status.HTTP_200_OK
+        )
+
+        ligne = self._ligne(factory, gestionnaire, reservation)
+
+        assert ligne["quantite_deposee"] == 4
+        assert ligne["quantite_restante"] == 0
+        # La colonne du bon, elle, n'a toujours pas d'écrivain.
+        assert ligne["quantite_livree"] == 0
+
+    @pytest.mark.django_db
+    def test_le_cout_de_la_liste_ne_depend_pas_du_nombre_de_bons(
+        self, factory, gestionnaire, prestation, part
+    ):
+        """Deux mesures plutôt qu'un plafond : quatre bons, puis douze.
+
+        Le même nombre de requêtes des deux côtés, parce que tout est joint ou
+        préchargé. Les deux régressions que cette égalité attrape : la quantité
+        déposée sans `lignes__livraisons`, qui coûte une requête par ligne, et
+        le nom du demandeur sans sa jointure, qui en coûte une par bon.
+        """
+
+        def mesure():
+            request = factory.get("/plugin/inventree-location/deliveries/")
+            force_authenticate(request, user=gestionnaire)
+
+            with CaptureQueriesContext(connection) as requetes:
+                reponse = DeliveryListView.as_view()(request)
+                assert reponse.status_code == status.HTTP_200_OK
+
+            return len(requetes)
+
+        def creer(combien):
+            for _ in range(combien):
+                _make_reservation(
+                    prestation,
+                    part,
+                    statut="validee",
+                    date_retrait="2026-06-02T00:00:00Z",
+                    date_retour="2026-06-03T00:00:00Z",
+                    quantite=2,
+                )
+
+        creer(4)
+        mesure()  # la première requête amorce les caches de l'application
+        quatre_bons = mesure()
+
+        creer(8)
+
+        assert mesure() == quatre_bons

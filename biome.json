@@ -4,7 +4,10 @@
 		"includes": [
 			"**",
 			"frontend/src/**",
-			"!frontend/src/locales/**"
+			"!frontend/src/locales/**",
+			"!**/inventree_location/static",
+			"!**/dist",
+			"!**/node_modules"
 		]
 	},
 	"javascript": {
@@ -16,32 +19,39 @@
 		}
 	},
 	"linter": {
-    "rules": {
-		"suspicious" : {
-			"noExplicitAny": "off",
-			"noDoubleEquals": "off",
-			"noArrayIndexKey": "off",
-			"useDefaultSwitchClauseLast": "off"
-		},
-		"style": {
-			"noUselessElse": "off",
-			"noNonNullAssertion": "off",
-			"noParameterAssign": "off"
-		}, "correctness":{
-			"useExhaustiveDependencies": "off",
-			"useJsxKeyInIterable": "off",
-			"noUnsafeOptionalChaining": "off",
-			"noSwitchDeclarations": "off",
-			"noUnusedImports":"error"
-		}, "complexity": {
-			"noBannedTypes": "off",
-			"noExtraBooleanCast": "off",
-			"noForEach": "off",
-			"noUselessSwitchCase": "off",
-			"useLiteralKeys":"off"
-		}, "performance": {
-			"noDelete":"off"
+		"enabled": true,
+		"rules": {
+			"suspicious": {
+				"noExplicitAny": "off",
+				"noDoubleEquals": "off",
+				"noArrayIndexKey": "off",
+				"useDefaultSwitchClauseLast": "off"
+			},
+			"style": {
+				"noUselessElse": "off",
+				"noNonNullAssertion": "off",
+				"noParameterAssign": "off"
+			},
+			"correctness": {
+				"useExhaustiveDependencies": "off",
+				"useJsxKeyInIterable": "off",
+				"noUnsafeOptionalChaining": "off",
+				"noSwitchDeclarations": "off",
+				"noUnusedImports": "error"
+			},
+			"complexity": {
+				"noBannedTypes": "off",
+				"noExtraBooleanCast": "off",
+				"noForEach": "off",
+				"noUselessSwitchCase": "off",
+				"useLiteralKeys": "off"
+			},
+			"performance": {
+				"noDelete": "off"
+			}
 		}
+	},
+	"formatter": {
+		"enabled": true
 	}
-}
 }

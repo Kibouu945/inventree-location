@@ -404,6 +404,12 @@ LIVRE = [
         "be356a4",
     ),
     (
+        "L7",
+        "Écriture des tables d'exécution",
+        "Les trois points d'écriture alimentent désormais `Livraison` et `Ramassage`, chacun dans sa transaction : le journal du livreur, `transition_reservation_status` — et donc ses six appelants d'un coup — et la saisie de ramassage, qui pose son statut à la main et échappait au service. `/deliveries/` rend enfin ces quantités à l'écran (`quantite_deposee`, `quantite_restante`), la colonne morte `quantite_livree` restant exposée le temps que la maquette bascule. Trois trous fermés au passage : `date_retrait_reelle` n'avait aucun écrivain, la projection ne savait pas <b>retirer</b> un passage devenu sans objet, et elle croyait les lignes qu'on lui passait — un cache de `prefetch_related` périmé lui faisait écrire des zéros.",
+        "",
+    ),
+    (
         "A3",
         "Filtre client sur les manifestations",
         "`client=` sur `/manifestations/`, distinct de `search` qui porte sur le nom de l'évènement : au téléphone on connaît le client, pas le nom de la manifestation. Sélecteur posé sur les deux écrans qui en listent.",
@@ -451,10 +457,10 @@ ETAT_TABLES = {
     "lignedevis": ("Créée, pas encore exploitée", "D0"),
     "facture": ("Créée, pas encore exploitée", "D0"),
     "modif": ("Créée, pas encore exploitée", "D0"),
-    "livr": ("Projection, en lecture", "L6"),
-    "livrl": ("Projection, en lecture", "L6"),
-    "ram": ("Projection, en lecture", "L6"),
-    "rama": ("Projection, en lecture", "L6"),
+    "livr": ("Écrite en direct, le bon fait foi", "L7"),
+    "livrl": ("Écrite en direct, le bon fait foi", "L7"),
+    "ram": ("Écrite en direct, le bon fait foi", "L7"),
+    "rama": ("Écrite en direct, le bon fait foi", "L7"),
     "incident": ("En service", "L5"),
     "sav": ("En service", ""),
     "logresa": ("En service", ""),
@@ -540,7 +546,7 @@ RECETTE = [
     (
         "Livraison partielle saisie par le livreur",
         "À faire",
-        "**L7** — la table existe depuis L6",
+        "la table existe (L6) et s'écrit (L7) ; reste un endpoint qui accepte une quantité par ligne et par passage",
     ),
     ("Modifier l'information là où elle se trouve", "Fait", "**F4** — livré le 12/09"),
     ("Magasinier → comptage de stock", "À faire", "**F8** + R42"),
@@ -619,15 +625,15 @@ FRONT = [
         "Maquette Livraison",
         "Table hiérarchique aux quatre niveaux, compteurs −/+ et photo par ligne, cases de validation par ligne et par prestation, filtres Tous / À faire / Partiel / Complet, envoi groupé.",
         "`delivery/DeliveriesList.tsx` (liste plate aujourd'hui). La hiérarchie et le chargement au dépliage sont déjà résolus dans `arborescence/Arborescence.tsx` : le lire avant d'écrire.",
-        "L6 est livré ; la saisie attend L7",
-        "la tournée du jour s'affiche en quatre niveaux avec les quantités demandée / livrée / restante, les filtres opèrent, et le tout se vérifie avec `demo_livreur`.",
+        "rien en lecture ; la saisie attend son endpoint",
+        "la tournée du jour s'affiche en quatre niveaux avec les quantités demandée / livrée / restante — `quantite_demandee`, `quantite_deposee` et `quantite_restante` de `/deliveries/`, la deuxième et la troisième venant des tables d'exécution —, les filtres opèrent, et le tout se vérifie avec `demo_livreur`.",
     ),
     (
         "F7",
         "Maquette Ramassage",
         "Même table, avec <b>quatre compteurs par ligne</b> — récupéré, cassé, détruit, manquant —, la photo, la bascule de facturation et la case de ramassage complet. Deux règles contre-intuitives : le manquant se <b>déduit</b> (R31) et n'est calculé qu'une fois le lieu déclaré entièrement ramassé (R32) ; et il n'y a <b>aucun plafond</b> (R33), un surplus est légitime.",
         "`ramassage/RamassagesList.tsx` et son formulaire, qui portent déjà les quatre quantités mais pas la table hiérarchique.",
-        "L7 pour la saisie, F6 pour la structure",
+        "F6 pour la structure ; L7 est livré",
         "les quatre compteurs se saisissent par ligne, le manquant se déduit, et rien n'est déclaré perdu tant que le lieu n'est pas terminé.",
     ),
     (
@@ -655,12 +661,6 @@ BACK = [
         "Devis : implémentation",
         "Génération automatique du bon, résolution du prix (paliers de quantité, table de remises, remise globale), signature, états de ligne. Les tables existent depuis D0.",
         "L2 — débloqué",
-    ),
-    (
-        "L7",
-        "Écriture des tables d'exécution",
-        "Greffe sur les trois points d'écriture déjà transactionnels : le journal de livraison, le passage de statut, la saisie de ramassage. Se découpe en trois lots indépendants. La projection et sa commande de vérification sont en place : chaque greffe se prouve par « aucune divergence ».",
-        "L6 — débloqué",
     ),
 ]
 
@@ -745,7 +745,7 @@ REPARTITION = [
     (
         "Back",
         "L3 — devis : prix, génération, signature",
-        "L7 — écriture des tables d'exécution",
+        "la saisie partielle, quand F6 et F7 la demanderont",
         "hors `frontend/`",
     ),
 ]
@@ -850,8 +850,8 @@ avancement = "".join(
         ),
         (
             "Back",
-            "D0 et L0 à L6 : tables du devis, client et contacts, rôle unique, couture d'exécution, tournée du jour. Plus L5b, le plafond du ramassage levé.",
-            f"{len(BACK)} lots : L3, le devis — dont F9 dépend — et L7, l'écriture des tables d'exécution, dont F6 et F7 ont besoin pour la saisie.",
+            "D0 et L0 à L7 : tables du devis, client et contacts, rôle unique, couture d'exécution, tournée du jour, et les trois points d'écriture qui alimentent les tables d'exécution. Plus L5b, le plafond du ramassage levé.",
+            f"{len(BACK)} lot : L3, le devis, dont F9 dépend. La saisie d'une quantité partielle viendra quand F6 et F7 en auront l'usage.",
         ),
         (
             "Recette du 11/09",
@@ -1043,9 +1043,12 @@ leur commit.</div>
 <div class="note"><b>Un fichier, un auteur</b> : c'est ce qui rend les quatre chantiers simultanés
 sans conflit de fusion. Une branche par tâche, depuis <code>develop</code>, PR vers
 <code>develop</code> — jamais vers <code>main</code>.<br>
-<b>F6 et F7 se font en lecture d'abord</b> : compteurs et validations ont besoin des tables
-d'exécution (lot L6). Ce n'est pas un retard, c'est le découpage — à dire avant, sinon la
-personne attend.<br>
+<b>F6 et F7 se font en lecture d'abord</b> : les tables d'exécution sont là (L6), se
+remplissent toutes seules au geste du livreur comme du magasinier (L7), et `/deliveries/`
+expose maintenant la quantité déposée et la restante. F7 sauvegarde déjà, par
+<code>PATCH /ramassages/&lt;id&gt;/retour/</code>. Ce qui manque à <b>F6</b>, c'est la saisie :
+ses compteurs par ligne ne vivent que dans le navigateur, et aucun endpoint n'accepte
+« ligne 12 : 4 unités, passage 1 ». À ouvrir quand l'écran le demandera, pas avant.<br>
 <b>F9 (devis) attend L3</b> : les écrans n'ont rien à montrer tant que le prix ne se résout pas.
 C'est pour cela qu'il vient en second chez Joseph, derrière F3 qui, lui, est prenable
 tout de suite.</div>

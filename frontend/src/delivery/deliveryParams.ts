@@ -1,35 +1,17 @@
-export type DeliveryViewMode = 'liste' | 'calendrier' | 'carte';
+export type DeliveryViewMode =
+  | 'hierarchique'
+  | 'liste'
+  | 'calendrier'
+  | 'carte';
 
-/**
- * Fenêtre de temps de la tournée.
- *
- * Revue interne du 07/09/2026 : « ajouter un filtre pour le livreur dans la
- * partie tournée livreur pour qu'il voie ses livraisons pour cette journée ou
- * demain — par défaut, afficher les livraisons du jour et lui permettre de
- * consulter les livraisons à venir ». L'écran s'ouvrait sur *toutes* les
- * livraisons, passées comprises : un livreur devait retrouver sa journée dans
- * la liste avant de commencer.
- *
- * `jour` (défaut) : ce qui est en cours aujourd'hui. `avenir` : aujourd'hui et
- * après. `tout` : aucune borne — c'est aussi ce que vaut l'horizon quand une
- * période libre est saisie, les deux étant exclusifs.
- */
 export type DeliveryHorizon = 'jour' | 'avenir' | 'tout';
 
 export interface DeliveryFiltersState {
   horizon: DeliveryHorizon;
-  /** Période libre. Renseignée, elle l'emporte sur `horizon`. */
   dateRange: [string | null, string | null];
   statuts: string[];
   lieux: number[];
   viewMode: DeliveryViewMode;
-  /**
-   * Ordre de passage de la tournée (LIV-04), clés `l<id>` / `r<id>`.
-   *
-   * Vide = ordre chronologique. Il vit dans l'URL comme les filtres : la
-   * tournée survit au rechargement et se partage par simple lien, sans table
-   * d'ordre côté serveur.
-   */
   ordre: string[];
 }
 
@@ -38,7 +20,7 @@ export const DEFAULT_DELIVERY_FILTERS: DeliveryFiltersState = {
   dateRange: [null, null],
   statuts: [],
   lieux: [],
-  viewMode: 'liste',
+  viewMode: 'hierarchique',
   ordre: []
 };
 
@@ -115,7 +97,12 @@ function isHorizon(value: string | null): value is DeliveryHorizon {
 }
 
 function isViewMode(value: string | null): value is DeliveryViewMode {
-  return value === 'liste' || value === 'calendrier' || value === 'carte';
+  return (
+    value === 'hierarchique' ||
+    value === 'liste' ||
+    value === 'calendrier' ||
+    value === 'carte'
+  );
 }
 
 export function serializeDeliveryFilters(

@@ -213,7 +213,13 @@ describe('prestationDefaults', () => {
     const defaults = prestationDefaults({
       ...PRESTATION,
       lignes: [
-        { id: 1, part: 7, part_name: 'Nettoyage', quantite: 1, commentaire: '' }
+        {
+          id: 1,
+          part: 7,
+          part_name: 'Nettoyage',
+          quantite: 1,
+          commentaire: ''
+        }
       ]
     });
 

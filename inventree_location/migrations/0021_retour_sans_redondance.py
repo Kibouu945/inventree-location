@@ -113,7 +113,15 @@ def normaliser_etat_retour(apps):
 
 
 class Migration(migrations.Migration):
-    """Reprise des données puis suppression des colonnes."""
+    """Reprise des données puis suppression des colonnes.
+
+    Atomique, et elle doit le rester : la reprise (`RunPython`) précède la
+    suppression de sept colonnes. Hors transaction, un échec au milieu laisse
+    un schéma à moitié démonté, sans retour arrière — et les données reprises
+    à moitié. Elle est par ailleurs déjà appliquée partout, prod comprise :
+    la désarmer ne changeait rien là où elle a tourné, et n'exposait que les
+    bases neuves.
+    """
 
     dependencies = [
         ("inventree_location", "0020_alter_lignereservation_etat_retour"),

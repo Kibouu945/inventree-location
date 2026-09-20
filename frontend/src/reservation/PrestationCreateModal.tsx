@@ -113,7 +113,7 @@ export function PrestationCreateModal({
       setState(emptyState(manifestationId));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opened]);
+  }, [opened, manifestationId]);
 
   const manifestationsQuery = useQuery<Page<ManifestationOption>>(
     {

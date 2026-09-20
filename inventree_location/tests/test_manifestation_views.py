@@ -14,12 +14,14 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from inventree_location import roles
 from inventree_location.models import (
     Client,
+    Contact,
     Manifestation,
     Prestation,
     Reservation,
     StatutManifestation,
     StatutReservation,
 )
+from inventree_location.serializers import ManifestationSerializer
 from inventree_location.views import (
     ClientListView,
     ManifestationDetailView,
@@ -110,6 +112,73 @@ class TestManifestationCrud:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "date_fin" in response.data
+
+    def test_client_inactif_refuse_a_la_creation(self, factory, gestionnaire, client):
+        client.actif = False
+        client.save(update_fields=["actif"])
+
+        request = factory.post(MANIF_URL, _payload(client), format="json")
+        force_authenticate(request, user=gestionnaire)
+        response = ManifestationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "client" in response.data
+
+    def test_manifestation_existante_reste_modifiable_si_client_devient_inactif(
+        self, factory, gestionnaire, client
+    ):
+        manif = Manifestation.objects.create(
+            nom="Déjà planifiée",
+            date_debut=timezone.now(),
+            date_fin=timezone.now() + timedelta(days=1),
+            client=client,
+        )
+        client.actif = False
+        client.save(update_fields=["actif"])
+
+        request = factory.patch(
+            f"{MANIF_URL}{manif.pk}/", {"nom": "Renommée"}, format="json"
+        )
+        force_authenticate(request, user=gestionnaire)
+        response = ManifestationDetailView.as_view()(request, pk=manif.pk)
+
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_contact_inactif_refuse_a_la_creation(self, factory, gestionnaire, client):
+        contact = Contact.objects.create(
+            client=client, nom="Vasseur", prenom="Hélène", actif=False
+        )
+        payload = _payload(client)
+        payload["contact"] = contact.pk
+
+        request = factory.post(MANIF_URL, payload, format="json")
+        force_authenticate(request, user=gestionnaire)
+        response = ManifestationListCreateView.as_view()(request)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "contact" in response.data
+
+    def test_manifestation_existante_reste_modifiable_si_contact_devient_inactif(
+        self, factory, gestionnaire, client
+    ):
+        contact = Contact.objects.create(client=client, nom="Vasseur", prenom="Hélène")
+        manif = Manifestation.objects.create(
+            nom="Déjà planifiée",
+            date_debut=timezone.now(),
+            date_fin=timezone.now() + timedelta(days=1),
+            client=client,
+            contact=contact,
+        )
+        contact.actif = False
+        contact.save(update_fields=["actif"])
+
+        request = factory.patch(
+            f"{MANIF_URL}{manif.pk}/", {"nom": "Renommée"}, format="json"
+        )
+        force_authenticate(request, user=gestionnaire)
+        response = ManifestationDetailView.as_view()(request, pk=manif.pk)
+
+        assert response.status_code == status.HTTP_200_OK
 
     def test_update_and_delete(self, factory, gestionnaire, client):
         manif = Manifestation.objects.create(
@@ -289,6 +358,31 @@ class TestClientList:
         request = factory.get("/plugin/inventree-location/groupes/")
         response = ClientListView.as_view()(request)
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_actif_non_filtre_par_defaut(self, factory, gestionnaire, client):
+        client.actif = False
+        client.save(update_fields=["actif"])
+
+        request = factory.get("/plugin/inventree-location/clients/")
+        force_authenticate(request, user=gestionnaire)
+        response = ClientListView.as_view()(request)
+
+        # Sans le paramètre, la gestion des clients doit pouvoir en retrouver
+        # un désactivé pour le réactiver.
+        assert [item["nom"] for item in response.data["results"]] == ["Jambville"]
+
+    def test_filtre_actif_true_exclut_les_desactives(self, factory, gestionnaire, client):
+        client.actif = False
+        client.save(update_fields=["actif"])
+        Client.objects.create(nom="Autre maison", email="autre@exemple.test")
+
+        request = factory.get(
+            "/plugin/inventree-location/clients/", {"actif": "true"}
+        )
+        force_authenticate(request, user=gestionnaire)
+        response = ClientListView.as_view()(request)
+
+        assert [item["nom"] for item in response.data["results"]] == ["Autre maison"]
 
 
 @pytest.mark.django_db
@@ -546,3 +640,67 @@ class TestFiltreParClient:
             self._noms(factory, gestionnaire, client=jambville.pk, search="Gala")
             == set()
         )
+
+
+class TestDesactivation:
+    """Désactiver n'est pas supprimer : l'existant survit, le neuf est refusé."""
+
+    def test_refuse_un_client_desactive(self, db):
+        client = Client.objects.create(nom="Association dissoute", actif=False)
+        serializer = ManifestationSerializer(
+            data={
+                "nom": "Camp d'hiver",
+                "client": client.pk,
+                "date_debut": "2026-12-01T08:00:00Z",
+                "date_fin": "2026-12-05T18:00:00Z",
+                "statut": "brouillon",
+            }
+        )
+
+        assert not serializer.is_valid()
+        assert "désactivé" in str(serializer.errors["client"][0])
+
+    def test_refuse_un_contact_desactive(self, db):
+        client = Client.objects.create(nom="Mairie", actif=True)
+        contact = Contact.objects.create(
+            client=client, nom="Parti", prenom="Jean", actif=False
+        )
+        serializer = ManifestationSerializer(
+            data={
+                "nom": "Séminaire",
+                "client": client.pk,
+                "contact": contact.pk,
+                "date_debut": "2026-12-01T08:00:00Z",
+                "date_fin": "2026-12-02T18:00:00Z",
+                "statut": "brouillon",
+            }
+        )
+
+        assert not serializer.is_valid()
+        assert "désactivé" in str(serializer.errors["contact"][0])
+
+    def test_une_manifestation_existante_reste_modifiable(self, db):
+        """Le cas qui compte : l'historique ne se verrouille pas.
+
+        Le client est désactivé après coup ; sa manifestation doit continuer de
+        s'éditer, sans quoi désactiver un client gèlerait tout son passé.
+        """
+
+        client = Client.objects.create(nom="Association dissoute", actif=True)
+        manifestation = Manifestation.objects.create(
+            nom="Camp d'été",
+            client=client,
+            date_debut=timezone.now(),
+            date_fin=timezone.now() + timedelta(days=2),
+        )
+        client.actif = False
+        client.save(update_fields=["actif"])
+
+        serializer = ManifestationSerializer(
+            manifestation,
+            data={"nom": "Camp d'été 2026", "client": client.pk},
+            partial=True,
+        )
+
+        assert serializer.is_valid(), serializer.errors
+        assert serializer.save().nom == "Camp d'été 2026"

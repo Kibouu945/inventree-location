@@ -1,10 +1,4 @@
-/**
- * Filtres du widget Ramassages : état, requête API et sérialisation d'URL.
- *
- * Clés préfixées `ram_` : plusieurs widgets partagent la query string du
- * dashboard (cf. `deliveryParams.ts` / `urlState.ts`), et deux widgets qui
- * utiliseraient `statut` pour des filtres différents se contamineraient.
- */
+export type RamassageViewMode = 'hierarchique' | 'liste';
 
 export interface RamassageFiltersState {
   search: string;
@@ -12,9 +6,9 @@ export interface RamassageFiltersState {
   statuts: string[];
   dateRange: [string | null, string | null];
   page: number;
+  viewMode: RamassageViewMode;
 }
 
-//: Doit rester aligné sur `LieuPagination.page_size` côté serveur.
 export const RAMASSAGE_PAGE_SIZE = 20;
 
 export const DEFAULT_RAMASSAGE_FILTERS: RamassageFiltersState = {
@@ -22,7 +16,8 @@ export const DEFAULT_RAMASSAGE_FILTERS: RamassageFiltersState = {
   lieu: '',
   statuts: [],
   dateRange: [null, null],
-  page: 1
+  page: 1,
+  viewMode: 'hierarchique'
 };
 
 export const RAMASSAGE_URL_KEYS = [
@@ -31,7 +26,8 @@ export const RAMASSAGE_URL_KEYS = [
   'ram_statut',
   'ram_from',
   'ram_to',
-  'ram_page'
+  'ram_page',
+  'ram_view'
 ];
 
 export function buildRamassageQuery(
@@ -94,6 +90,10 @@ export function serializeRamassageFilters(
     search.set('ram_page', String(filters.page));
   }
 
+  if (filters.viewMode !== DEFAULT_RAMASSAGE_FILTERS.viewMode) {
+    search.set('ram_view', filters.viewMode);
+  }
+
   return search.toString();
 }
 
@@ -120,13 +120,16 @@ export function parseRamassageFilters(query: string): RamassageFiltersState {
   const from = search.get('ram_from');
   const to = search.get('ram_to');
   const page = Number.parseInt(search.get('ram_page') ?? '1', 10);
+  const viewMode =
+    search.get('ram_view') === 'liste' ? 'liste' : 'hierarchique';
 
   return {
     search: search.get('ram_q') ?? '',
     lieu: search.get('ram_lieu') ?? '',
     statuts: parseStringList(search.get('ram_statut')),
     dateRange: [from || null, to || null],
-    page: Number.isInteger(page) && page > 0 ? page : 1
+    page: Number.isInteger(page) && page > 0 ? page : 1,
+    viewMode
   };
 }
 
