@@ -28,6 +28,7 @@ from inventree_location.views import (
     CatalogPagination,
     CatalogPartDetailView,
     CatalogPartListView,
+    PartAvailabilityHistogramView,
     RentableFlagBulkUpdateView,
     RentablePartDetailView,
 )
@@ -332,6 +333,61 @@ class TestCatalogPartDetail:
         """Une requête anonyme doit renvoyer 401 sur l'endpoint détail."""
         request = factory.get(self._url(parts["tente"].pk))
         response = CatalogPartDetailView.as_view()(request, pk=parts["tente"].pk)
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+class TestPartAvailabilityHistogram:
+    def _url(self, pk):
+        return f"/plugin/inventree-location/catalog/{pk}/histogram/"
+
+    @pytest.mark.django_db
+    def test_get_returns_one_entry_per_day(self, factory, user, parts):
+        mettre_en_stock(parts["tente"], 10)
+        today = timezone.localdate()
+
+        request = factory.get(
+            self._url(parts["tente"].pk),
+            {
+                "date_debut": today.isoformat(),
+                "date_fin": (today + timedelta(days=2)).isoformat(),
+            },
+        )
+        force_authenticate(request, user=user)
+
+        response = PartAvailabilityHistogramView.as_view()(
+            request, pk=parts["tente"].pk
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["part_id"] == parts["tente"].pk
+        assert len(response.data["days"]) == 3
+        assert response.data["days"][0]["available"] == 10
+
+    @pytest.mark.django_db
+    def test_defaults_to_a_week_from_today(self, factory, user, parts):
+        request = factory.get(self._url(parts["tente"].pk))
+        force_authenticate(request, user=user)
+
+        response = PartAvailabilityHistogramView.as_view()(
+            request, pk=parts["tente"].pk
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data["days"]) == 7
+
+    @pytest.mark.django_db
+    def test_get_missing_part_returns_404(self, factory, user):
+        request = factory.get(self._url(99999))
+        force_authenticate(request, user=user)
+
+        response = PartAvailabilityHistogramView.as_view()(request, pk=99999)
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_anonymous_returns_401(self, factory, parts):
+        request = factory.get(self._url(parts["tente"].pk))
+        response = PartAvailabilityHistogramView.as_view()(
+            request, pk=parts["tente"].pk
+        )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
