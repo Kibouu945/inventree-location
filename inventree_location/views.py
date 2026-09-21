@@ -99,7 +99,12 @@ from .serializers import (
     geocode_candidates,
     sync_ligne_etat_retour,
 )
-from .stock import _as_date, compute_prestation_stock, compute_stock_availability
+from .stock import (
+    _as_date,
+    compute_part_availability_calendar,
+    compute_prestation_stock,
+    compute_stock_availability,
+)
 from .services.return_report import build_return_report
 from .services.return_report_pdf import (
     PdfEngineUnavailable,
@@ -2257,6 +2262,38 @@ class CatalogPartDetailView(APIView):
         serializer = self.serializer_class(part)
 
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class PartAvailabilityHistogramView(APIView):
+    permission_classes = [CatalogPermission]
+
+    def get(self, request, pk, *args, **kwargs):
+        from part.models import Part
+
+        part = Part.objects.filter(pk=pk).first()
+
+        if part is None:
+            return Response(
+                {"detail": "Part introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        today = timezone.localdate()
+        date_debut = parse_optional_date_param(request, "date_debut") or today
+        date_fin = parse_optional_date_param(
+            request, "date_fin"
+        ) or date_debut + timedelta(days=6)
+
+        days = compute_part_availability_calendar(part, date_debut, date_fin)
+
+        return Response(
+            {
+                "part_id": part.pk,
+                "part_name": getattr(part, "name", str(part)),
+                "days": days,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class RentableFlagBulkUpdateView(APIView):

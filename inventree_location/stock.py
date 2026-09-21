@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from django.utils import timezone
 
-from .conflicts import CONFLICT_STATUSES, get_part_total_stock
+from .conflicts import CONFLICT_STATUSES, get_part_total_stock, tension_level
 
 
 def _as_date(value) -> date:
@@ -273,3 +273,49 @@ def compute_prestation_stock(prestation) -> dict:
         lignes,
         exclude_prestation_id=prestation.pk,
     )
+
+
+MAX_HISTOGRAM_DAYS = 92
+
+
+def compute_part_availability_calendar(part, date_debut, date_fin) -> list[dict]:
+    from .models import RentableItem
+
+    rentable_item = RentableItem.objects.filter(part=part).first()
+
+    if rentable_item is not None and rentable_item.is_virtual:
+        return []
+
+    total_stock = get_part_total_stock(part, rentable_item=rentable_item)
+
+    start_date = _as_date(date_debut)
+    end_date = _as_date(date_fin)
+
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+
+    end_date = min(end_date, start_date + timedelta(days=MAX_HISTOGRAM_DAYS - 1))
+
+    base = max(total_stock, 1)
+    days = []
+    current = start_date
+
+    while current <= end_date:
+        engagements = compute_engagement_details([part.pk], current, current).get(
+            part.pk, []
+        )
+        reserved = sum(entry["quantite"] for entry in engagements)
+        occupation_rate = (reserved / base) * 100
+
+        days.append({
+            "date": current.isoformat(),
+            "total_stock": total_stock,
+            "reserved": reserved,
+            "available": total_stock - reserved,
+            "occupation_rate": occupation_rate,
+            "tension_level": tension_level(occupation_rate),
+        })
+
+        current += timedelta(days=1)
+
+    return days

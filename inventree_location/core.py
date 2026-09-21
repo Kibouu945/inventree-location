@@ -94,6 +94,7 @@ class InvenTreeLocation(
             LieuListCreateView,
             ManifestationDetailView,
             ManifestationListCreateView,
+            PartAvailabilityHistogramView,
             PrestationDetailView,
             PrestationListCreateView,
             PrestationStockPreviewView,
@@ -140,6 +141,11 @@ class InvenTreeLocation(
                 "catalog/<int:pk>/rentable/",
                 RentablePartDetailView.as_view(),
                 name="catalog-part-rentable-detail",
+            ),
+            path(
+                "catalog/<int:pk>/histogram/",
+                PartAvailabilityHistogramView.as_view(),
+                name="catalog-part-histogram",
             ),
             path(
                 "reservations/",
