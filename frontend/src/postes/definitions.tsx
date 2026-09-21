@@ -6,6 +6,7 @@ import {
   IconBox,
   IconCalendarEvent,
   IconCalendarMonth,
+  IconChartBar,
   IconListSearch,
   IconPackageImport,
   IconSitemap,
@@ -41,6 +42,11 @@ const ConflictsList = lazy(() =>
 const DeliveriesList = lazy(() =>
   import('../delivery/DeliveriesList').then((m) => ({
     default: m.DeliveriesList
+  }))
+);
+const HistogramView = lazy(() =>
+  import('../stock/histogram/HistogramView').then((m) => ({
+    default: m.HistogramView
   }))
 );
 const OrganisationPanel = lazy(() =>
@@ -153,6 +159,12 @@ const RAMASSAGES = onglet(
   IconPackageImport,
   RamassagesList
 );
+const HISTOGRAMME = onglet(
+  'histogramme',
+  'Histogramme',
+  IconChartBar,
+  HistogramView
+);
 
 //: Ordre = journée de travail du métier. Le premier écran est celui qu'on doit
 //: voir en arrivant.
@@ -160,8 +172,6 @@ export const POSTES: Record<string, PosteDefinition> = {
   gestionnaire: {
     titre: 'Poste gestionnaire client',
     roles: [ADMIN, GESTIONNAIRE],
-    // Devis, Factures et Histogramme (CDC §95-101) manquent : leurs écrans
-    // n'existent pas, on ne pose pas d'onglet vide.
     onglets: [
       MANIFESTATIONS,
       CLIENTS,
@@ -170,7 +180,8 @@ export const POSTES: Record<string, PosteDefinition> = {
       RESERVATIONS,
       CATALOGUE,
       CONFLITS,
-      ALERTES
+      ALERTES,
+      HISTOGRAMME
     ]
   },
   magasinier: {
@@ -178,7 +189,7 @@ export const POSTES: Record<string, PosteDefinition> = {
     roles: [ADMIN, MAGASINIER],
     // Le catalogue reste faute d'écran stock dédié : c'est le seul qui donne
     // l'état article par article.
-    onglets: [RAMASSAGES, CATALOGUE, ALERTES, RESERVATIONS]
+    onglets: [RAMASSAGES, CATALOGUE, ALERTES, RESERVATIONS, HISTOGRAMME]
   },
   livreur: {
     titre: 'Poste livreur',
@@ -211,7 +222,8 @@ export const POSTES: Record<string, PosteDefinition> = {
       LIVRAISONS,
       RAMASSAGES,
       CONFLITS,
-      ALERTES
+      ALERTES,
+      HISTOGRAMME
     ]
   }
 };
