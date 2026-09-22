@@ -11,26 +11,30 @@ Module de gestion des locations événementielles pour InvenTree.
 ```bash
 # Lancer tous les services (db, inventree, backend, frontend)
 make up
+
+make provision
 ```
 
 Au premier lancement, les migrations Django s'exécutent automatiquement et un utilisateur admin est créé.
 
-| Service | URL | Description |
-|---------|-----|-------------|
-| InvenTree | http://localhost:8000 | Interface principale (identifiants admin dans `.env`) |
-| Frontend dev | http://localhost:5174 | Serveur Vite pour le hot-reload du plugin |
-| PostgreSQL | localhost:5432 | Base de données |
+| Service      | URL                   | Description                                           |
+| ------------ | --------------------- | ----------------------------------------------------- |
+| InvenTree    | http://localhost:8000 | Interface principale (identifiants admin dans `.env`) |
+| Frontend dev | http://localhost:5174 | Serveur Vite pour le hot-reload du plugin             |
+| PostgreSQL   | localhost:5432        | Base de données                                       |
 
 ## Commandes disponibles
 
 ```bash
-make up        # Build et démarre tous les services
-make down      # Arrête tous les services
-make migrate   # Exécute les migrations Django
-make test      # Lance les tests du plugin
-make logs      # Affiche les logs en temps réel
-make shell     # Ouvre un shell dans le conteneur InvenTree
-make clean     # Arrête les services et supprime les volumes
+make up               # Build et démarre tous les services
+make provision        # Active le plugin + intégrations, données de démo, permissions, dashboards
+make provision-plugin # Juste l'activation du plugin + des intégrations (sans les données de démo)
+make down              # Arrête tous les services
+make migrate           # Exécute les migrations Django
+make test               # Lance les tests du plugin
+make logs                # Affiche les logs en temps réel
+make shell                # Ouvre un shell dans le conteneur InvenTree
+make clean                 # Arrête les services et supprime les volumes (refaire `make provision` après)
 ```
 
 ## Architecture
