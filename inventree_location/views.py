@@ -138,7 +138,14 @@ def _parse_csv_int_values(values):
 
 
 def _borne_journee(champ, valeur, sens):
-    """Filtre de borne temporelle, comparé au jour entier si la borne est un jour."""
+    """Filtre de borne temporelle, comparé au jour entier si la borne est un jour.
+
+    Une borne fournie au jour (`2026-09-10`) est lue comme minuit : filtrer une
+    tournée sur « le 10 » excluait alors toutes les livraisons de ce jour-là,
+    dont le retrait est prévu à 8 h 30. On compare donc à la date, dans le
+    fuseau du serveur, conformément à la règle transverse « tout se calcule au
+    jour entier ». Une borne horodatée complète reste comparée telle quelle.
+    """
 
     valeur = valeur.strip()
 
@@ -195,6 +202,26 @@ class CatalogPagination(PageNumberPagination):
     max_page_size = 100
 
 
+class DeliveryPagination(PageNumberPagination):
+    """Pagination de la tournée livreur.
+
+    C'était la seule liste du plugin à ne pas en avoir : elle renvoyait *toutes*
+    les réservations validées ou livrées, avec sept jointures et trois
+    préchargements, pour un écran qui en montre une journée. À 10 000
+    réservations par an, l'appel coûtait près de sept secondes (cf.
+    `docs/test-de-charge.md`).
+
+    La page par défaut est large parce que la tournée se lit d'un bloc — la
+    carte et le calendrier consomment le même jeu que le tableau. Le client
+    demande explicitement sa taille et signale la troncature à l'utilisateur,
+    comme il le fait déjà pour les ramassages.
+    """
+
+    page_size = 100
+    page_size_query_param = "page_size"
+    max_page_size = 500
+
+
 class LieuListCreateView(generics.ListCreateAPIView):
     """List and create places with GPS coordinates."""
 
@@ -225,7 +252,16 @@ class SuppressionRefusee(APIException):
 
 
 def _retenu_par(refus):
-    """Nomme, compte, et accorde ce qui retient la suppression."""
+    """Nomme, compte, et accorde ce qui retient la suppression.
+
+    `protected_objects` rend les instances qui référencent, pas leur type : on
+    regroupe par modèle pour dire « 2 prestations » plutôt que d'aligner deux
+    représentations d'objets que personne ne lit.
+
+    Rend aussi le verbe accordé. Le genre de ce qui bloque n'étant connu qu'à
+    l'exécution, la phrase l'évite : un verbe s'accorde en nombre seulement,
+    là où « rattachée » aurait demandé de savoir.
+    """
 
     par_modele = {}
 
@@ -245,7 +281,17 @@ def _retenu_par(refus):
 
 
 class RefusDeSuppressionLisible:
-    """Traduit le verrou de la base en refus lisible."""
+    """Traduit le verrou de la base en refus lisible.
+
+    Une clé étrangère en `PROTECT` interdit de supprimer ce qui est encore
+    référencé — un lieu qui porte des prestations, une manifestation qui porte
+    des bons. C'est la règle métier, pas un incident.
+
+    Sans interception, Django lève `ProtectedError`, que DRF ne sait pas
+    traduire : la requête ressort en **500**, journalisée comme une erreur
+    serveur, et l'écran annonce une panne là où il devrait dire ce qui retient.
+    On répond donc 409, avec le décompte de ce qui bloque.
+    """
 
     #: Ce qu'on supprimait, au singulier, tel qu'il se lit dans la phrase.
     objet_supprime = "cet élément"
@@ -311,7 +357,19 @@ class GeocodeAddressView(APIView):
 
 
 class ReservationListCreateView(generics.ListCreateAPIView):
-    """CRUD réservation — partie collection."""
+    """CRUD réservation — partie collection.
+
+    - GET  : liste les réservations, filtrables par statut et période.
+    - POST : crée une nouvelle réservation (lignes imbriquées supportées).
+
+    Paramètres de filtre :
+    - statut    : filtre exact sur le statut (répétable)
+    - date_from : réservations dont le retour prévu est >= à cette date
+    - date_to   : réservations dont le retrait prévu est <= à cette date
+    - search    : recherche sur le numéro, l'événement ou le demandeur
+
+    Tri par date de demande décroissante par défaut.
+    """
 
     serializer_class = ReservationSerializer
     permission_classes = [ReservationPermission]
@@ -384,7 +442,16 @@ class ReservationListCreateView(generics.ListCreateAPIView):
 
 
 class ReservationCalendarView(APIView):
-    """Évènements du calendrier mensuel des réservations (DIS-01)."""
+    """Évènements du calendrier mensuel des réservations (DIS-01).
+
+    Paramètres `from` / `to` : la fenêtre affichée, tous deux obligatoires,
+    envoyés par FullCalendar à chaque changement de mois. Bornes comparées au
+    jour entier, comme les listes filtrables (cf. `_borne_journee`).
+
+    La réponse n'est pas paginée — un calendrier doit montrer tout ce qui
+    chevauche la période — donc c'est la période elle-même qui est bornée
+    (cf. `calendrier.bornes_fenetre`).
+    """
 
     permission_classes = [ReservationPermission]
 
@@ -399,6 +466,7 @@ class ReservationCalendarView(APIView):
 
             # Une réservation est affichée dès qu'elle chevauche la fenêtre :
             # celle qui a commencé le mois dernier et court toujours reste
+            # visible.
             evenements = evenements_calendrier(
                 request.user,
                 debut={"fin_calendrier__date__gte": debut},
@@ -413,7 +481,12 @@ class ReservationCalendarView(APIView):
 
 
 class DeliveryMarquerLivreeView(APIView):
-    """Marque une réservation livrée depuis la tournée du livreur."""
+    """Marque une réservation livrée depuis la tournée du livreur.
+
+    Endpoint dédié plutôt que `reservations/<pk>/transition/` : celui-ci
+    n'autorise qu'un seul saut, `validée → livrée`, ce qui permet de l'ouvrir
+    au livreur sans lui donner la validation ni le refus.
+    """
 
     permission_classes = [MarquerLivreePermission]
 
@@ -460,7 +533,13 @@ def _refus_livraison(refus):
 
 
 class DeliveryAccepterView(APIView):
-    """Pool commun des livraisons (US-18) : prendre en charge, ou relâcher."""
+    """Pool commun des livraisons (US-18) : prendre en charge, ou relâcher.
+
+    `POST` s'attribue une livraison libre, `DELETE` la remet à disposition.
+    Deux verbes sur la même URL plutôt que deux endpoints : c'est la même
+    ressource — l'assignation de cette livraison — qu'on crée puis qu'on
+    supprime.
+    """
 
     permission_classes = [DeliveryAssignationPermission]
     serializer_class = DeliverySerializer
@@ -487,7 +566,11 @@ class DeliveryAccepterView(APIView):
 
 
 class DeliveryEtatView(APIView):
-    """Progression d'une livraison assignée (US-19) : en route, livrée, problème."""
+    """Progression d'une livraison assignée (US-19) : en route, livrée, problème.
+
+    Accepte du multipart : le livreur peut joindre une photo au constat, et
+    l'écran envoie donc un `FormData` plutôt que du JSON.
+    """
 
     permission_classes = [DeliveryAssignationPermission]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -514,7 +597,20 @@ class DeliveryEtatView(APIView):
 
 
 class TourneeView(APIView):
-    """Tournée d'une journée : les arrêts par lieu, plus le récapitulatif global."""
+    """Tournée d'une journée : les arrêts par lieu, plus le récapitulatif global.
+
+    `?date=AAAA-MM-JJ`, la journée du jour par défaut. La journée est celle du
+    fuseau de l'application, jamais `dt.date()` sur de l'UTC.
+
+    Deux maille différentes dans une seule réponse, et c'est le point : le
+    livreur organise ses arrêts lieu par lieu, mais charge son véhicule sur le
+    total tous lieux confondus (R25). Les quantités d'un arrêt somment la
+    journée sur ce lieu, parce que des objets circulent d'un lieu à l'autre
+    (R30) — règle d'affichage, la maille de stockage reste le bon.
+
+    Lecture seule : rien n'écrit ici, ni dans les tables d'exécution ni sur les
+    bons.
+    """
 
     permission_classes = [DeliveryPermission]
 
@@ -562,10 +658,25 @@ class TourneeView(APIView):
 
 
 class DeliveryListView(generics.ListAPIView):
-    """Tournée livreur : réservations à livrer / livrées, enrichies (US livreur)."""
+    """Tournée livreur : réservations à livrer / livrées, enrichies (US livreur).
+
+    Paramètres de filtre :
+    - statut    : filtre exact sur le statut (répétable). Absent : validée +
+                  livrée (« à livrer » et « livré » sur la période observée).
+    - date_from : réservations dont le retour prévu est >= à cette date
+    - date_to   : réservations dont le retrait prévu est <= à cette date
+    - lieu      : filtre sur le lieu de la prestation (CSV / répétable)
+
+    Tri par date de retrait prévue croissante (ordre d'une tournée), à la
+    différence de `reservations/` triée par date de demande décroissante.
+
+    Paginée (`page`, `page_size`, 100 par défaut, 500 au plus) : l'horizon
+    « à venir » ne pose pas de `date_to` et ramenait sinon toute la base.
+    """
 
     serializer_class = DeliverySerializer
     permission_classes = [DeliveryPermission]
+    pagination_class = DeliveryPagination
 
     #: Statuts affichés par défaut quand `statut` n'est pas fourni.
     DEFAULT_STATUTS = (StatutReservation.VALIDEE, StatutReservation.LIVREE)
@@ -664,7 +775,17 @@ class ReservationDetailView(
 
 
 class RamassageListView(generics.ListAPIView):
-    """SCRUM-89 — Liste des ramassages à effectuer."""
+    """SCRUM-89 — Liste des ramassages à effectuer.
+
+    Un ramassage correspond à une réservation avec une date de retour prévue.
+
+    Filtres disponibles :
+    - date_from : ramassages dont la date de retour prévue est >= à cette date
+    - date_to   : ramassages dont la date de retour prévue est <= à cette date
+    - lieu      : recherche sur le nom ou l'adresse du lieu
+    - statut    : filtre sur un ou plusieurs statuts
+    - search    : recherche sur numéro, prestation, manifestation ou demandeur
+    """
 
     serializer_class = RamassageSerializer
     permission_classes = [ReservationPermission]
@@ -798,7 +919,12 @@ class BonRamassageView(APIView):
 
 
 class ReservationConflictCheckView(APIView):
-    """Détection des conflits de stock d'une réservation (US-03 / SCRUM-76)."""
+    """Détection des conflits de stock d'une réservation (US-03 / SCRUM-76).
+
+    GET renvoie le détail des conflits de stock de la réservation :
+    - 200 s'il n'y a aucun conflit ;
+    - 409 si au moins un conflit est détecté.
+    """
 
     permission_classes = [ReservationPermission]
 
@@ -986,14 +1112,23 @@ class StockAvailabilityCheckView(APIView):
 
 
 class ReservationRetourView(APIView):
-    """Déclaration du retour d'une prestation ligne par ligne (SCRUM-95)."""
+    """Déclaration du retour d'une prestation ligne par ligne (SCRUM-95).
+
+    - GET  : accessible quand la réservation est livrée ou retournée ;
+      renvoie les lignes du bon avec la quantité déjà déclarée rendue.
+    - POST : enregistre la quantité rendue par ligne (retour possible en
+      plusieurs fois), calcule le statut de retour (partiel / complet) et
+      fait passer la réservation en "retournée" une fois le retour complet.
+    """
 
     permission_classes = [PrestationRetourPermission]
     serializer_class = PrestationRetourSerializer
 
     #: Consultable tant que le bon est livré ou déjà retourné.
     ELIGIBLE_STATUTS = {StatutReservation.LIVREE, StatutReservation.RETOURNEE}
-    #: Déclarable seulement tant que le bon est livré.
+    #: Déclarable seulement tant que le bon est livré. Un bon « retourné » est
+    #: complet par construction : le rouvrir permettait de *baisser* les
+    #: quantités, et aucune transition ne ramène ensuite vers « livrée ».
     DECLARABLE_STATUTS = {StatutReservation.LIVREE}
 
     NOT_DECLARABLE_DETAIL = (
@@ -1005,7 +1140,12 @@ class ReservationRetourView(APIView):
     )
 
     def _get_reservation(self, pk, *, lock=False):
-        """Charge la réservation ; `lock` pose un verrou de ligne."""
+        """Charge la réservation ; `lock` pose un verrou de ligne.
+
+        Le verrou sérialise deux déclarations concurrentes : sans lui, les
+        deux franchissent la garde de statut avec un objet périmé et rejouent
+        toutes les deux la transition.
+        """
 
         queryset = Reservation.objects.prefetch_related(
             "lignes", "lignes__part", "lignes__part__rentable_info"
@@ -1064,7 +1204,8 @@ class ReservationRetourView(APIView):
             return self._conflict_response(reservation, self.NOT_ELIGIBLE_DETAIL)
 
         # Même périmètre que le bon de ramassage : un service ne revient pas,
-        # le compter classait en « partiel » un bon dont tout le matériel était
+        # le compter classait en « partiel » un bon dont tout le matériel
+        # était rendu.
         lignes = lignes_a_ramasser(reservation)
         statut_retour, total_demandee, total_rendue = self._statut_retour(lignes)
 
@@ -1088,7 +1229,8 @@ class ReservationRetourView(APIView):
         serializer.is_valid(raise_exception=True)
 
         # Les écritures de lignes et la transition sont indissociables : sans
-        # la transaction, une transition qui échoue laissait les quantités déjà
+        # la transaction, une transition qui échoue laissait les quantités
+        # déjà persistées et le bon coincé en « livrée ».
         with transaction.atomic():
             reservation = self._get_reservation(pk, lock=True)
 
@@ -1198,7 +1340,11 @@ class ReturnIncidentListCreateView(generics.ListCreateAPIView):
 
 
 class ReturnIncidentHistoryView(generics.ListAPIView):
-    """Retourne les incidents de retour des 90 derniers jours."""
+    """Retourne les incidents de retour des 90 derniers jours.
+
+    Filtres cumulables : `type`, `object` (nom d'article) et `event` (nom de
+    manifestation), tous en recherche partielle insensible à la casse.
+    """
 
     permission_classes = [ReturnCheckinPermission]
     serializer_class = ReturnIncidentHistorySerializer
@@ -1259,7 +1405,11 @@ class ReturnIncidentDetailView(
     )
 
     def perform_destroy(self, instance):
-        """Supprime l'incident puis réaligne l'état de retour de la ligne."""
+        """Supprime l'incident puis réaligne l'état de retour de la ligne.
+
+        Sans ça, supprimer le dernier incident d'une ligne la laissait
+        indéfiniment marquée « manquant » ou « cassé ».
+        """
 
         ligne = instance.line
         super().perform_destroy(instance)
@@ -1267,7 +1417,17 @@ class ReturnIncidentDetailView(
 
 
 class ReturnLossReportView(APIView):
-    """Rapport de pertes agrégé : manquants, cassés, détruits et facturés."""
+    """Rapport de pertes agrégé : manquants, cassés, détruits et facturés.
+
+    Complète `ReturnReportView`, qui détaille **une** réservation : ici on
+    agrège sur l'ensemble des incidents, avec ventilation par article et par
+    réservation, pour répondre à « qu'est-ce qui se perd, et sur quoi ».
+    Le filtre `reservation` permet de retomber sur une seule réservation.
+
+    Totaux et ventilations sont calculés dans la même passe, avec la même
+    définition de « facturé » — tout incident portant `bill_client`, quel que
+    soit son type — pour qu'ils se réconcilient toujours.
+    """
 
     permission_classes = [ReturnCheckinPermission]
 
@@ -1308,6 +1468,7 @@ class ReturnLossReportView(APIView):
         for incident in incidents:
             # Un type ajouté au modèle sans passer ici ne doit pas faire tomber
             # le rapport sur un KeyError : il reste compté dans `count` et,
+            # s'il est facturé, dans « facturé ».
             cle = self.TOTAL_KEYS.get(incident.type)
 
             part_entry = by_part.setdefault(
@@ -1404,7 +1565,14 @@ class ReturnReportPdfView(APIView):
 
 
 class ReservationCheckinView(APIView):
-    """Check-in retour ligne par ligne (SCRUM-94) : OK / manquant / casse."""
+    """Check-in retour ligne par ligne (SCRUM-94) : OK / manquant / casse.
+
+    - GET  : accessible uniquement quand la reservation est au statut
+      livree ; renvoie les lignes a pointer.
+    - POST : valide que somme(ok + manquant + casse) == quantite demandee
+      pour chaque ligne, journalise les incidents, puis cloture la
+      reservation (livree -> retournee -> cloturee).
+    """
 
     permission_classes = [ReturnCheckinPermission]
     serializer_class = ReservationCheckinSerializer
@@ -1415,7 +1583,12 @@ class ReservationCheckinView(APIView):
     )
 
     def _get_reservation(self, pk, *, lock=False):
-        """Charge la reservation et ses lignes ; `lock` pose un verrou de ligne."""
+        """Charge la reservation et ses lignes ; `lock` pose un verrou de ligne.
+
+        Le verrou serialise deux check-in concurrents : sans lui, les deux
+        requetes franchissent la garde « livree » avec un objet en memoire
+        perime et rejouent toutes les deux les transitions de statut.
+        """
 
         queryset = Reservation.objects.prefetch_related(
             "lignes", "lignes__part", "lignes__part__rentable_info"
@@ -1467,7 +1640,12 @@ class ReservationCheckinView(APIView):
 
     @staticmethod
     def _validate_payload_lignes(payload_lignes, lignes_by_id):
-        """Erreurs par ligne : appartenance, somme, et couverture complete."""
+        """Erreurs par ligne : appartenance, somme, et couverture complete.
+
+        Le check-in cloture definitivement la reservation : toutes ses lignes
+        doivent donc etre pointees dans la meme requete, sinon on cloturerait
+        un retour partiel sans possibilite de le corriger ensuite.
+        """
 
         errors = {}
         seen = set()
@@ -1506,7 +1684,11 @@ class ReservationCheckinView(APIView):
 
     @staticmethod
     def _ligne_pointee(ligne):
-        """Ligne telle que la renvoie le check-in."""
+        """Ligne telle que la renvoie le check-in.
+
+        Forme inchangée pour le front ; les chiffres se déduisent désormais du
+        registre d'incidents, une seule passe par ligne.
+        """
 
         quantites = quantites_du_retour(ligne)
 
@@ -1545,6 +1727,8 @@ class ReservationCheckinView(APIView):
 
         # Le pointage alimente le registre d'incidents comme la saisie de
         # ramassage, sinon un objet cassé constaté au check-in n'apparaissait
+        # dans aucun rapport. Pas de décision de facturation ici : `facturer`
+        # reste à None, le drapeau déjà posé est conservé.
         projeter_incidents(
             ligne,
             user,
@@ -1564,6 +1748,7 @@ class ReservationCheckinView(APIView):
 
         # Ecritures des lignes et transitions de statut dans une seule
         # transaction : un echec en cours de route ne doit pas laisser la
+        # reservation coincee en « retournee » avec un check-in a moitie pose.
         with transaction.atomic():
             reservation = self._get_reservation(pk, lock=True)
 
@@ -1630,7 +1815,12 @@ class ConflictsListView(APIView):
     permission_classes = [ReservationPermission]
 
     def get(self, request, *args, **kwargs):
-        """Retourne les réservations en conflit triées par date de retrait prévue."""
+        """Retourne les réservations en conflit triées par date de retrait prévue.
+
+        Synchronise le registre au passage : le stock peut baisser hors de toute
+        écriture de réservation, et rien d'autre ne déclenche alors l'historisation.
+        `get_or_create` rend l'opération idempotente.
+        """
 
         conflits = list_current_conflicts()
         sync_conflict_registry(conflits)
@@ -1718,6 +1908,7 @@ class ConflictHistoryResolveView(APIView):
 
         # Clore une entrée dont la cause tient encore ne résolvait rien : le
         # registre affirmait « traité » pendant que la pénurie restait entière.
+        # On rejoue le détecteur et on renvoie le problème réel.
         encore_actif, motif = conflict_still_active(conflict)
 
         if encore_actif:
@@ -1813,8 +2004,11 @@ class StockAlertListView(APIView):
 
             scope_ids = set(scoped_lines.values_list("part_id", flat=True))
 
-        # Les articles virtuels (services, ex. « nettoyage ») n'ont pas de
-        # stock physique : ni seuil, ni tension n'ont de sens pour eux.
+        # Les articles virtuels (services, ex. « nettoyage ») n'ont pas de stock
+        # physique : ni seuil, ni tension n'ont de sens pour eux. Sans ce filtre
+        # ils remontaient en alerte à 200 % de « 0 louable(s) ».
+        # `alertes_desactivees` coupe l'article sans effacer ses seuils : sans
+        # ce filtre, le booléen du CDC n'aurait aucun effet.
         rentable_items = (
             RentableItem.objects.select_related("part")
             .filter(is_virtual=False, alertes_desactivees=False)
@@ -1849,6 +2043,18 @@ class StockAlertListView(APIView):
 
             # Les seuils portent sur ce qu'on possède, pas sur ce qui est libre
             # à l'instant : réapprovisionner se décide sur le parc, pas sur le
+            # calendrier des réservations.
+            #
+            # Le seuil bas n'est plus réservé aux consommables. En recette
+            # (07/09/2026, remarque 11), le client signale : « le stock minimum
+            # de ce produit est = 5, il y a 1 seul produit en stock pourtant on
+            # ne retrouve pas ce produit dans la liste des alertes de stock ».
+            # Deux pièges se cumulaient. D'abord la condition `consommable` :
+            # une trousse de secours à 1 exemplaire sur 5 attendus ne
+            # déclenchait rien parce qu'elle n'était pas cochée consommable —
+            # or « je veux consulter une alerte lorsqu'un stock disponible
+            # futur < seuil critique » (CDC V06, épic F, US 9) ne parle pas de
+            # consommables. Ensuite la source du seuil : voir `_seuil_bas`.
             if low is not None and stock_total <= low:
                 part_reasons.append({
                     "type": "low_threshold",
@@ -1859,7 +2065,9 @@ class StockAlertListView(APIView):
                 })
 
             # Seuil haut réservé aux consommables comme le seuil bas : le CDC
-            # V06 attache les deux seuils au consommable.
+            # V06 attache les deux seuils au consommable. Sans cette condition,
+            # un seuil haut posé sur un article louable déclenchait une alerte
+            # de réapprovisionnement qui n'a pas de sens pour du matériel.
             if rentable.consommable and high is not None and stock_total >= high:
                 part_reasons.append({
                     "type": "high_threshold",
@@ -1909,7 +2117,21 @@ class StockAlertListView(APIView):
         return alerts
 
     def _seuil_bas(self, rentable, part):
-        """Seuil bas applicable, et d'où il vient."""
+        """Seuil bas applicable, et d'où il vient.
+
+        Le plugin ne lisait que `RentableItem.seuil_alerte_bas` et ignorait
+        `Part.minimum_stock`, le champ natif d'InvenTree — que le client avait
+        justement renseigné (recette du 07/09/2026, remarque 11 : « le stock
+        minimum de ce produit est = 5 »). Deux champs pour une même notion,
+        dont un seul était lu : l'utilisateur remplissait celui que l'interface
+        d'InvenTree lui montrait, et rien ne se passait.
+
+        Le champ du plugin garde la priorité — il est explicitement posé pour
+        la location, et le CDC V06 en attend deux (haut et bas) là où InvenTree
+        n'en offre qu'un. `minimum_stock` sert de repli : mieux vaut une alerte
+        fondée sur le champ natif que pas d'alerte du tout. La provenance est
+        rendue avec la valeur pour que le message dise où corriger le seuil.
+        """
 
         if rentable.seuil_alerte_bas is not None:
             return rentable.seuil_alerte_bas, ""
@@ -1926,6 +2148,7 @@ class StockAlertListView(APIView):
 
         # `minimum_stock` vaut 0 par défaut chez InvenTree : le prendre pour un
         # seuil mettrait en alerte tout article à stock nul, sans que personne
+        # n'ait rien demandé.
         if minimum <= 0:
             return None, ""
 
@@ -1998,7 +2221,13 @@ class StockAlertListView(APIView):
 
 
 def parse_optional_date_param(request, name):
-    """Lit un paramètre de date optionnel de la query string."""
+    """Lit un paramètre de date optionnel de la query string.
+
+    Absent ou vide vaut « non fourni » (l'appelant retombe alors sur la
+    journée courante). Une valeur malformée est une erreur du client : on
+    renvoie 400 plutôt que de laisser remonter la `ValueError` de `_as_date`
+    en 500 depuis un endpoint de liste public.
+    """
 
     raw = request.query_params.get(name)
 
@@ -2032,7 +2261,15 @@ def parse_optional_int_param(request, name):
 def annotate_stock_available(
     parts, date_debut=None, date_fin=None, exclude_reservation_id=None
 ):
-    """Attache `.stock_available` à chaque Part pour la sérialisation catalogue."""
+    """Attache `.stock_available` à chaque Part pour la sérialisation catalogue.
+
+    Sans `date_debut`/`date_fin`, la disponibilité est calculée pour la
+    journée courante (CAT-04). Les articles virtuels (services) restent à
+    `None`, exposés en 0 par le sérialiseur.
+
+    `exclude_reservation_id` sert à l'édition d'une réservation : ses propres
+    quantités ne doivent pas être décomptées de ce qu'elle peut demander.
+    """
 
     from .stock import compute_parts_availability
 
@@ -2140,7 +2377,20 @@ class CatalogPartListView(APIView):
         return category_ids
 
     def _with_descendants(self, category_ids):
-        """Étend une liste de catégories à leurs sous-catégories."""
+        """Étend une liste de catégories à leurs sous-catégories.
+
+        Filtrer sur « Mobilier » ne rendait que les articles rangés
+        directement dans « Mobilier », pas ceux de ses sous-catégories : sur
+        une arborescence un peu profonde, le filtre paraissait ne rien
+        trouver. Le client demandait explicitement une recherche « avec les
+        libellés et les catégories, les sous-catégories » (recette du
+        07/09/2026, remarque 4).
+
+        `PartCategory` est un arbre MPTT : `get_descendants(include_self=True)`
+        donne la branche entière en une requête. Si le modèle n'est pas
+        disponible (tests avec une app `part` factice), on retombe sur le
+        filtre plat plutôt que d'échouer.
+        """
 
         try:
             from part.models import PartCategory
@@ -2209,7 +2459,12 @@ class CatalogPartListView(APIView):
         return queryset.filter(rentable_info__is_rentable=False)
 
     def _filter_virtual(self, queryset, virtual):
-        """Filtre optionnel sur le drapeau article virtuel de RentableItem."""
+        """Filtre optionnel sur le drapeau article virtuel de RentableItem.
+
+        - virtual absent : pas de filtre (matériel réel + virtuel).
+        - virtual=true    : articles virtuels uniquement (ex: prestations).
+        - virtual=false   : matériel réel uniquement.
+        """
 
         virtual_value = self._parse_boolean(virtual)
 
@@ -2388,8 +2643,12 @@ class RentablePartDetailView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
-#: Chemin du niveau agrégé, vu depuis `LigneReservation` puis depuis
-#: `Reservation`.
+#: Chemin du niveau agrégé, vu depuis `LigneReservation` puis depuis `Reservation`.
+#:
+#: Le planning se lit à deux mailles — la manifestation pour la barre, la
+#: prestation pour ses sous-lignes. Les deux se comptent avec la **même**
+#: requête au chemin près : c'est ce qui garantit que les sous-lignes d'une
+#: barre totalisent la barre, au lieu de mesurer deux choses différentes.
 DEPUIS_LIGNE = {
     "manifestation": "reservation__prestation__manifestation",
     "prestation": "reservation__prestation",
@@ -2437,7 +2696,14 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
     pagination_class = LieuPagination
 
     def get_queryset(self):
-        """Manifestations, filtrées par statut, recherche et période."""
+        """Manifestations, filtrées par statut, recherche et période.
+
+        Les trois agrégats du planning — volume engagé, bons engagés, bons
+        sortis — sont posés par sous-requête et non par `annotate(Sum(...))`
+        enchaînés : deux agrégations sur deux jointures dans la même requête se
+        multiplient l'une l'autre, et le volume ressortirait multiplié par le
+        nombre de bons. Chaque sous-requête compte dans son coin.
+        """
 
         queryset = (
             Manifestation.objects.select_related("client", "contact")
@@ -2462,7 +2728,8 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
             queryset = queryset.filter(statut__in=statuts)
 
         # « Rechercher les manifestations d'un client défini » (recette du
-        # 11/09).
+        # 11/09). La recherche texte porte sur le nom de la manifestation, pas
+        # sur celui du client : deux besoins distincts, deux paramètres.
         client_id = self.request.query_params.get("client")
 
         if client_id:
@@ -2473,7 +2740,9 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
         if search:
             queryset = queryset.filter(nom__icontains=search)
 
-        # Filtre Futur / Passé / Tout de la maquette.
+        # Filtre Futur / Passé / Tout de la maquette. Découpage sur la date de
+        # **fin** : une manifestation en cours a encore ses ramassages devant
+        # elle. `localdate()` et non `today()` — serveur en UTC, métier à Paris.
         periode = self.request.query_params.get("periode")
 
         if periode in {"futur", "passe"}:
@@ -2485,7 +2754,8 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
                 queryset = queryset.filter(date_fin__date__lt=aujourdhui)
 
         # Fenêtre du planning : on veut ce qui **chevauche** la période, pas ce
-        # qui y tient entièrement.
+        # qui y tient entièrement. Une manifestation commencée le mois dernier
+        # et qui court encore doit apparaître sur la semaine affichée.
         depuis = self.request.query_params.get("from")
         jusqua = self.request.query_params.get("to")
 
@@ -2521,14 +2791,28 @@ def _prestation_queryset():
 
 
 class PrestationListCreateView(generics.ListCreateAPIView):
-    """CRUD prestation — collection (ORG-01 / RES-09)."""
+    """CRUD prestation — collection (ORG-01 / RES-09).
+
+    Paramètres de filtre :
+    - manifestation : filtre exact sur la manifestation parente.
+    - search        : recherche sur le nom de la prestation ou de sa manifestation.
+    - from / to     : fenêtre du planning, au **chevauchement** comme pour les
+      manifestations — une prestation commencée avant la fenêtre et qui court
+      encore doit apparaître dans la semaine affichée.
+    """
 
     permission_classes = [PrestationPermission]
     serializer_class = PrestationSerializer
     pagination_class = LieuPagination
 
     def get_queryset(self):
-        """Retourne les prestations, filtrées par manifestation, fenêtre et recherche."""
+        """Retourne les prestations, filtrées par manifestation, fenêtre et recherche.
+
+        Les agrégats sont posés par sous-requête, avec la mécanique et les
+        raisons de `ManifestationListCreateView` : deux `Sum` sur deux
+        jointures se multiplieraient, et le planning déplié demande ces
+        nombres pour chaque sous-ligne d'un coup.
+        """
 
         queryset = (
             _prestation_queryset()
@@ -2577,7 +2861,11 @@ class PrestationDetailView(
 
 
 class PrestationStockView(APIView):
-    """Disponibilité au jour des articles d'une prestation enregistrée (STK-01)."""
+    """Disponibilité au jour des articles d'une prestation enregistrée (STK-01).
+
+    - 200 s'il n'y a aucune pénurie ;
+    - 409 si au moins un article est en pénurie.
+    """
 
     permission_classes = [PrestationPermission]
 
@@ -2606,7 +2894,11 @@ class PrestationStockView(APIView):
 
 
 class PrestationStockPreviewView(APIView):
-    """Disponibilité au jour AVANT sauvegarde (temps réel côté front, STK-01)."""
+    """Disponibilité au jour AVANT sauvegarde (temps réel côté front, STK-01).
+
+    Corps attendu : ``{"date_debut", "date_fin", "lignes": [{"part", "quantite"}],
+    "exclude_prestation": <pk optionnel>}``.
+    """
 
     permission_classes = [PrestationPermission]
 
@@ -2651,7 +2943,17 @@ class ClientListView(generics.ListAPIView):
     pagination_class = CatalogPagination
 
     def get_queryset(self):
-        """Retourne les clients, filtrés par recherche texte et par gestionnaire."""
+        """Retourne les clients, filtrés par recherche texte et par gestionnaire.
+
+        `gestionnaire=me` sert l'écran d'accueil du gestionnaire, qui doit
+        retrouver ses clients pendant un appel téléphonique sans connaître son
+        propre identifiant. Une valeur inconnue est ignorée, pas refusée : un
+        400 sur un écran de liste serait pire.
+
+        `actif` est un filtre optionnel, pas un défaut : la gestion des
+        clients et les filtres de recherche (manifestations, contacts) ont
+        besoin de retrouver aussi les clients désactivés.
+        """
 
         queryset = Client.objects.select_related("gestionnaire").order_by("nom")
 
@@ -2678,7 +2980,13 @@ class ClientListView(generics.ListAPIView):
 
 
 class UserListView(generics.ListAPIView):
-    """Liste des utilisateurs actifs (lecture seule), pour les sélecteurs."""
+    """Liste des utilisateurs actifs (lecture seule), pour les sélecteurs.
+
+    Paramètres de filtre :
+    - search : recherche sur username, prénom, nom ou email ;
+    - roles : ne garder que les comptes portant l'un de ces rôles (CSV) ;
+    - exclude_roles : écarter les comptes portant l'un de ces rôles (CSV).
+    """
 
     permission_classes = [RoleBasedPermission]
     serializer_class = UserSerializer
@@ -2699,7 +3007,14 @@ class UserListView(generics.ListAPIView):
                 | Q(email__icontains=search)
             )
 
-        # Filtres de rôle.
+        # Filtres de rôle. Revue interne du 07/09/2026 : « dans le champ gérant
+        # interne, ne pas afficher le client (l'organisateur) ». Le sélecteur
+        # servait la même liste à tout le monde, si bien qu'on pouvait désigner
+        # un client comme responsable interne d'une réservation. Le CDC V06
+        # sépare pourtant nettement les deux : l'organisateur est le client qui
+        # co    mmande et signe les devis (persona 1), le gestionnaire est celui qui
+        # les traite (persona 2) — et la matrice RACI n'a même pas de colonne
+        # « organisateur », signe qu'il n'agit pas dans l'outil.
         roles_demandes = self._roles_param("roles")
         roles_exclus = self._roles_param("exclude_roles")
 
@@ -2713,7 +3028,11 @@ class UserListView(generics.ListAPIView):
         return queryset.distinct() if (roles_demandes or roles_exclus) else queryset
 
     def _roles_param(self, name):
-        """Lit une liste de rôles en CSV, en ignorant les noms inconnus."""
+        """Lit une liste de rôles en CSV, en ignorant les noms inconnus.
+
+        Un rôle inexistant est du bruit, pas une erreur : le filtrer
+        silencieusement vaut mieux qu'un 400 sur un sélecteur d'interface.
+        """
 
         raw = self.request.query_params.get(name)
 

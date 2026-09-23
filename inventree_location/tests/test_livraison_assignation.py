@@ -333,7 +333,7 @@ class TestSerialisation:
         client, _ = client_for(roles.GESTIONNAIRE, "gina")
 
         response = client.get(f"{BASE}/deliveries/")
-        ligne = response.data[0]
+        ligne = response.data["results"][0]
 
         assert ligne["livreur_assigne"] is None
         assert ligne["livreur_assigne_nom"] == ""
