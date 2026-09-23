@@ -202,6 +202,26 @@ class CatalogPagination(PageNumberPagination):
     max_page_size = 100
 
 
+class DeliveryPagination(PageNumberPagination):
+    """Pagination de la tournée livreur.
+
+    C'était la seule liste du plugin à ne pas en avoir : elle renvoyait *toutes*
+    les réservations validées ou livrées, avec sept jointures et trois
+    préchargements, pour un écran qui en montre une journée. À 10 000
+    réservations par an, l'appel coûtait près de sept secondes (cf.
+    `docs/test-de-charge.md`).
+
+    La page par défaut est large parce que la tournée se lit d'un bloc — la
+    carte et le calendrier consomment le même jeu que le tableau. Le client
+    demande explicitement sa taille et signale la troncature à l'utilisateur,
+    comme il le fait déjà pour les ramassages.
+    """
+
+    page_size = 100
+    page_size_query_param = "page_size"
+    max_page_size = 500
+
+
 class LieuListCreateView(generics.ListCreateAPIView):
     """List and create places with GPS coordinates."""
 
@@ -649,10 +669,14 @@ class DeliveryListView(generics.ListAPIView):
 
     Tri par date de retrait prévue croissante (ordre d'une tournée), à la
     différence de `reservations/` triée par date de demande décroissante.
+
+    Paginée (`page`, `page_size`, 100 par défaut, 500 au plus) : l'horizon
+    « à venir » ne pose pas de `date_to` et ramenait sinon toute la base.
     """
 
     serializer_class = DeliverySerializer
     permission_classes = [DeliveryPermission]
+    pagination_class = DeliveryPagination
 
     #: Statuts affichés par défaut quand `statut` n'est pas fourni.
     DEFAULT_STATUTS = (StatutReservation.VALIDEE, StatutReservation.LIVREE)
@@ -2988,7 +3012,7 @@ class UserListView(generics.ListAPIView):
         # servait la même liste à tout le monde, si bien qu'on pouvait désigner
         # un client comme responsable interne d'une réservation. Le CDC V06
         # sépare pourtant nettement les deux : l'organisateur est le client qui
-        # commande et signe les devis (persona 1), le gestionnaire est celui qui
+        # co    mmande et signe les devis (persona 1), le gestionnaire est celui qui
         # les traite (persona 2) — et la matrice RACI n'a même pas de colonne
         # « organisateur », signe qu'il n'agit pas dans l'outil.
         roles_demandes = self._roles_param("roles")

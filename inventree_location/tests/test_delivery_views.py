@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from rest_framework import status
+from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from django.db import connection
@@ -150,7 +151,7 @@ class TestDeliveryListView:
         response = DeliveryListView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        ids = [row["id"] for row in response.data]
+        ids = [row["id"] for row in response.data["results"]]
         assert ids == [to_deliver.pk]
 
     @pytest.mark.django_db
@@ -184,7 +185,7 @@ class TestDeliveryListView:
         response = DeliveryListView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        ids = {row["id"] for row in response.data}
+        ids = {row["id"] for row in response.data["results"]}
         assert ids == {validee.pk, livree.pk}
 
     @pytest.mark.django_db
@@ -211,7 +212,7 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        ids = [row["id"] for row in response.data]
+        ids = [row["id"] for row in response.data["results"]]
         assert ids == [in_range.pk]
 
     @pytest.mark.django_db
@@ -239,7 +240,7 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        assert [row["id"] for row in response.data] == [du_jour.pk]
+        assert [row["id"] for row in response.data["results"]] == [du_jour.pk]
 
     @pytest.mark.django_db
     def test_borne_horodatee_reste_exacte(
@@ -262,7 +263,7 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        assert response.data == []
+        assert response.data["results"] == []
 
     @pytest.mark.django_db
     def test_lieu_filter(self, factory, gestionnaire, manifestation, part, lieu):
@@ -303,7 +304,7 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        ids = [row["id"] for row in response.data]
+        ids = [row["id"] for row in response.data["results"]]
         assert ids == [wanted.pk]
 
     @pytest.mark.django_db
@@ -325,7 +326,7 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        row = next(r for r in response.data if r["id"] == reservation.pk)
+        row = next(r for r in response.data["results"] if r["id"] == reservation.pk)
         assert row["organisateur_telephone"] == "0102030405"
         assert "Nisatrice" in row["organisateur_nom"]
 
@@ -350,7 +351,7 @@ class TestDeliveryListView:
         response = DeliveryListView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        row = next(r for r in response.data if r["id"] == reservation.pk)
+        row = next(r for r in response.data["results"] if r["id"] == reservation.pk)
         assert row["organisateur_nom"] == prestation.manifestation.client.nom
         assert row["organisateur_telephone"] == ""
 
@@ -372,7 +373,7 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        row = next(r for r in response.data if r["id"] == reservation.pk)
+        row = next(r for r in response.data["results"] if r["id"] == reservation.pk)
         assert row["quantite_totale"] == 8
 
     @pytest.mark.django_db
@@ -402,7 +403,7 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        row = next(r for r in response.data if r["id"] == reservation.pk)
+        row = next(r for r in response.data["results"] if r["id"] == reservation.pk)
         assert row["quantite_totale"] == 4
 
     @pytest.mark.django_db
@@ -427,7 +428,7 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        row = next(r for r in response.data if r["id"] == reservation.pk)
+        row = next(r for r in response.data["results"] if r["id"] == reservation.pk)
         assert row["lieu_detail"] is None
 
 
@@ -523,7 +524,7 @@ class TestQuantitesDeLaTournee:
 
         assert response.status_code == status.HTTP_200_OK
 
-        row = next(r for r in response.data if r["id"] == reservation.pk)
+        row = next(r for r in response.data["results"] if r["id"] == reservation.pk)
 
         return row["lignes"][0]
 
@@ -614,3 +615,104 @@ class TestQuantitesDeLaTournee:
         creer(8)
 
         assert mesure() == quatre_bons
+
+
+class TestPaginationDeLaTournee:
+    """La tournée était la seule liste du plugin sans pagination.
+
+    Elle renvoyait toutes les réservations validées ou livrées, avec sept
+    jointures et trois préchargements, pour un écran qui en montre une journée :
+    6,8 s à 10 000 réservations (cf. `docs/test-de-charge.md`). Le coût par bon
+    était déjà borné — c'est l'objet du test voisin — mais leur *nombre* ne
+    l'était pas.
+    """
+
+    @staticmethod
+    def _appeler(factory, utilisateur, **params):
+        request = factory.get("/plugin/inventree-location/deliveries/", params)
+        force_authenticate(request, user=utilisateur)
+        reponse = DeliveryListView.as_view()(request)
+
+        assert reponse.status_code == status.HTTP_200_OK
+
+        return reponse.data
+
+    @pytest.mark.django_db
+    def test_la_reponse_est_paginee(self, factory, gestionnaire, prestation, part):
+        _make_reservation(
+            prestation,
+            part,
+            statut="validee",
+            date_retrait="2026-06-02T00:00:00Z",
+            date_retour="2026-06-03T00:00:00Z",
+        )
+
+        page = self._appeler(factory, gestionnaire)
+
+        assert set(page) >= {"count", "next", "previous", "results"}
+        assert page["count"] == 1
+        assert len(page["results"]) == 1
+
+    @pytest.mark.django_db
+    def test_la_page_borne_les_lignes_et_annonce_le_total(
+        self, factory, gestionnaire, prestation, part
+    ):
+        """C'est `count` qui permet au client de signaler la troncature."""
+
+        for _ in range(5):
+            _make_reservation(
+                prestation,
+                part,
+                statut="validee",
+                date_retrait="2026-06-02T00:00:00Z",
+                date_retour="2026-06-03T00:00:00Z",
+            )
+
+        page = self._appeler(factory, gestionnaire, page_size=2)
+
+        assert page["count"] == 5
+        assert len(page["results"]) == 2
+        assert page["next"] is not None
+
+    def test_la_taille_de_page_est_plafonnee(self, factory):
+        """Sans plafond, `?page_size=100000` rétablirait le comportement d'avant.
+
+        On interroge le paginateur plutôt que l'endpoint : prouver le plafond
+        par la réponse demanderait de créer cinq cents bons pour observer qu'il
+        n'en revient pas cinq cent un.
+        """
+
+        paginateur = DeliveryListView.pagination_class()
+
+        demesure = Request(factory.get("/", {"page_size": 100000}))
+        raisonnable = Request(factory.get("/", {"page_size": 25}))
+        muette = Request(factory.get("/"))
+
+        assert paginateur.get_page_size(demesure) == 500
+        assert paginateur.get_page_size(raisonnable) == 25
+        assert paginateur.get_page_size(muette) == 100
+
+    @pytest.mark.django_db
+    def test_l_ordre_de_tournee_survit_a_la_pagination(
+        self, factory, gestionnaire, prestation, part
+    ):
+        """Le tri par retrait croissant est l'ordre du camion : il doit être global.
+
+        Paginer un queryset non ordonné rendrait les pages instables ; ici
+        l'ordre vient du `get_queryset`, et la première page est bien celle des
+        premiers retraits.
+        """
+
+        for jour in ("05", "03", "04"):
+            _make_reservation(
+                prestation,
+                part,
+                statut="validee",
+                date_retrait=f"2026-06-{jour}T08:00:00Z",
+                date_retour=f"2026-06-{jour}T18:00:00Z",
+            )
+
+        page = self._appeler(factory, gestionnaire, page_size=2)
+        retraits = [ligne["date_retrait_prevue"] for ligne in page["results"]]
+
+        assert [horodatage[8:10] for horodatage in retraits] == ["03", "04"]

@@ -46,6 +46,13 @@ const RAMASSAGES_URL = '/plugin/inventree-location/ramassages/';
 /** Plafond de `LieuPagination` côté serveur : au-delà, on le signale. */
 const MAX_RAMASSAGES_TOURNEE = 100;
 
+/** Idem pour les livraisons : `DeliveryPagination` plafonne à 500.
+ *
+ * La tournée se lit d'un bloc — la carte et le calendrier consomment le même
+ * jeu que le tableau — donc on demande une page large plutôt que d'ajouter une
+ * navigation qui les désynchroniserait. Au-delà, on le dit. */
+const MAX_LIVRAISONS_TOURNEE = 200;
+
 const STATUT_COLORS: Record<string, string> = {
   validee: 'green',
   livree: 'teal'
@@ -109,16 +116,16 @@ export function DeliveriesList({
 
   const params = buildDeliveryQuery(filters);
 
-  const query = useQuery<Delivery[]>(
+  const query = useQuery<Page<Delivery>>(
     {
       queryKey: ['deliveries', params],
       queryFn: async () => {
         const response = await context.api.get(DELIVERIES_URL, {
-          params,
+          params: { ...params, page_size: MAX_LIVRAISONS_TOURNEE },
           // Clés répétées `statut=a&statut=b` (le backend lit getlist).
           paramsSerializer: { indexes: null }
         });
-        return response.data as Delivery[];
+        return response.data as Page<Delivery>;
       },
       // Le pool commun (US-18) change sous l'action d'autres livreurs : sans
       // ça, une livraison relâchée par un livreur reste invisible pour les
@@ -303,7 +310,9 @@ export function DeliveriesList({
     return lieux.map((lieu) => ({ value: String(lieu.id), label: lieu.nom }));
   }, [lieuxQuery.data]);
 
-  const rows = query.data ?? [];
+  const rows = query.data?.results ?? [];
+
+  const livraisonsTronquees = (query.data?.count ?? 0) > rows.length;
 
   function updateFilters(patch: Partial<DeliveryFiltersState>) {
     setFilters((current) => ({ ...current, ...patch }));
@@ -418,6 +427,14 @@ export function DeliveriesList({
       {query.isError && (
         <Alert color='red' title='Erreur'>
           Impossible de charger les livraisons.
+        </Alert>
+      )}
+
+      {livraisonsTronquees && (
+        <Alert color='yellow' variant='light'>
+          Plus de {MAX_LIVRAISONS_TOURNEE} livraisons sur cette période : seules
+          les {MAX_LIVRAISONS_TOURNEE} premières sont affichées, tableau, carte
+          et calendrier compris. Resserrez la période ou filtrez par lieu.
         </Alert>
       )}
 

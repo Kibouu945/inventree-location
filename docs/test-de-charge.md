@@ -340,6 +340,17 @@ appel, pour un écran qui en montre vingt.
 
 *Correction :* lui donner la pagination que ses voisines ont déjà.
 
+**Corrigé.** `DeliveryPagination` : 100 bons par page, 500 au plus. Le coût par
+bon était déjà borné — jointures et préchargements, vérifiés par un test de
+budget de requêtes existant — mais leur *nombre* ne l'était pas, et l'horizon
+« à venir » ne pose pas de `date_to`.
+
+Le client a suivi, parce que la forme de la réponse change. La tournée se lit
+d'un bloc — carte et calendrier consomment le même jeu que le tableau — donc il
+demande une page large plutôt qu'une navigation qui les désynchroniserait, et
+signale la troncature quand `count` dépasse ce qu'il a reçu. C'est déjà ce que
+l'écran fait pour les ramassages.
+
 ### 5.3 `StockAlertListView` — une requête par article
 
 `_projected_tension()` est appelée une fois par article louable, et chacune
