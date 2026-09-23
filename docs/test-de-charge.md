@@ -330,6 +330,43 @@ chevauchent la période — le filtre de date appartient au SQL, pas à la boucl
 — les regrouper par `(prestation, article)`, et comparer au stock. Le coût
 redevient proportionnel au volume.
 
+l**Corrigé.** Le moteur d'engagement est coupé en deux : `charger_lignes_engagement`
+lit la base, `reduire_engagements` réconcilie prévisionnel et réalisé. La règle
+de réconciliation — par prestation et par article, le plus grand des deux — n'a
+pas bougé d'une ligne ; seul l'endroit d'où viennent les données a changé.
+
+Cette séparation permet d'interroger **plusieurs fenêtres sur un même
+chargement**, ce dont le widget a précisément besoin puisque chaque réservation
+a la sienne. Un `ContexteDeConflits` charge une fois la nature des articles,
+leur stock, leurs engagements et les réservations concurrentes ; le parcours
+arbitre ensuite en mémoire.
+
+Le filtre de période est passé en SQL, avec **un jour de marge de chaque
+côté** : le chevauchement fait foi au jour entier, si bien qu'un filtre posé tel
+quel sur les horodatages serait plus strict que la règle et écarterait des
+lignes légitimes. Le SQL dégrossit, Python tranche — et le résultat reste
+identique, ce que les tests existants vérifient.
+
+`detect_reservation_conflicts` reste l'unique arbitre : le garde-fou du
+formulaire lui passe un contexte d'une seule réservation, le widget un contexte
+partagé. Deux chemins de calcul auraient fini par se contredire.
+
+Mesuré sur une base saine — sans pénurie, donc chaque réservation arbitrée
+jusqu'au bout, le cas le plus coûteux :
+
+| Réservations | Requêtes avant | Temps avant | Requêtes après | Temps après |
+|---|---|---|---|---|
+| 100 | 3 102 | 0,95 s | **8** | 0,02 s |
+| 200 | 5 898 | 2,48 s | **8** | 0,03 s |
+| 400 | > 9 000 | 6,55 s | **8** | 0,06 s |
+
+Le temps d'avant croît plus vite que le volume — 0,95 s, 2,48 s, 6,55 s pour
+100, 200 puis 400 — ce qui est bien la signature relevée sur la production.
+Après, il suit le volume, et le nombre de requêtes ne bouge plus.
+
+*(Au-delà de 9 000 requêtes, Django cesse de les journaliser : le chiffre de la
+dernière ligne est une borne inférieure.)*
+
 ### 5.2 `DeliveryListView` — la seule liste non paginée
 
 Toutes les vues de liste du plugin portent une `pagination_class`, sauf

@@ -19,7 +19,8 @@ et sont ignorés.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from typing import NamedTuple
 
 from django.utils import timezone
 
@@ -49,6 +50,215 @@ def day_ranges_overlap(start_a, end_a, start_b, end_b) -> bool:
     """Vrai si les deux plages se chevauchent au jour entier (bornes incluses)."""
 
     return _as_date(start_a) <= _as_date(end_b) and _as_date(end_a) >= _as_date(start_b)
+
+
+#: Marge du filtre SQL de période.
+#:
+#: Le chevauchement fait foi **au jour entier** (`day_ranges_overlap`) : le
+#: 2 juin à 18 h chevauche le 2 juin à 9 h, alors que le premier horodatage est
+#: postérieur au second. Un filtre SQL posé tel quel sur les horodatages serait
+#: donc plus strict que la règle et écarterait des lignes légitimes.
+#:
+#: On élargit les bornes d'un jour de chaque côté : le SQL dégrossit, Python
+#: tranche. Aucun décalage de fuseau n'atteint vingt-quatre heures, si bien
+#: qu'une ligne écartée par ce filtre ne pouvait pas chevaucher la période.
+MARGE_FENETRE = timedelta(days=1)
+
+
+class LigneDEngagement(NamedTuple):
+    """Une quantité retenue sur une période, prévisionnelle ou réservée.
+
+    Les deux tables qui décrivent le besoin matériel — `LignePrestation` pour
+    le prévisionnel, `LigneReservation` pour le réalisé — se ramènent à cette
+    forme commune. `reservation_id` vaut None pour le prévisionnel : c'est ce
+    qui distingue les deux origines lors de la réconciliation.
+    """
+
+    part_id: int
+    prestation_id: int
+    prestation_nom: str
+    quantite: int
+    debut: object
+    fin: object
+    reservation_id: int | None
+    numero: str
+    statut: str
+
+
+def charger_lignes_engagement(part_ids, date_debut, date_fin) -> list:
+    """Charge en deux requêtes tout ce qui engage ces articles sur la période.
+
+    Le filtre de période appartient au SQL : sans lui, chaque appel relisait
+    *toutes* les lignes portant l'article, quelle que soit leur date, et le
+    chevauchement était vérifié en Python ligne par ligne. Sur une base d'une
+    année, cela faisait plusieurs centaines de lignes relues par appel.
+
+    Aucune exclusion n'est appliquée ici : elles dépendent de la fenêtre
+    interrogée, et le même chargement sert à en interroger plusieurs.
+    """
+
+    from .models import LignePrestation, LigneReservation
+
+    part_ids = [int(pid) for pid in part_ids]
+
+    if not part_ids:
+        return []
+
+    borne_basse = _as_date(date_debut) - MARGE_FENETRE
+    borne_haute = _as_date(date_fin) + MARGE_FENETRE
+
+    lignes = []
+
+    lignes_prestation = (
+        LignePrestation.objects.filter(
+            part_id__in=part_ids,
+            prestation__date_fin__date__gte=borne_basse,
+            prestation__date_debut__date__lte=borne_haute,
+        )
+        .select_related("prestation")
+        .only(
+            "part_id",
+            "quantite",
+            "prestation__id",
+            "prestation__nom",
+            "prestation__date_debut",
+            "prestation__date_fin",
+        )
+    )
+
+    for ligne in lignes_prestation:
+        prestation = ligne.prestation
+        lignes.append(
+            LigneDEngagement(
+                part_id=ligne.part_id,
+                prestation_id=prestation.pk,
+                prestation_nom=prestation.nom,
+                quantite=ligne.quantite,
+                debut=prestation.date_debut,
+                fin=prestation.date_fin,
+                reservation_id=None,
+                numero="",
+                statut="",
+            )
+        )
+
+    lignes_reservation = (
+        LigneReservation.objects.filter(
+            part_id__in=part_ids,
+            reservation__statut__in=CONFLICT_STATUSES,
+            reservation__date_retrait_prevue__isnull=False,
+            reservation__date_retour_prevue__isnull=False,
+            reservation__date_retour_prevue__date__gte=borne_basse,
+            reservation__date_retrait_prevue__date__lte=borne_haute,
+        )
+        .select_related("reservation__prestation")
+        .only(
+            "part_id",
+            "quantite_demandee",
+            "reservation__id",
+            "reservation__numero",
+            "reservation__statut",
+            "reservation__date_retrait_prevue",
+            "reservation__date_retour_prevue",
+            "reservation__prestation__id",
+            "reservation__prestation__nom",
+        )
+    )
+
+    for ligne in lignes_reservation:
+        reservation = ligne.reservation
+        lignes.append(
+            LigneDEngagement(
+                part_id=ligne.part_id,
+                prestation_id=reservation.prestation_id,
+                prestation_nom=reservation.prestation.nom,
+                quantite=ligne.quantite_demandee,
+                debut=reservation.date_retrait_prevue,
+                fin=reservation.date_retour_prevue,
+                reservation_id=reservation.pk,
+                numero=reservation.numero,
+                statut=reservation.statut,
+            )
+        )
+
+    return lignes
+
+
+def reduire_engagements(
+    lignes,
+    date_debut,
+    date_fin,
+    *,
+    exclude_prestation_id=None,
+    exclude_reservation_id=None,
+    excluded_forecast_id=None,
+) -> dict[int, list[dict]]:
+    """Réconcilie prévisionnel et réalisé sur une fenêtre, sans toucher la base.
+
+    C'est ici que vit la règle : **par prestation et par article**, on retient
+    le plus grand du prévisionnel et du réservé. Les sommer double-compterait
+    la réservation qui matérialise le prévisionnel de sa propre prestation ;
+    n'en lire qu'un seul rendait invisible la moitié des engagements.
+
+    Séparer cette réduction du chargement permet d'interroger plusieurs
+    fenêtres sur un même chargement — ce dont le widget de conflits a besoin,
+    puisque chaque réservation a la sienne.
+    """
+
+    forecast: dict[tuple[int, int], int] = {}
+    booked: dict[tuple[int, int], int] = {}
+    noms: dict[int, str] = {}
+    numeros: dict[tuple[int, int], list[str]] = {}
+
+    for ligne in lignes:
+        if (
+            exclude_prestation_id is not None
+            and ligne.prestation_id == exclude_prestation_id
+        ):
+            continue
+
+        if ligne.reservation_id is None:
+            # Le prévisionnel de la prestation dont on exclut la réservation :
+            # cette réservation en est justement la matérialisation.
+            if (
+                excluded_forecast_id is not None
+                and ligne.prestation_id == excluded_forecast_id
+            ):
+                continue
+        elif (
+            exclude_reservation_id is not None
+            and ligne.reservation_id == exclude_reservation_id
+        ):
+            continue
+
+        if not day_ranges_overlap(date_debut, date_fin, ligne.debut, ligne.fin):
+            continue
+
+        key = (ligne.prestation_id, ligne.part_id)
+        noms[ligne.prestation_id] = ligne.prestation_nom
+
+        if ligne.reservation_id is None:
+            forecast[key] = forecast.get(key, 0) + ligne.quantite
+        else:
+            booked[key] = booked.get(key, 0) + ligne.quantite
+            numeros.setdefault(key, []).append(ligne.numero)
+
+    details: dict[int, list[dict]] = {}
+
+    for key in sorted(set(forecast) | set(booked)):
+        prestation_id, part_id = key
+        prevu = forecast.get(key, 0)
+        reserve = booked.get(key, 0)
+
+        details.setdefault(part_id, []).append({
+            "prestation_id": prestation_id,
+            "prestation_nom": noms.get(prestation_id, ""),
+            "quantite": max(prevu, reserve),
+            "origine": "reservations" if reserve >= prevu else "prevision",
+            "reservation_numeros": sorted(numeros.get(key, [])),
+        })
+
+    return details
 
 
 def compute_engagement_details(
@@ -96,7 +306,7 @@ def compute_engagement_details(
     ou ``"reservations"`` selon celle des deux qui l'emporte.
     """
 
-    from .models import LignePrestation, LigneReservation, Reservation
+    from .models import Reservation
 
     part_ids = [int(pid) for pid in part_ids]
 
@@ -112,78 +322,14 @@ def compute_engagement_details(
             .first()
         )
 
-    # Quantités indexées par (prestation, article) : la réconciliation
-    # prévisionnel/réalisé se fait prestation par prestation.
-    forecast: dict[tuple[int, int], int] = {}
-    booked: dict[tuple[int, int], int] = {}
-    noms: dict[int, str] = {}
-    numeros: dict[tuple[int, int], list[str]] = {}
-
-    lignes_prestation = LignePrestation.objects.filter(
-        part_id__in=part_ids
-    ).select_related("prestation")
-
-    for excluded in (exclude_prestation_id, excluded_forecast_id):
-        if excluded is not None:
-            lignes_prestation = lignes_prestation.exclude(prestation_id=excluded)
-
-    for ligne in lignes_prestation:
-        prestation = ligne.prestation
-
-        if day_ranges_overlap(
-            date_debut, date_fin, prestation.date_debut, prestation.date_fin
-        ):
-            key = (prestation.pk, ligne.part_id)
-            forecast[key] = forecast.get(key, 0) + ligne.quantite
-            noms[prestation.pk] = prestation.nom
-
-    lignes_reservation = LigneReservation.objects.filter(
-        part_id__in=part_ids,
-        reservation__statut__in=CONFLICT_STATUSES,
-        reservation__date_retrait_prevue__isnull=False,
-        reservation__date_retour_prevue__isnull=False,
-    ).select_related("reservation__prestation")
-
-    if exclude_prestation_id is not None:
-        lignes_reservation = lignes_reservation.exclude(
-            reservation__prestation_id=exclude_prestation_id
-        )
-
-    if exclude_reservation_id is not None:
-        lignes_reservation = lignes_reservation.exclude(
-            reservation_id=exclude_reservation_id
-        )
-
-    for ligne in lignes_reservation:
-        reservation = ligne.reservation
-
-        if day_ranges_overlap(
-            date_debut,
-            date_fin,
-            reservation.date_retrait_prevue,
-            reservation.date_retour_prevue,
-        ):
-            key = (reservation.prestation_id, ligne.part_id)
-            booked[key] = booked.get(key, 0) + ligne.quantite_demandee
-            noms[reservation.prestation_id] = reservation.prestation.nom
-            numeros.setdefault(key, []).append(reservation.numero)
-
-    details: dict[int, list[dict]] = {}
-
-    for key in sorted(set(forecast) | set(booked)):
-        prestation_id, part_id = key
-        prevu = forecast.get(key, 0)
-        reserve = booked.get(key, 0)
-
-        details.setdefault(part_id, []).append({
-            "prestation_id": prestation_id,
-            "prestation_nom": noms.get(prestation_id, ""),
-            "quantite": max(prevu, reserve),
-            "origine": "reservations" if reserve >= prevu else "prevision",
-            "reservation_numeros": sorted(numeros.get(key, [])),
-        })
-
-    return details
+    return reduire_engagements(
+        charger_lignes_engagement(part_ids, date_debut, date_fin),
+        date_debut,
+        date_fin,
+        exclude_prestation_id=exclude_prestation_id,
+        exclude_reservation_id=exclude_reservation_id,
+        excluded_forecast_id=excluded_forecast_id,
+    )
 
 
 def compute_engaged_quantities(

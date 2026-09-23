@@ -376,7 +376,127 @@ def _rental_stock_quantities(part_ids):
     return {ligne["part_id"]: int(ligne["total"] or 0) for ligne in lignes}
 
 
-def detect_reservation_conflicts(reservation) -> dict:
+class ContexteDeConflits:
+    """Tout ce qu'il faut pour arbitrer des conflits, chargé une fois.
+
+    Arbitrer une réservation demande quatre choses par article : sa nature
+    (louable ou virtuel), son stock, ce qui l'engage déjà sur la période, et
+    les réservations avec qui il est partagé. Lues une réservation à la fois,
+    ces quatre choses coûtaient autant de requêtes par ligne — et le widget en
+    parcourt plusieurs milliers.
+
+    Le contexte les charge une fois pour tout un lot d'articles et pour la
+    période qui englobe toutes les fenêtres à interroger. Chaque fenêtre est
+    ensuite arbitrée en mémoire. Le nombre de requêtes ne dépend plus du
+    nombre de réservations.
+
+    C'est un cache de lecture, construit pour la durée d'un appel : il ne voit
+    pas les écritures faites après lui.
+    """
+
+    def __init__(self, part_ids, date_debut, date_fin):
+        from part.models import Part
+
+        from .models import RentableItem
+        from .stock import charger_lignes_engagement
+
+        self.part_ids = sorted({int(pid) for pid in part_ids})
+
+        self.rentables = {
+            item.part_id: item
+            for item in RentableItem.objects.filter(part_id__in=self.part_ids)
+        }
+        # Les articles sont portés ici plutôt que joints aux lignes de chaque
+        # réservation : une jointure posée sur le manager de relation ignore le
+        # préchargement du parcours et relance une requête par réservation.
+        self.parts = {
+            part.pk: part for part in Part.objects.filter(pk__in=self.part_ids)
+        }
+
+        self.lignes_par_part: dict[int, list] = {}
+
+        for ligne in charger_lignes_engagement(self.part_ids, date_debut, date_fin):
+            self.lignes_par_part.setdefault(ligne.part_id, []).append(ligne)
+
+        self._stock: dict[int, int] | None = None
+
+    def stock_de(self, part_id) -> int:
+        """Le stock louable de l'article, tiré d'un agrégat groupé unique."""
+
+        if self._stock is None:
+            self._stock = get_parts_total_stock(self.parts.values())
+
+        return self._stock.get(part_id, 0)
+
+    def nom_de(self, part_id) -> str:
+        """Le nom de l'article, pour le libellé de la pénurie."""
+
+        part = self.parts.get(part_id)
+
+        return getattr(part, "name", str(part_id)) if part is not None else str(part_id)
+
+    def engagements(
+        self,
+        part_id,
+        debut,
+        fin,
+        *,
+        exclude_reservation_id=None,
+        exclude_prestation_forecast_id=None,
+    ):
+        """Le détail des engagements d'un article sur une fenêtre donnée.
+
+        `exclude_prestation_forecast_id` écarte le prévisionnel dont la
+        réservation exclue est la matérialisation : sans lui, une réservation
+        se heurterait au besoin qu'elle est en train de couvrir. L'appelant le
+        fournit — c'est `reservation.prestation_id`, qu'il a sous la main — là
+        où le déduire de l'index le rendrait faux pour une réservation non
+        bloquante, absente de cet index.
+        """
+
+        from .stock import reduire_engagements
+
+        return reduire_engagements(
+            self.lignes_par_part.get(part_id, []),
+            debut,
+            fin,
+            exclude_reservation_id=exclude_reservation_id,
+            excluded_forecast_id=exclude_prestation_forecast_id,
+        ).get(part_id, [])
+
+    def partageurs(self, part_id, debut, fin, *, exclude_reservation_id=None):
+        """Les réservations bloquantes qui se partagent l'article sur la période.
+
+        Même définition que `compute_conflicts`, tirée du même index : une
+        réservation au statut bloquant dont la période chevauche celle-ci, au
+        jour entier.
+        """
+
+        from .stock import day_ranges_overlap
+
+        vues = {}
+
+        for ligne in self.lignes_par_part.get(part_id, []):
+            if ligne.reservation_id is None:
+                continue
+            if ligne.reservation_id == exclude_reservation_id:
+                continue
+            if ligne.reservation_id in vues:
+                continue
+            if not day_ranges_overlap(debut, fin, ligne.debut, ligne.fin):
+                continue
+
+            vues[ligne.reservation_id] = {
+                "reservation_id": ligne.reservation_id,
+                "numero": ligne.numero,
+                "statut": ligne.statut,
+                "direct_link": RESERVATION_DIRECT_LINK.format(pk=ligne.reservation_id),
+            }
+
+        return [vues[cle] for cle in sorted(vues)]
+
+
+def detect_reservation_conflicts(reservation, contexte=None) -> dict:
     """Détecte les conflits de stock d'une réservation, ligne par ligne.
 
     Pour chaque ligne : stock projeté = stock total − somme des quantités
@@ -387,11 +507,15 @@ def detect_reservation_conflicts(reservation) -> dict:
     Les articles virtuels (services, ex. « nettoyage ») sont ignorés : ils
     ne portent pas de contrainte de stock physique.
 
+    `contexte` — un `ContexteDeConflits` déjà chargé — évite de relire la base
+    pour chaque ligne. Sans lui, la fonction en construit un pour elle seule :
+    c'est le cas du garde-fou de validation, qui n'arbitre qu'une réservation.
+    Le widget, qui en parcourt plusieurs milliers, en partage un unique. Les
+    deux passent par le même arbitrage, sans quoi le formulaire et le tableau
+    de bord pourraient se contredire.
+
     Retourne ``{"has_conflict": bool, "reservation": pk, "conflicts": [...]}``.
     """
-
-    from .models import RentableItem
-    from .stock import compute_engagement_details
 
     empty = {"has_conflict": False, "reservation": reservation.pk, "conflicts": []}
 
@@ -404,68 +528,64 @@ def detect_reservation_conflicts(reservation) -> dict:
     if normalize_to_datetime(start) > normalize_to_datetime(end, end=True):
         return empty
 
+    lignes = list(reservation.lignes.all())
+
+    if contexte is None:
+        contexte = ContexteDeConflits([ligne.part_id for ligne in lignes], start, end)
+
     conflicts = []
 
-    for ligne in reservation.lignes.select_related("part").all():
-        part = ligne.part
+    for ligne in lignes:
+        part_id = ligne.part_id
         requested = ligne.quantite_demandee
 
-        rentable_item = RentableItem.objects.filter(part=part).first()
+        rentable_item = contexte.rentables.get(part_id)
 
         # Les articles virtuels n'ont pas de stock physique à arbitrer.
         if rentable_item is not None and rentable_item.is_virtual:
             continue
 
-        availability = compute_part_availability(
-            part,
-            requested,
-            start,
-            end,
-            exclude_resa_id=reservation.pk,
-        )
-
-        # `compute_part_availability` s'appuie déjà sur le moteur d'engagement
-        # partagé ; on ne recalcule ici que le détail nominatif, nécessaire
-        # pour désigner la prestation responsable d'une pénurie.
-        engagements = compute_engagement_details(
-            [part.pk],
+        # Le détail nominatif sert deux fois : il donne la quantité engagée, et
+        # il nomme la prestation responsable quand la pénurie ne vient que du
+        # prévisionnel, sans aucune réservation à montrer.
+        engagements = contexte.engagements(
+            part_id,
             start,
             end,
             exclude_reservation_id=reservation.pk,
-        ).get(part.pk, [])
+            exclude_prestation_forecast_id=reservation.prestation_id,
+        )
 
-        if availability["has_conflict"]:
-            safe_available = max(availability["available_quantity"], 0)
+        total_stock = contexte.stock_de(part_id)
+        reserved = sum(entry["quantite"] for entry in engagements)
+        available = total_stock - reserved
+        missing = max(requested - available, 0)
 
-            conflicts.append({
-                "part_id": part.pk,
-                "part_name": getattr(part, "name", str(part)),
-                "requested_quantity": requested,
-                "total_stock": availability["total_stock"],
-                "already_reserved_quantity": availability["already_reserved_quantity"],
-                "available_quantity": availability["available_quantity"],
-                "missing_quantity": availability["missing_quantity"],
-                "occupation_rate": availability["occupation_rate"],
-                "tension_level": availability["tension_level"],
-                "conflicting_reservations": [
-                    {
-                        "reservation_id": resa.pk,
-                        "numero": resa.numero,
-                        "statut": resa.statut,
-                        "direct_link": RESERVATION_DIRECT_LINK.format(pk=resa.pk),
-                    }
-                    for resa in availability["conflicting_reservations"]
-                ],
-                # Le stock peut être retenu par le seul prévisionnel d'une
-                # prestation, sans aucune réservation à montrer : sans ce
-                # détail, la pénurie n'aurait aucun responsable à désigner.
-                "conflicting_prestations": engagements,
-                "suggestions": [
-                    f"Réduire la quantité demandée à {safe_available}.",
-                    "Choisir une autre période de réservation.",
-                    "Libérer ou modifier une réservation existante en conflit.",
-                ],
-            })
+        if missing <= 0:
+            continue
+
+        occupation_rate = ((reserved + requested) / max(total_stock, 1)) * 100
+
+        conflicts.append({
+            "part_id": part_id,
+            "part_name": contexte.nom_de(part_id),
+            "requested_quantity": requested,
+            "total_stock": total_stock,
+            "already_reserved_quantity": reserved,
+            "available_quantity": available,
+            "missing_quantity": missing,
+            "occupation_rate": occupation_rate,
+            "tension_level": tension_level(occupation_rate),
+            "conflicting_reservations": contexte.partageurs(
+                part_id, start, end, exclude_reservation_id=reservation.pk
+            ),
+            "conflicting_prestations": engagements,
+            "suggestions": [
+                f"Réduire la quantité demandée à {max(available, 0)}.",
+                "Choisir une autre période de réservation.",
+                "Libérer ou modifier une réservation existante en conflit.",
+            ],
+        })
 
     return {
         "has_conflict": bool(conflicts),
@@ -498,6 +618,8 @@ def list_current_conflicts() -> List[dict]:
     prestation, auquel cas `conflict_count` vaut 0.
     """
 
+    from django.db.models import Max, Min
+
     from .models import Reservation
 
     queryset = (
@@ -511,14 +633,34 @@ def list_current_conflicts() -> List[dict]:
         .order_by("date_retrait_prevue", "date_retour_prevue", "pk")
     )
 
+    # Un seul chargement pour tout le parcours. Arbitrée une par une, chaque
+    # réservation relisait la base pour chacune de ses lignes : le coût suivait
+    # le produit du nombre de réservations par celui des lignes, et l'écran ne
+    # rendait plus (cf. `docs/test-de-charge.md`).
+    bornes = queryset.aggregate(
+        debut=Min("date_retrait_prevue"), fin=Max("date_retour_prevue")
+    )
+
+    if bornes["debut"] is None:
+        return []
+
+    reservations = list(queryset)
+    part_ids = {
+        ligne.part_id
+        for reservation in reservations
+        for ligne in reservation.lignes.all()
+    }
+
+    contexte = ContexteDeConflits(part_ids, bornes["debut"], bornes["fin"])
+
     payload = []
     processed_ids = set()
 
-    for reservation in queryset:
+    for reservation in reservations:
         if reservation.pk in processed_ids:
             continue
 
-        result = detect_reservation_conflicts(reservation)
+        result = detect_reservation_conflicts(reservation, contexte=contexte)
 
         if not result["has_conflict"]:
             continue
