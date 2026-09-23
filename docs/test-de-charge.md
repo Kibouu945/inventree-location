@@ -359,6 +359,29 @@ articles louables, cent requêtes là où deux suffiraient.
 
 *Correction :* une agrégation groupée par article, en une requête.
 
+**Corrigé.** Trois grandeurs étaient lues article par article : le stock
+possédé, la disponibilité du jour, et la tension projetée sur trente jours. La
+deuxième était déjà groupée ; les deux autres le sont désormais —
+`get_parts_total_stock` regroupe l'agrégat des `StockItem` par article, et
+`_projected_tensions` fait de même pour les quantités engagées.
+
+Le premier de ces deux agrégats se cachait aussi **dans**
+`compute_stock_availability`, qui appelait `get_part_total_stock` dans sa propre
+boucle. Le catalogue et le sélecteur de matériel passent par là : ils gagnent la
+correction sans l'avoir demandée.
+
+Mesuré par le test de budget, sur un nombre croissant d'articles louables :
+
+| Articles louables | Requêtes avant | Requêtes après |
+|---|---|---|
+| 5 | 24 | **9** |
+| 15 | 69 | **9** |
+| 30 | 159 | **9** |
+
+Trois requêtes par article, devenues zéro. C'est l'égalité entre deux mesures —
+et non un plafond chiffré, qui se périmerait à la première jointure ajoutée —
+qui tient lieu de garde-fou.
+
 ### 5.4 La numérotation — quatre chiffres et un tri de chaînes
 
 *Correction :* trier sur la partie numérique plutôt que sur la chaîne, ou

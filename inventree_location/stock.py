@@ -6,7 +6,7 @@ from datetime import date, datetime
 
 from django.utils import timezone
 
-from .conflicts import CONFLICT_STATUSES, get_part_total_stock
+from .conflicts import CONFLICT_STATUSES, get_parts_total_stock
 
 
 def _as_date(value) -> date:
@@ -192,6 +192,11 @@ def compute_stock_availability(
         exclude_reservation_id=exclude_reservation_id,
     )
 
+    # Le stock de tous les articles en une requête. Lu article par article, il
+    # coûtait ici un agrégat par ligne demandée — le catalogue et le sélecteur
+    # de matériel passent par là aussi.
+    stock_par_part = get_parts_total_stock(parts.values())
+
     result_lines = []
     has_shortage = False
 
@@ -205,7 +210,7 @@ def compute_stock_availability(
             continue
 
         part = parts.get(part_id)
-        total_stock = get_part_total_stock(part, rentable_item=rentable) if part else 0
+        total_stock = stock_par_part.get(part_id, 0)
         reserved = reserved_by_part.get(part_id, 0)
         available = total_stock - reserved
         shortage = requested > available

@@ -227,6 +227,44 @@ def get_part_total_stock(part, rentable_item=None) -> int:
     if quantity is not None:
         return quantity
 
+    return _stock_depuis_les_attributs(part)
+
+
+def get_parts_total_stock(parts) -> dict[int, int]:
+    """Stock physique louable de plusieurs Parts, en **une** requête.
+
+    Même définition que `get_part_total_stock`, appliquée à un lot : un
+    regroupement par article plutôt qu'un agrégat par article. Appelée en
+    boucle, la version unitaire coûtait une requête par article — cent là où
+    deux suffisent, sur cinquante articles louables (cf.
+    `docs/test-de-charge.md`).
+
+    Rend un dictionnaire `{part_id: quantité}` couvrant **tous** les articles
+    reçus, y compris ceux sans exemplaire : un article absent du résultat de
+    l'agrégat en a zéro, et l'appelant ne doit pas avoir à distinguer les deux.
+    """
+
+    parts = list(parts)
+
+    if not parts:
+        return {}
+
+    totaux = _rental_stock_quantities([part.pk for part in parts])
+
+    if totaux is None:
+        return {part.pk: _stock_depuis_les_attributs(part) for part in parts}
+
+    return {part.pk: totaux.get(part.pk, 0) for part in parts}
+
+
+def _stock_depuis_les_attributs(part) -> int:
+    """Repli hors container InvenTree : ce que l'objet Part sait dire de lui.
+
+    La suite pytest tourne avec une app `stock` factice ; d'autres contextes
+    n'en ont aucune. On lit alors les attributs de stock exposés par l'objet,
+    puis on rend zéro.
+    """
+
     for attr in ("total_stock", "in_stock", "stock", "quantity"):
         value = getattr(part, attr, None)
 
@@ -247,17 +285,15 @@ def get_part_total_stock(part, rentable_item=None) -> int:
     return 0
 
 
-def _rental_stock_quantity(part):
-    """Somme des exemplaires louables d'une Part, ou None si `stock` est absent."""
-
-    from django.db.models import Sum
+def _stock_louable_queryset():
+    """Les `StockItem` réellement louables, ou None si l'app `stock` est absente."""
 
     try:
         from stock.models import StockItem
     except ImportError:  # pragma: no cover - dépend de l'environnement
         return None
 
-    queryset = StockItem.objects.filter(part=part, status__in=RENTAL_STOCK_STATUSES)
+    queryset = StockItem.objects.filter(status__in=RENTAL_STOCK_STATUSES)
 
     # `IN_STOCK_FILTER` porte la définition InvenTree de « physiquement en
     # stock » (ni vendu, ni consommé, ni chez un client, quantité > 0).
@@ -266,9 +302,45 @@ def _rental_stock_quantity(part):
     if in_stock_filter is not None:
         queryset = queryset.filter(in_stock_filter)
 
-    total = queryset.aggregate(total=Sum("quantity"))["total"] or 0
+    return queryset
+
+
+def _rental_stock_quantity(part):
+    """Somme des exemplaires louables d'une Part, ou None si `stock` est absent."""
+
+    from django.db.models import Sum
+
+    queryset = _stock_louable_queryset()
+
+    if queryset is None:
+        return None
+
+    total = queryset.filter(part=part).aggregate(total=Sum("quantity"))["total"] or 0
 
     return int(total)
+
+
+def _rental_stock_quantities(part_ids):
+    """Idem pour un lot d'articles, en une requête — None si `stock` est absent.
+
+    Seuls les articles ayant au moins un exemplaire louable figurent dans le
+    résultat ; c'est à l'appelant de compléter par zéro.
+    """
+
+    from django.db.models import Sum
+
+    queryset = _stock_louable_queryset()
+
+    if queryset is None:
+        return None
+
+    lignes = (
+        queryset.filter(part_id__in=part_ids)
+        .values("part_id")
+        .annotate(total=Sum("quantity"))
+    )
+
+    return {ligne["part_id"]: int(ligne["total"] or 0) for ligne in lignes}
 
 
 def detect_reservation_conflicts(reservation) -> dict:
