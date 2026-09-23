@@ -354,6 +354,21 @@ articles louables, cent requêtes là où deux suffiraient.
 tenir un compteur par année. Élargir le format ne suffit pas : c'est le tri
 qui est faux, pas la largeur.
 
+**Corrigé.** `_generate_reservation_numero` relit désormais un maximum
+numérique calculé par la base, sur le suffixe converti en entier. Les numéros
+existants ne changent pas — quatre chiffres restent un minimum, la largeur
+s'étend d'elle-même au-delà de 9 999 — et aucune migration n'est nécessaire.
+
+La conversion est restreinte aux suffixes composés de chiffres : sous
+PostgreSQL elle est stricte, et un seul numéro mal formé hérité d'une reprise
+de données empêcherait *toute* création ultérieure. Sous SQLite, où tournent
+les tests, la conversion est laxiste et ne révélerait pas ce cas : il a été
+vérifié directement sur le moteur de la stack.
+
+La boucle de réessai de `Reservation.save()` est conservée. Elle ne masque plus
+un tri faux : elle protège la course entre deux créations simultanées, qui
+liraient le même maximum.
+
 ---
 
 ## 6. Rejouer la campagne
