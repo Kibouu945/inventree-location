@@ -1,0 +1,374 @@
+# Test de charge — 10 000 réservations par an
+
+Le volume cible est **≈10 000 réservations par an, avec des pics de 30
+réservations sur un même week-end**. Ce n'est pas le cahier des charges qui
+l'annonce — il ne contient aucune volumétrie — mais la réponse du client du
+20 mai, reprise au ticket **PERF-01** du backlog (`BACKLOG.md:794`), classé
+Must, avec un critère d'acceptation écrit : *liste paginée < 500 ms avec 10 000
+lignes*.
+
+Ce document décrit l'outillage qui permet de vérifier cette annonce, le
+protocole suivi, et ce que la campagne a mesuré. Il est le livrable de PERF-01.
+
+> Les chiffres de la section « Résultats » sont datés et rattachés à une
+> machine précise. Un test de charge sans son contexte matériel ne veut rien
+> dire : rejouer la campagne est une commande, il n'y a aucune raison de citer
+> des chiffres périmés.
+
+---
+
+## 1. Ce que la campagne cherche
+
+Deux questions, qu'on confond souvent et qui n'ont pas le même remède.
+
+**Le coût.** Combien coûte un écran quand la base contient 500, 2 000, 5 000
+puis 10 000 réservations ? Un seul appelant, aucune concurrence. Si le coût
+suit le volume, c'est le **code** qui est en cause, et aucun serveur plus gros
+n'y changera rien : doubler la machine divise le temps par deux, quand
+l'algorithme, lui, le multiplie par quatre à chaque doublement des données.
+
+**La capacité.** Combien d'utilisateurs simultanés la machine tient-elle à
+volume fixé ? C'est la question du dimensionnement — et elle n'a de sens que
+si la première est saine.
+
+On mesure des **percentiles**, jamais des moyennes. Une moyenne de 200 ms peut
+cacher un utilisateur sur vingt qui attend huit secondes ; c'est celui-là qui
+appelle le support.
+
+---
+
+## 2. L'outillage
+
+### 2.1 `seed_charge` — le volume
+
+Commande Django, à lancer dans le conteneur :
+
+```bash
+make manage cmd="seed_charge --total 10000"
+```
+
+Elle amène la base à N réservations réparties sur une année : manifestations,
+prestations avec leur prévisionnel, réservations avec leurs lignes, statuts
+répartis entre passé clôturé et futur encore bloquant.
+
+Trois propriétés qui comptent :
+
+- **Cumulative.** `--total 2000` puis `--total 5000` complète au lieu de tout
+  refaire. On enchaîne les paliers sans que rien d'autre que le volume ne
+  change entre deux mesures.
+- **Écrite en `bulk_create`.** `Reservation.save()` relit la table à chaque
+  insertion pour fabriquer son numéro : par la voie normale, générer le jeu
+  coûterait plus longtemps que la mesure elle-même.
+- **Marquée.** Tout ce qu'elle crée porte le préfixe `CHG`. `--reset` supprime
+  ce jeu et lui seul — le jeu de démonstration et les vraies données restent
+  en place.
+
+Options utiles : `--stock` (défaut 500, généreux : baisser cette valeur est le
+moyen de mesurer le cas où tout est en pénurie), `--articles`, `--clients`,
+`--lignes-max`, `--graine` (deux exécutions donnent la même base).
+
+### 2.2 `bench.py` — la mesure
+
+```bash
+# coût : un appelant, chaque endpoint joué trois fois
+python tests/charge/bench.py --sequentiel
+
+# capacité : dix appelants pendant trente secondes
+python tests/charge/bench.py --concurrence 10 --duree 30
+
+# écriture : création de réservations
+python tests/charge/bench.py --scenario ecriture --concurrence 5
+```
+
+Le scénario de lecture rejoue les treize appels que font réellement les écrans
+(liste, calendrier, conflits, alertes de stock, tournée, catalogue, contrôle
+de disponibilité…), pondérés selon leur fréquence d'usage. Chaque itération
+change de page, de mois et d'article : deux appels successifs ne doivent pas
+taper la même chose, sinon on mesure un cache et non un serveur.
+
+Un dépassement de `--timeout` est compté comme un échec, pas comme un incident
+du script : c'est précisément le point de rupture qu'on cherche.
+
+### 2.3 `paliers.sh` et `synthese.py` — la campagne
+
+```bash
+tests/charge/paliers.sh                        # 500, 2 000, 5 000, 10 000
+PALIERS="10000" CONCURRENCES="1 10 25" tests/charge/paliers.sh
+python tests/charge/synthese.py tests/charge/resultats/
+```
+
+`paliers.sh` enchaîne : amener la base au palier, mesurer le coût, mesurer la
+capacité à 1, 5, 10 et 25 appelants. Les rapports bruts sont écrits en JSON
+dans `tests/charge/resultats/`, et `synthese.py` les croise en deux tableaux —
+le coût par volume, la capacité par palier.
+
+---
+
+## 3. Résultats — campagne du 22/09/2026
+
+### 3.1 Les deux machines mesurées
+
+| | Poste de développement | **VPS de production** |
+|---|---|---|
+| Processeurs | 12 CPU (VM Docker Desktop) | **3 vCPU** |
+| Mémoire | 8 Go alloués à Docker | **3,9 Go** |
+| Workers gunicorn | 4 | **4** |
+| Frontal | aucun | Caddy (HTTPS) |
+| Base | Postgres 17, même machine | Postgres, même machine |
+
+Le VPS est la machine qui compte : c'est celle qui sert
+`inventree-location.duckdns.org`. Les mesures locales servent à établir la
+**courbe** — comment le coût évolue avec le volume — ce qu'on ne peut pas
+faire sur la production sans la tenir occupée une demi-journée.
+
+Volume injecté sur le VPS : 10 000 réservations réparties sur 2026, 25 041
+lignes, **3 801 réservations au statut bloquant** (celles qui pèsent sur le
+calcul de disponibilité), 50 articles louables, sur un catalogue client de 797
+articles. Les données ont été supprimées à l'issue de la campagne et la base
+est revenue à ses compteurs d'origine.
+
+### 3.2 Coût par écran, un seul appelant, sur la production à 10 000
+
+| Endpoint | p50 | Verdict |
+|---|---|---|
+| `conflicts/` | **> 120 000 ms** | ne rend pas |
+| `deliveries/` | 6 846 ms | inutilisable |
+| `alerts/stock/` | 6 023 ms | inutilisable |
+| `reservations/` (recherche) | 915 ms | acceptable |
+| `reservations/` (page profonde) | 863 ms | acceptable |
+| `catalog/` | 837 ms | acceptable |
+| `reservations/` (liste) | 780 ms | acceptable |
+| `ramassages/` | 589 ms | bon |
+| `reservations/calendar/` | 586 ms | bon |
+| `prestations/` | 180 ms | bon |
+| `tournees/` | 177 ms | bon |
+| `conflicts/history/` | 114 ms | bon |
+| `reservations/check-stock/` | 114 ms | bon |
+
+Neuf écrans sur treize tiennent la charge annoncée sans effort. Trois ne la
+tiennent pas, et un ne répond pas.
+
+Aucune borne supérieure n'a été établie pour `conflicts/` : les deux appels du
+banc ont été abandonnés à 120 s, et un appel unique lancé ensuite depuis la
+machine elle-même — sans HTTPS ni réseau — a été interrompu avant d'aboutir,
+pour ne pas prolonger l'occupation de la production. On sait donc qu'il
+dépasse deux minutes ; on ne sait pas de combien.
+
+### 3.3 La courbe : le volume, pas la machine
+
+Sur le poste de développement — quatre fois plus de processeurs que le VPS —
+`conflicts/` mesuré à volume croissant :
+
+| Réservations en base | p50 de `conflicts/` |
+|---|---|
+| 500 | 2 856 ms |
+| 2 000 | 21 577 ms |
+| 5 000 | > 45 000 ms (dépassement) |
+| 10 000 (VPS) | > 120 000 ms (dépassement) |
+
+Quatre fois plus de données, presque **huit fois** plus de temps. Un coût qui
+croît plus vite que la base ne se corrige pas en changeant de serveur :
+doubler la machine diviserait le temps par deux, quand doubler les données le
+multiplie par près de quatre. À ce rythme, l'endpoint était déjà au-delà de la
+minute vers 3 000 réservations — c'est-à-dire **au premier trimestre** d'une
+année à 10 000.
+
+### 3.4 Capacité de la production, `conflicts/` écarté
+
+`conflicts/` monopolise les quatre workers dès qu'il est appelé ; pour savoir
+ce que tient le reste de l'application, il faut le retirer du scénario.
+
+| Appelants simultanés | Débit | Échecs | p95 du pire écran |
+|---|---|---|---|
+| 1 | 0,31 req/s | 0 | 7,1 s |
+| 5 | **1,10 req/s** | 1 | 24,2 s |
+| 10 | 0,89 req/s | 1 | 31,1 s |
+| 25 | 0,78 req/s | 4 | 60,1 s |
+
+Le débit **plafonne à cinq appelants** et décroît ensuite : au-delà, les
+requêtes s'empilent devant quatre workers déjà occupés, et chacune attend plus
+longtemps sans que le serveur n'en traite davantage. C'est la signature d'une
+saturation, pas d'une montée en charge.
+
+Le plafond n'est pas celui de la machine mais celui de deux écrans : à eux
+seuls, `deliveries/` et `alerts/stock/` consomment presque tout le temps
+disponible.
+
+### 3.5 Capacité de la production, `conflicts/` compris
+
+Dix appelants, scénario complet :
+
+| | Sans `conflicts/` | Avec `conflicts/` |
+|---|---|---|
+| Débit | 0,89 req/s | **0,30 req/s** |
+| Échecs | 1 sur 38 | **4 sur 23** |
+| `reservations/` (liste), p95 | 7,6 s | **37,0 s** |
+
+C'est le résultat le plus parlant de la campagne : la simple liste des
+réservations, qui coûte 0,8 s toute seule, passe à 37 secondes. Elle n'est
+pourtant devenue ni plus grosse ni plus complexe — elle attend simplement son
+tour derrière un widget de tableau de bord qui occupe les quatre workers. **Un
+seul écran lent rend toute l'application indisponible**, et c'est celui que le
+tableau de bord charge à l'ouverture.
+
+### 3.6 Un effet de bord : la purge est lente elle aussi
+
+Supprimer les 10 000 réservations injectées a pris plusieurs dizaines de
+minutes, sur les deux machines. `QuerySet.delete()` de Django charge en
+mémoire les objets à supprimer pour propager les cascades, puis émet les
+suppressions par paquets — un coût qui n'apparaît nulle part tant qu'on
+travaille sur vingt lignes.
+
+L'archivage annuel, lui, n'est **pas** concerné :
+`archiving.archive_old_reservations()` pose un drapeau par un seul `UPDATE`
+SQL, sans rien charger en mémoire. Le coût constaté ici ne pèse que sur une
+vraie suppression de masse — reprise de données, erreur d'import — que
+l'application ne fait pas en routine. À savoir le jour où il faudra en faire
+une.
+
+### 3.7 Deux plafonds durs, indépendants du serveur
+
+**La numérotation s'arrête à 10 000 par an.** `Reservation.numero` suit la
+forme `RES-AAAA-NNNN`, et le numéro suivant est calculé en relisant le plus
+grand numéro de l'année — par un tri de **chaînes**. Sous 10 000, le zéro de
+remplissage rend ce tri équivalent à un tri numérique. À la dix-millième, le
+numéro passe à cinq chiffres et les deux ordres divergent : `RES-2026-9999`
+passe devant `RES-2026-10000`, puisque « 9 » vient après « 1 ». Le générateur
+propose alors éternellement 10000, se heurte à la contrainte d'unicité, et
+abandonne au bout de cinq tentatives par une `IntegrityError`. La réservation
+n'est pas enregistrable.
+
+C'est exactement le volume annoncé par le client, et cela ne dépend d'aucun
+serveur. Quatre tests le démontrent :
+`inventree_location/tests/test_numerotation_annuelle.py`.
+
+**Le calendrier refuse le mois.** `calendrier.MAX_EVENEMENTS` plafonne à 1 000
+évènements par fenêtre. À 10 000 réservations réparties sur l'année, une vue
+mensuelle en demande environ 830, plus celles qui débordent de part et
+d'autre : la campagne a bien reçu le refus « Plus de 1000 réservations sur
+cette période ». La vue mensuelle passe encore de justesse, la vue
+trimestrielle — que la borne de 92 jours autorise — est certaine d'échouer.
+
+---
+
+## 4. Cinq utilisateurs simultanés : est-ce assez ?
+
+Le plafond mesuré ne veut rien dire tant qu'on ne le rapporte pas à la
+population réelle d'utilisateurs. Celle-ci n'est écrite nulle part, mais elle se
+déduit de ce qui est déjà tranché.
+
+**Tous les utilisateurs sont internes.** Le cahier des charges définit huit
+personas — gestionnaire, magasinier, livreur, SAV, lecteur événement, lecteur
+stock, acheteur, administrateur — qui sont tous des acteurs de la structure
+loueuse. Sept d'entre eux sont matérialisés en groupes Django (`roles.py:19`), à
+raison d'**un seul rôle par compte** (arbitrage du 09/09, appliqué au
+sérialiseur, `backoffice.py:78`). Côté client, il n'existe aucun compte : les
+`Contact` (`models.py:254`) sont des personnes physiques rattachées à un
+`Client`, sans identifiant de connexion, et le champ qui rattachait autrefois un
+utilisateur à un client a été supprimé en migration `0028` — « un acteur interne
+n'appartient à aucun client ».
+
+**Le nombre de clients ne fait pas croître le nombre de comptes.** Un `Client`
+porte un gestionnaire référent unique (`models.py:232`) et un gestionnaire tient
+plusieurs clients : c'est le portefeuille, qu'alimente `?gestionnaire=me`
+(`views.py:2914`). Cent associations de plus, c'est cent fiches de plus, pas
+cent comptes.
+
+**Le pic connu est un pic d'écriture, pas de concurrence.** Les « 30
+réservations sur un même week-end » annoncées le 20 mai comptent des saisies
+étalées sur deux jours, pas trente sessions ouvertes en même temps.
+
+La population simultanée est donc bornée par l'effectif de la structure, de
+l'ordre du nombre de rôles — une poignée de personnes, pas une foule. **Ce
+n'est pas le nombre d'utilisateurs qui pose problème, c'est le coût de trois
+écrans.** La preuve tient dans le §3.4 : le débit plafonne dès cinq appelants,
+mais à cinq appelants le pire écran est déjà à 24 s de p95 — et il l'est parce
+qu'il coûte 6,8 s *tout seul*, sans concurrence. Une machine deux fois plus
+grosse déplacerait le plafond de cinq à dix ; elle ne ramènerait pas ces
+6,8 secondes sous la seconde.
+
+C'est ce qui rend la question du dimensionnement secondaire ici. Un serveur se
+dimensionne pour une population : celle-ci est connue, petite, et stable — le
+nombre d'associations clientes n'y change rien. Ce qui reste à corriger est du
+code.
+
+---
+
+## 5. Réponse à la question posée
+
+**Le serveur tient 10 000 réservations par an en stockage. Il ne tient pas les
+écrans qui vont avec.** Le critère écrit de PERF-01 — liste paginée sous 500 ms
+à 10 000 lignes — n'est pas atteint (780 ms), trois écrans dépassent les six
+secondes pour un seul appelant, et `conflicts/` ne rend pas du tout. En prime,
+l'ouverture du tableau de bord par un seul utilisateur rend l'application
+indisponible pour tous les autres, et la dix-mille-unième réservation de l'année
+n'est pas enregistrable.
+
+Le nombre d'utilisateurs simultanés, lui, n'est pas le facteur limitant (§4).
+
+Les quatre causes sont identifiées, et aucune n'est un problème de
+dimensionnement.
+
+### 5.1 `list_current_conflicts` — une boucle imbriquée
+
+`conflicts.list_current_conflicts()` parcourt les 3 801 réservations
+bloquantes ; pour chacune, `detect_reservation_conflicts()` parcourt ses
+lignes ; pour chaque ligne, `compute_engagement_details()` est appelé **deux
+fois** (une fois directement, une fois via `compute_part_availability`), et
+chaque appel relit **toutes** les lignes de prestation et de réservation
+portant cet article, sans filtre de date en SQL — le chevauchement est ensuite
+vérifié en Python, ligne par ligne.
+
+Soit, à 10 000 réservations : environ 9 500 lignes à traiter — les 3 801
+réservations bloquantes à 2,5 lignes en moyenne — et chacune relit plusieurs
+centaines de lignes, les 25 041 lignes de la base se répartissant sur 40
+articles. Plusieurs millions d'objets construits en Python pour afficher un
+widget.
+
+*Correction :* une seule passe. Charger en une requête les lignes qui
+chevauchent la période — le filtre de date appartient au SQL, pas à la boucle
+— les regrouper par `(prestation, article)`, et comparer au stock. Le coût
+redevient proportionnel au volume.
+
+### 5.2 `DeliveryListView` — la seule liste non paginée
+
+Toutes les vues de liste du plugin portent une `pagination_class`, sauf
+`DeliveryListView` (`views.py:640`). Elle renvoie donc **toutes** les
+réservations validées ou livrées, avec sept jointures et trois préchargements.
+À 10 000 par an, cela fait plusieurs milliers de bons sérialisés à chaque
+appel, pour un écran qui en montre vingt.
+
+*Correction :* lui donner la pagination que ses voisines ont déjà.
+
+### 5.3 `StockAlertListView` — une requête par article
+
+`_projected_tension()` est appelée une fois par article louable, et chacune
+lance son propre `aggregate`. `get_part_total_stock()` en fait autant. Avec 50
+articles louables, cent requêtes là où deux suffiraient.
+
+*Correction :* une agrégation groupée par article, en une requête.
+
+### 5.4 La numérotation — quatre chiffres et un tri de chaînes
+
+*Correction :* trier sur la partie numérique plutôt que sur la chaîne, ou
+tenir un compteur par année. Élargir le format ne suffit pas : c'est le tri
+qui est faux, pas la largeur.
+
+---
+
+## 6. Rejouer la campagne
+
+```bash
+# en local
+tests/charge/paliers.sh
+
+# sur une instance distante, jeton obtenu dans Paramètres → Jetons d'API
+python tests/charge/bench.py --url https://exemple.tld --token inv-... --sequentiel
+python tests/charge/bench.py --url https://exemple.tld --token inv-... --concurrence 5 --duree 20
+```
+
+Sur une instance de production, la marche à suivre est celle qui a été
+appliquée ici : sauvegarde `pg_dump` d'abord, répétition de l'injection **et
+de la suppression** sur une cinquantaine de réservations avec vérification des
+compteurs, puis seulement la campagne, puis `seed_charge --total 0 --reset` et
+nouvelle vérification des compteurs.
