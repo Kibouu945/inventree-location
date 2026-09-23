@@ -10,6 +10,9 @@ lignes*.
 Ce document décrit l'outillage qui permet de vérifier cette annonce, le
 protocole suivi, et ce que la campagne a mesuré. Il est le livrable de PERF-01.
 
+Il porte **deux campagnes** : celle du 22/09 (§3), qui a établi le constat, et
+celle du 23/09 (§6), rejouée après correction des quatre causes.
+
 > Les chiffres de la section « Résultats » sont datés et rattachés à une
 > machine précise. Un test de charge sans son contexte matériel ne veut rien
 > dire : rejouer la campagne est une commande, il n'y a aucune raison de citer
@@ -307,7 +310,9 @@ n'est pas enregistrable.
 Le nombre d'utilisateurs simultanés, lui, n'est pas le facteur limitant (§4).
 
 Les quatre causes sont identifiées, et aucune n'est un problème de
-dimensionnement.
+dimensionnement. Elles ont depuis été corrigées : chacune porte ci-dessous la
+correction apportée, et le §6 donne la mesure d'après. Le constat de cette
+section reste celui du 22/09 — on ne réécrit pas une mesure datée.
 
 ### 5.1 `list_current_conflicts` — une boucle imbriquée
 
@@ -442,7 +447,93 @@ liraient le même maximum.
 
 ---
 
-## 6. Rejouer la campagne
+## 6. Après correction — campagne du 23/09/2026
+
+Les quatre causes de la section 5 ont été corrigées, puis le banc rejoué.
+
+> **Sur le poste de développement, pas sur la production.** Les chiffres de
+> cette section ne se comparent donc pas à ceux du §3.2, mesurés sur le VPS et
+> sur une machine quatre fois plus petite. Ils se comparent au **§3.3**, la
+> courbe locale, prise sur la même machine à un jour d'intervalle. Rejouer la
+> campagne sur la production demande d'y réinjecter dix mille réservations :
+> c'est une décision à prendre, pas un geste de vérification.
+
+### 6.1 Le coût, avant et après, sur la même machine
+
+p95 en millisecondes, un appelant, pour les quatre endpoints corrigés :
+
+| Endpoint | 500 | 2 000 | 5 000 | 10 000 |
+|---|---|---|---|---|
+| `conflicts/` **avant** | 2 879 | 22 278 | > 45 000 | *non atteint* |
+| `conflicts/` **après** | **268** | **374** | **1 225** | **2 789** |
+| `alerts/stock/` avant | 127 | 312 | 615 | *non atteint* |
+| `alerts/stock/` après | **32** | **30** | **38** | **45** |
+| `deliveries/` avant | 59 | 289 | 509 | *non atteint* |
+| `deliveries/` après | 69 | **151** | **61** | **54** |
+| `catalog/` avant | 308 | 535 | 806 | *non atteint* |
+| `catalog/` après | **225** | **192** | **208** | **521** |
+
+Le palier de 5 000 est le dernier que la campagne d'avant ait atteint, et
+encore : `conflicts/` y était un dépassement de la borne de 45 s, donc une
+borne inférieure. Le palier de 10 000 n'avait jamais pu être mesuré en local.
+
+`catalog/` n'était pas dans la liste des causes : il profite du regroupement
+fait pour les alertes, puisque `compute_stock_availability` lui est commun.
+
+### 6.2 Le coût suit-il encore le volume ?
+
+C'était la vraie question. Facteur entre le premier et le dernier palier, à
+volume multiplié par vingt (500 → 10 000) :
+
+| Endpoint | Facteur |
+|---|---|
+| `reservations/` (page profonde) | 12,7× |
+| `conflicts/` | 10,4× |
+| `reservations/` (recherche) | 6,4× |
+| `catalog/` | 2,3× |
+| `alerts/stock/` | 1,4× |
+| `deliveries/` | 0,8× |
+
+Vingt fois plus de données, dix fois plus de temps sur le pire endpoint : le
+coût croît désormais **moins vite que la base**. Avant, `conflicts/` prenait
+15,6× pour 10× de données — plus vite qu'elle. C'est ce renversement qui
+compte, davantage que les millisecondes : il dit que le volume n'est plus
+l'ennemi.
+
+`conflicts/` reste le plus lent des treize, à 2,4 s de p50 sur 10 000. Il
+répond, ce qui n'était pas le cas, mais il n'est pas *rapide* : le prochain
+gain serait de ne plus parcourir l'année entière pour un widget qui montre les
+conflits du moment.
+
+### 6.3 La capacité ne plafonne plus
+
+Dix mille réservations en base, scénario de lecture complet — `conflicts/`
+**compris**, là où il avait fallu l'écarter pour obtenir une mesure :
+
+| Appelants simultanés | Débit |
+|---|---|
+| 1 | 3,8 req/s |
+| 5 | 8,9 req/s |
+| 10 | **10,7 req/s** |
+
+Le débit monte avec le nombre d'appelants au lieu de décroître. La saturation
+décrite au §3.4 venait bien des écrans, pas de la machine.
+
+### 6.4 Ce qui échoue encore
+
+Onze appels sur 246 échouent à dix appelants, et tous pour la même raison :
+`400 — « Plus de 1000 réservations sur cette période : resserrez la fenêtre »`.
+
+C'est le second plafond dur du §3.7, et il n'est pas un problème de
+performance : à 10 000 réservations par an, une vue mensuelle en demande plus
+de mille. Aucune optimisation ne le lèvera, parce qu'afficher trois mille
+évènements dans un calendrier n'a pas de sens pour celui qui le lit. C'est un
+arbitrage produit — agréger par jour au-delà d'un seuil, ou restreindre la
+fenêtre — et il reste à prendre.
+
+---
+
+## 7. Rejouer la campagne
 
 ```bash
 # en local
