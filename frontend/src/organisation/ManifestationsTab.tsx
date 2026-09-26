@@ -158,8 +158,7 @@ export function ManifestationsTab({
   }));
 
   // Le formulaire, lui, ne propose que les clients en service — sauf celui que
-  // porte déjà la manifestation qu'on édite. C'est la règle annoncée par le
-  // back-office, et le serveur la refuse aussi.
+  // porte déjà la manifestation qu'on édite.
   const clientOptionsFormulaire = optionsActives(
     clients,
     (client) => client.nom,

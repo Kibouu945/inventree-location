@@ -83,12 +83,7 @@ def _nominatim_search(address, limit):
 
 
 def geocode_candidates(address, limit=5):
-    """Return up to ``limit`` geocoding candidates for an address.
-
-    Une recherche texte libre est souvent ambiguë (« Champs de Mars » matche
-    plusieurs lieux en France) : on renvoie donc plusieurs candidats pour que
-    l'utilisateur choisisse le bon plutôt que de deviner à sa place.
-    """
+    """Return up to ``limit`` geocoding candidates for an address."""
 
     if not address:
         return []
@@ -128,11 +123,7 @@ def geocode_address(address):
 
 
 def _round_coord(value):
-    """Round a coordinate to 6 decimal places (the DB column precision).
-
-    Nominatim renvoie souvent 7+ décimales, ce qui dépasse le
-    ``decimal_places=6`` du modèle ``Lieu`` et fait échouer la validation.
-    """
+    """Round a coordinate to 6 decimal places (the DB column precision)."""
 
     if value is None:
         return None
@@ -164,13 +155,7 @@ def _user_label(user):
 
 
 class LigneReservationSerializer(serializers.ModelSerializer):
-    """Sérialiseur d'une ligne de réservation.
-
-    Les quantités de retour ne sont plus stockées sur la ligne — sept colonnes
-    y disaient ce que le registre d'incidents dit déjà (cf. `retours.py` et la
-    migration `0021`). Elles restent exposées **sous les mêmes noms**, calculées
-    en une passe, pour que les écrans n'aient pas à changer.
-    """
+    """Sérialiseur d'une ligne de réservation."""
 
     quantite_ramassee = serializers.SerializerMethodField()
     quantite_sav = serializers.SerializerMethodField()
@@ -183,7 +168,6 @@ class LigneReservationSerializer(serializers.ModelSerializer):
 
     # Pour l'arborescence, qui affiche « Sono YAMAHA / Réf. 1516 ». Suppose la
     # Part préchargée (`prefetch_related("lignes__part")`), sinon une requête
-    # par ligne.
     part_name = serializers.CharField(source="part.name", read_only=True)
     part_noi = serializers.CharField(source="part.IPN", read_only=True)
 
@@ -247,18 +231,11 @@ class LigneReservationSerializer(serializers.ModelSerializer):
         ]
         # Le détail du retour n'appartient qu'aux écrans de retour (check-in
         # magasinier et saisie de ramassage) : il est calculé, donc en lecture
-        # seule par construction, et ne peut plus être remis à zéro par une
-        # réécriture des lignes de la réservation.
         read_only_fields = ["id"]
 
 
 def sync_ligne_etat_retour(ligne):
-    """Recalcule `etat_retour` d'une ligne (cf. `retours.py`).
-
-    Conservée comme point d'entrée des vues d'incidents ; la règle elle-même
-    vit dans `retours.appliquer_etat_retour`, partagée avec le check-in et la
-    saisie de ramassage.
-    """
+    """Recalcule `etat_retour` d'une ligne (cf. `retours.py`)."""
 
     appliquer_etat_retour(ligne)
 
@@ -268,7 +245,6 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
 
     # Déclaré explicitement : le `ChoiceField` implicite du ModelSerializer
     # rejette la valeur avant tout `validate_type`, dont le message français
-    # n'atteignait donc jamais le client.
     type = serializers.ChoiceField(
         choices=ReturnIncidentType.choices,
         error_messages={
@@ -318,19 +294,10 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
         ]
         # Le validateur d'unicité déduit de `incident_unique_par_ligne_et_type`
         # est écarté au profit de `_refuser_le_doublon` : il passe avant
-        # `validate()` et son message anglais ne nomme pas l'enregistrement
-        # fautif. La contrainte reste le filet en base.
         validators = []
 
     def validate(self, attrs):
-        """Seul le manquant est plafonné par la quantité sortie.
-
-        Le cassé et le détruit ne le sont pas : du matériel circule entre
-        lieux, et douze objets rendus cassés pour dix sortis est un constat
-        possible qu'il faut pouvoir enregistrer (R36). Le manquant, lui, ne
-        peut pas dépasser ce qui est parti — on ne perd pas ce qu'on n'a pas
-        livré. Règle arrêtée en recette le 11/09.
-        """
+        """Seul le manquant est plafonné par la quantité sortie."""
 
         line = attrs.get("line") or getattr(self.instance, "line", None)
 
@@ -355,13 +322,7 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
         return attrs
 
     def _refuser_le_doublon(self, line, attrs):
-        """Un seul incident par ligne et par nature.
-
-        Le registre porte un total par nature : le geste correct est d'ajuster
-        l'enregistrement existant, pas d'en créer un second. Le message le
-        nomme, là où le validateur automatique de DRF sort un
-        « must make a unique set » en anglais qui ne dit pas lequel.
-        """
+        """Un seul incident par ligne et par nature."""
 
         type_incident = attrs.get("type") or getattr(self.instance, "type", None)
         autres = line.incidents.filter(type=type_incident)
@@ -418,14 +379,7 @@ class ReturnIncidentSerializer(serializers.ModelSerializer):
 
 
 class ReturnIncidentHistorySerializer(ReturnIncidentSerializer):
-    """Incident enrichi du contexte réservation / manifestation (SCRUM-100).
-
-    Ces champs vivaient sur le sérialiseur partagé, ce qui coûtait cher :
-    `event_name` traverse `line.reservation.prestation.manifestation`, et seule
-    la vue historique avait le `select_related` correspondant. La liste et le
-    détail des incidents payaient deux requêtes de plus par incident pour des
-    champs qu'ils n'exposent pas.
-    """
+    """Incident enrichi du contexte réservation / manifestation (SCRUM-100)."""
 
     part_name = serializers.CharField(source="line.part.name", read_only=True)
     reservation_id = serializers.IntegerField(
@@ -507,15 +461,7 @@ class ReservationTransitionSerializer(serializers.Serializer):
 
 
 class CheckinLigneSerializer(serializers.Serializer):
-    """Une ligne de check-in retour (SCRUM-94) : OK / manquant / cassé + commentaire.
-
-    La validation de la somme (== quantité demandée) se fait au niveau de la
-    vue, une fois la ligne de réservation résolue par `id`.
-
-    `commentaire` n'a volontairement pas de valeur par défaut : absent du
-    payload, il reste absent de `validated_data`, et la vue laisse alors
-    intact le commentaire déjà saisi sur la ligne de réservation.
-    """
+    """Une ligne de check-in retour (SCRUM-94) : OK / manquant / cassé + commentaire."""
 
     id = serializers.IntegerField(required=True)
     ok = serializers.IntegerField(required=True, min_value=0)
@@ -597,23 +543,10 @@ class ReservationSerializer(serializers.ModelSerializer):
         return self._user_label(obj.validateur)
 
     def validate(self, attrs):
-        """Règles métier : permissives en brouillon, strictes au-delà.
-
-        Une réservation en statut `brouillon` peut être sauvegardée
-        incomplète. Dès qu'elle est soumise (ou plus), le demandeur, la
-        prestation, la période, au moins une ligne et au moins un article
-        virtuel (ex: prestation de nettoyage) deviennent obligatoires, la
-        période doit couvrir au minimum les dates de la prestation, et les
-        objets référencés doivent être actifs et louables.
-        """
+        """Règles métier : permissives en brouillon, strictes au-delà."""
 
         # Le bon est le cœur métier : le geste qui engage réellement du
-        # matériel. Un client ou un contact désactivé ne doit plus pouvoir en
-        # recevoir de nouveau, brouillon compris — contrairement aux autres
-        # règles de cette méthode, qui sont permissives en brouillon. Comme
-        # pour Manifestation et Prestation, seule la création est concernée :
-        # un bon déjà existant reste modifiable si son client/contact a été
-        # désactivé depuis.
+        # matériel.
         if self.instance is None:
             prestation_a_creer = attrs.get("prestation")
 
@@ -699,7 +632,6 @@ class ReservationSerializer(serializers.ModelSerializer):
 
             # Les trois règles portent sur la même clé : on les cumule au lieu
             # de les écraser, sinon un objet inactif remontait « il manque un
-            # article virtuel » — un message qui ne désigne pas le problème.
             lignes_errors = []
 
             if self._has_inactive_part(part_ids):
@@ -734,12 +666,7 @@ class ReservationSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def _has_inactive_part(part_ids) -> bool:
-        """Vrai si au moins une des Parts est désactivée côté InvenTree.
-
-        Le contrôle porte sur `Part.active` et non sur `RentableItem` : une
-        Part sans extension louable l'est par défaut, mais elle peut très bien
-        être désactivée — passer par `RentableItem` laissait filtrer ces Parts.
-        """
+        """Vrai si au moins une des Parts est désactivée côté InvenTree."""
 
         from part.models import Part
 
@@ -776,15 +703,7 @@ class ReservationSerializer(serializers.ModelSerializer):
         return reservation
 
     def _replace_lignes(self, reservation, lignes_data):
-        """Remplace l'intégralité des lignes de la réservation.
-
-        La suppression **cascade** sur le registre d'incidents et sur les
-        tickets SAV, y compris les tickets ouverts que le stock réel lit
-        encore. La vue refuse déjà l'édition au-delà de « soumise », mais
-        l'endpoint des incidents accepte n'importe quelle ligne quel que soit
-        le statut du bon : un brouillon peut donc porter un constat, et le
-        perdait sans un mot. D'où le refus explicite.
-        """
+        """Remplace l'intégralité des lignes de la réservation."""
 
         self._refuser_si_le_retour_est_constate(reservation)
 
@@ -824,13 +743,7 @@ class ReservationSerializer(serializers.ModelSerializer):
         })
 
     def _register_conflict_history(self, reservation):
-        """Journalise les conflits détectés, qu'ils bloquent ou non (SCRUM-110).
-
-        L'historique et le blocage sont deux choses distinctes : une demande
-        peut être enregistrée en conflit et arbitrée plus tard, mais le conflit
-        doit rester tracé. Les fonctions d'enregistrement existaient sans
-        qu'aucun appel ne les atteigne : l'historique restait vide.
-        """
+        """Journalise les conflits détectés, qu'ils bloquent ou non (SCRUM-110)."""
 
         if not reservation.date_retrait_prevue or not reservation.date_retour_prevue:
             return
@@ -1004,12 +917,7 @@ class BonRamassageSerializer(RamassageSerializer):
 
 
 class RentableItemSerializer(serializers.ModelSerializer):
-    """Drapeaux location d'un Part.
-
-    Le stock physique n'y figure pas : il appartient à InvenTree et se met à
-    jour par les `StockItem`, pas par ce formulaire. `stock_total` reste
-    exposé en lecture par `CatalogPartSerializer`, calculé depuis InvenTree.
-    """
+    """Drapeaux location d'un Part."""
 
     class Meta:
         """Configuration du serializer RentableItem."""
@@ -1061,12 +969,7 @@ class ExampleSerializer(serializers.Serializer):
 
 
 class RoundedDecimalField(serializers.DecimalField):
-    """DecimalField qui arrondit l'entrée au lieu de rejeter l'excès de décimales.
-
-    Les coordonnées GPS collées depuis une carte comportent souvent plus de
-    décimales que le ``decimal_places`` autorisé ; on quantifie plutôt que
-    de renvoyer une 400.
-    """
+    """DecimalField qui arrondit l'entrée au lieu de rejeter l'excès de décimales."""
 
     def validate_precision(self, value):
         """Round to the allowed decimal places before precision validation."""
@@ -1192,17 +1095,7 @@ class LieuSerializer(serializers.ModelSerializer):
 
 
 class DeliveryLigneSerializer(serializers.ModelSerializer):
-    """Une ligne de la tournée, avec ce qui a été déposé et ce qui reste.
-
-    `quantite_deposee` somme les passages de la table d'exécution, remplie
-    depuis le lot L7 : c'est le « livrée » de la maquette Livraison.
-    `quantite_restante` est la différence avec ce qui doit partir — calculée,
-    jamais stockée (R27), puisqu'un passage supplémentaire la changerait.
-
-    `quantite_livree` reste exposée : c'est la colonne du bon, qu'aucun endpoint
-    n'écrit (cf. `retours.py`) et que l'écran lit encore. Elle vaut 0 partout, et
-    disparaîtra du contrat quand la maquette aura basculé sur `quantite_deposee`.
-    """
+    """Une ligne de la tournée, avec ce qui a été déposé et ce qui reste."""
 
     part_name = serializers.CharField(source="part.name", read_only=True)
     is_virtual = serializers.SerializerMethodField()
@@ -1335,12 +1228,7 @@ class DeliverySerializer(serializers.ModelSerializer):
         return EtatLivraison(obj.etat_livraison).label
 
     def get_organisateur_nom(self, obj):
-        """Nom de l'interlocuteur à joindre sur place.
-
-        Les clés `organisateur_*` sont conservées : quatre écrans de livraison
-        les consomment. Seule la source change — le contact référent de la
-        manifestation, à défaut le client lui-même.
-        """
+        """Nom de l'interlocuteur à joindre sur place."""
 
         return _libelle_interlocuteur(obj.prestation.manifestation)
 
@@ -1356,12 +1244,7 @@ class DeliverySerializer(serializers.ModelSerializer):
         return manifestation.client.telephone
 
     def get_quantite_totale(self, obj):
-        """Somme des quantités demandées sur les seules lignes physiques.
-
-        Un article virtuel — nettoyage, montage — ne se charge pas dans le
-        camion : le compter donnait au livreur un total supérieur au nombre
-        d'objets à embarquer, et différent de celui du bon de ramassage.
-        """
+        """Somme des quantités demandées sur les seules lignes physiques."""
 
         return sum(ligne.quantite_demandee for ligne in lignes_a_ramasser(obj))
 
@@ -1401,13 +1284,7 @@ class CatalogPartSerializer(serializers.Serializer):
             return None
 
     def get_stock_available(self, obj):
-        """Disponibilité **sur la période demandée**, annotée par la vue.
-
-        À ne pas confondre avec `stock_reel_disponible` (SCRUM-112) : ici on
-        répond « combien puis-je réserver du 12 au 14 mars », là-bas « combien
-        reste-t-il en état de servir, hors SAV et casse ». Les deux chiffres
-        diffèrent légitimement et portaient le même nom.
-        """
+        """Disponibilité **sur la période demandée**, annotée par la vue."""
 
         for attr in ["stock_available", "available_stock"]:
             value = getattr(obj, attr, None)
@@ -1426,15 +1303,7 @@ class CatalogPartSerializer(serializers.Serializer):
         return get_real_available_stock(obj.id)
 
     def get_image_url(self, obj):
-        """URL de l'image principale si le modèle en expose une.
-
-        `Part.image` est un champ fichier : son `str()` donne le **nom**
-        (« part_images/tente.png »), pas une URL. Le front le posait tel quel
-        dans un `<img src>`, résolu relativement à `/web/…`, donc en 404 : la
-        photo d'un objet n'était jamais visible. On passe par `.url`, qui
-        préfixe avec MEDIA_URL, et on ne retombe sur `str()` que pour les
-        attributs déjà textuels (`thumbnail` d'InvenTree, par exemple).
-        """
+        """URL de l'image principale si le modèle en expose une."""
 
         for attr in ["image", "image_url", "thumbnail", "thumbnail_url"]:
             value = getattr(obj, attr, None)
@@ -1449,12 +1318,7 @@ class CatalogPartSerializer(serializers.Serializer):
         return None
 
     def get_rentable(self, obj):
-        """Drapeau louable issu de RentableItem.
-
-        Une Part désactivée côté InvenTree n'est jamais louable, quels que
-        soient ses drapeaux plugin (SCRUM-111 : « Désactiver » dans le
-        back-office doit sortir l'objet du catalogue louable).
-        """
+        """Drapeau louable issu de RentableItem."""
 
         if not bool(getattr(obj, "active", True)):
             return False
@@ -1540,12 +1404,7 @@ STATUTS_DEJA_SORTIS = (
 
 
 def _volume_des_bons(reservations):
-    """Volume engagé d'un lot de bons, annulés exclus.
-
-    Repli du sérialiseur quand la vue n'a pas annoté : il sert au détail d'une
-    prestation ou d'une manifestation, jamais à une liste, où il ferait une
-    requête par ligne.
-    """
+    """Volume engagé d'un lot de bons, annulés exclus."""
 
     return sum(
         ligne.quantite_demandee
@@ -1556,11 +1415,7 @@ def _volume_des_bons(reservations):
 
 
 def _etat_des_bons(reservations):
-    """Avancement des livraisons d'un lot de bons : sortis sur engagés.
-
-    Trois nombres plutôt qu'un pourcentage : le planning affiche « 2/5 », et un
-    pourcentage se recalcule côté écran si besoin, l'inverse non.
-    """
+    """Avancement des livraisons d'un lot de bons : sortis sur engagés."""
 
     engages = [bon for bon in reservations if bon.statut not in STATUTS_SANS_ENGAGEMENT]
     livres = sum(1 for bon in engages if bon.statut in STATUTS_DEJA_SORTIS)
@@ -1687,12 +1542,7 @@ class LignePrestationSerializer(serializers.ModelSerializer):
 
 
 class PrestationSerializer(serializers.ModelSerializer):
-    """CRUD d'une prestation : manifestation, lieu unique et liste d'articles.
-
-    Une prestation se déroule sur un seul lieu (ORG-02) et porte sa propre liste
-    de matériel + quantités (RES-09). Les lignes sont imbriquées et remplacées
-    intégralement à chaque écriture, comme pour les réservations.
-    """
+    """CRUD d'une prestation : manifestation, lieu unique et liste d'articles."""
 
     manifestation_nom = serializers.CharField(
         source="manifestation.nom",
@@ -1738,14 +1588,7 @@ class PrestationSerializer(serializers.ModelSerializer):
         ]
 
     def get_quantite_totale(self, obj):
-        """Volume d'objets engagés sur cette prestation, annulés exclus.
-
-        Même mesure que `ManifestationSerializer.quantite_totale`, un cran plus
-        bas : les prestations d'une manifestation totalisent donc exactement sa
-        barre de planning. Prendre ici les lignes de prestation — le
-        prévisionnel — donnerait un autre nombre, et deux mailles qui ne
-        s'additionnent pas.
-        """
+        """Volume d'objets engagés sur cette prestation, annulés exclus."""
 
         annotee = getattr(obj, "volume_engage", None)
 
@@ -1775,9 +1618,6 @@ class PrestationSerializer(serializers.ModelSerializer):
 
         # Nouvelle prestation seulement sur une manif pas encore démarrée, et
         # dont le client (et le contact référent, s'il y en a un) sont encore
-        # actifs. Une manifestation déjà « planifiée » avant la désactivation
-        # de son client reste, elle, pleinement gérable : seule la création
-        # d'un nouvel engagement est refusée.
         if self.instance is None and manifestation:
             if not manifestation.accepte_nouvelles_prestations:
                 errors["manifestation"] = (
@@ -1825,9 +1665,8 @@ class PrestationSerializer(serializers.ModelSerializer):
                 f"(jusqu'au {timezone.localdate(manifestation.date_fin):%d/%m/%Y})."
             )
 
-        # Le lieu reste nullable en base pour autoriser les brouillons, mais une
-        # prestation sans lieu est invisible des tournées : on ne la laisse pas
-        # quitter le brouillon. Avant, un POST sans lieu passait en silence.
+        # Le lieu reste nullable en base pour autoriser les brouillons, mais
+        # une prestation sans lieu est invisible des tournées : on ne la laisse
         statut = effective("statut")
 
         if statut and statut != StatutPrestation.BROUILLON and not effective("lieu"):
@@ -1879,37 +1718,7 @@ class PrestationSerializer(serializers.ModelSerializer):
         ])
 
     def _signaler_penurie(self, prestation):
-        """Journalise une pénurie de stock sans refuser l'enregistrement.
-
-        Ce contrôle levait une `ValidationError` dans la transaction de
-        `create` / `update`, ce qui annulait la sauvegarde. En recette
-        (07/09/2026, remarque 6), le client s'est retrouvé dans une impasse :
-        « un article dépasse le stock disponible, le système bloque alors la
-        réservation et seul annuler est possible. Il ne faut pas bloquer mais
-        alerter. (Voir les Epic E & F) ». Sa prestation était perdue, donc
-        aucune réservation, donc aucune livraison ni ramassage — le cycle
-        complet n'a jamais pu être déroulé.
-
-        Il a raison sur le fond, et le CDC V06 va dans son sens : l'US 3
-        demande « une alerte immédiate dans une table avec tag de couleur », un
-        « message expliquant : disponibles / réservés / manquants » et une
-        « proposition d'alternative », et l'épic F attend des alertes de seuil
-        sur le tableau de bord. Nulle part un refus d'écriture. C'est notre
-        backlog (STK-01, CON-04) qui avait durci la règle en blocage sec.
-
-        Une prestation porte le *prévisionnel* : dire « il me faudra 6 tables »
-        avant de savoir comment les trouver est un usage normal, et le
-        prévisionnel est précisément ce qui permet d'anticiper la tension. Le
-        garde-fou reste là où il protège quelque chose de réel : le passage
-        d'une réservation en statut « validée » refuse toujours une pénurie non
-        forcée (`ReservationSerializer._validate_stock_conflicts_if_needed`).
-
-        La pénurie n'est pas inscrite au registre des conflits ici :
-        `ConflictHistory.reservation` n'est pas nullable, une pénurie purement
-        prévisionnelle n'a donc pas d'entrée à porter. Elle remonte par
-        `PrestationStockPreviewView` (que le formulaire interroge en direct) et
-        entrera au registre dès qu'une réservation la matérialisera.
-        """
+        """Journalise une pénurie de stock sans refuser l'enregistrement."""
 
         result = compute_prestation_stock(prestation)
 
@@ -1930,14 +1739,7 @@ class PrestationSerializer(serializers.ModelSerializer):
 
 
 class ManifestationSerializer(serializers.ModelSerializer):
-    """CRUD d'une manifestation (événement).
-
-    Le planning (maquette du CDC) affiche au survol d'une barre le nom du
-    client, son interlocuteur, le volume d'objets engagés et l'avancement des
-    livraisons. Ces quatre informations sont lues, jamais écrites, et calculées
-    par la vue : les agréger ici, manifestation par manifestation, ferait une
-    requête par ligne de planning.
-    """
+    """CRUD d'une manifestation (événement)."""
 
     organisateur_nom = serializers.SerializerMethodField()
     client_nom = serializers.CharField(source="client.nom", read_only=True)
@@ -1989,21 +1791,12 @@ class ManifestationSerializer(serializers.ModelSerializer):
         ]
 
     def get_organisateur_nom(self, obj):
-        """Interlocuteur de la manifestation.
-
-        Clé conservée pour ne pas casser les écrans qui la lisent ; la source
-        est le contact référent, à défaut le client.
-        """
+        """Interlocuteur de la manifestation."""
 
         return _libelle_interlocuteur(obj)
 
     def get_prestations_count(self, obj):
-        """Nombre de prestations.
-
-        Lu depuis l'annotation de la vue : `source="prestations.count"`
-        déclenchait un `SELECT COUNT` par manifestation, soit dix requêtes pour
-        dix barres de planning.
-        """
+        """Nombre de prestations."""
 
         annotee = getattr(obj, "prestations_total", None)
 
@@ -2017,12 +1810,7 @@ class ManifestationSerializer(serializers.ModelSerializer):
         return contact.telephone if contact is not None else ""
 
     def get_quantite_totale(self, obj):
-        """Volume d'objets engagés, annulés exclus.
-
-        Lue depuis l'annotation posée par la vue quand elle existe. Le repli
-        calcule ligne à ligne : il sert au détail d'une manifestation, pas à la
-        liste, où il ferait une requête par ligne.
-        """
+        """Volume d'objets engagés, annulés exclus."""
 
         annotee = getattr(obj, "volume_engage", None)
 
@@ -2048,17 +1836,7 @@ class ManifestationSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
-        """Dates cohérentes, et interlocuteurs encore en service.
-
-        La désactivation d'un client ou d'un contact n'est pas une suppression :
-        l'existant reste consultable et modifiable — sinon une manifestation
-        passée deviendrait inéditable le jour où son interlocuteur quitte
-        l'association. Ce qui est refusé, c'est de **rattacher** une
-        manifestation à quelqu'un qui n'est plus en service.
-
-        D'où la comparaison à l'instance : on ne refuse que le changement, pas
-        la conservation.
-        """
+        """Dates cohérentes, et interlocuteurs encore en service."""
 
         def effective(field):
             if field in attrs:
@@ -2124,8 +1902,7 @@ class ManifestationSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def _cancel_related_reservations(manifestation):
-        """Annule les réservations pré-livraison ; les livrées/retournées
-        (matériel sorti) sont laissées au circuit retour."""
+        """Annule les réservations pré-livraison ; les livrées/retournées"""
 
         cancellables = Reservation.objects.filter(
             prestation__manifestation=manifestation,

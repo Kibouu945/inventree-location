@@ -249,12 +249,7 @@ class TestComputePartsAvailability:
 
 @pytest.mark.django_db
 class TestEngagedQuantities:
-    """Répartition d'un même article entre prévisionnel et réservations.
-
-    Le prévisionnel (`LignePrestation`) et le réalisé (`LigneReservation`)
-    décrivent le même besoin : on retient le plus grand des deux par
-    prestation, sans double comptage ni engagement invisible.
-    """
+    """Répartition d'un même article entre prévisionnel et réservations."""
 
     def _period(self, base, hours=2):
         return base["now"], base["now"] + timedelta(hours=hours)

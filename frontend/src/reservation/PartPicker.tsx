@@ -63,15 +63,9 @@ export function PartPicker({
             search: debouncedSearch || undefined,
             // Un article non louable n'a rien à faire dans une réservation :
             // `rentable: 'all'` laissait passer le « Banc de brasserie souple,
-            // 220 cm », pourtant marqué NON LOUABLE (recette Tassin du
-            // 07/09/2026, remarque 5). Le sélecteur d'article virtuel garde
-            // « tout » : « louable » ne veut rien dire pour un service, et
-            // filtrer là risquerait de masquer l'article virtuel obligatoire.
             rentable: virtualOnly ? 'all' : 'true',
             // Les deux sélecteurs sont disjoints : « Matériel » ne doit pas
             // proposer les articles virtuels (services sans stock physique),
-            // sinon ils échappent au garde-fou de quantité. Omettre le
-            // paramètre ne filtrait rien et les faisait apparaître ici.
             virtual: virtualOnly ? 'true' : 'false',
             date_debut: dateDebut || undefined,
             date_fin: dateFin || undefined,
@@ -87,12 +81,8 @@ export function PartPicker({
 
   const results = query.data?.results ?? [];
 
-  // L'article retenu ne peut pas être dérivé des seuls résultats de recherche :
-  // Mantine recopie le label de l'option dans `searchValue`, et ce label
-  // ("Nom — N disponible(s)") ne correspond à aucun résultat côté serveur, qui
-  // ne cherche que sur le nom. Sans ce repli, le sélecteur se vidait dès la
-  // sélection et « Ajouter » restait grisé. On préfère malgré tout la version
-  // fraîche quand la recherche la ramène, pour une dispo à jour.
+  // L'article retenu ne peut pas être dérivé des seuls résultats de recherche
+  // : Mantine recopie le label de l'option dans `searchValue`, et ce label
   const selectedPart =
     results.find((part) => String(part.id) === selectedId) ??
     (pickedPart && String(pickedPart.id) === selectedId
@@ -128,12 +118,6 @@ export function PartPicker({
   }, []);
 
   // Dépassement du stock disponible : on le dit, on ne l'interdit pas.
-  //
-  // « Il ne faut pas bloquer mais alerter » (recette Tassin du 07/09/2026,
-  // remarque 6, qui renvoie aux épics E et F du CDC). Griser « Ajouter »
-  // laissait l'utilisateur sans issue : il ne pouvait ni saisir sa ligne, ni
-  // arbitrer. La pénurie remonte au bandeau du formulaire et au registre des
-  // conflits ; le refus ferme ne subsiste qu'au passage en statut « validée ».
   const exceedsAvailable =
     !!selectedPart &&
     !selectedPart.is_virtual &&

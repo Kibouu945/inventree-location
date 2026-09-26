@@ -1,10 +1,4 @@
-"""PDF generation for return reports using WeasyPrint.
-
-WeasyPrint est importé à l'appel, pas au chargement du module : il tire des
-bibliothèques natives (pango, cairo) absentes de l'image et de l'environnement
-de test. Importé en tête, il rendait `views.py` — donc le plugin entier et
-toute la suite de tests — non importable.
-"""
+"""PDF generation for return reports using WeasyPrint."""
 
 from __future__ import annotations
 

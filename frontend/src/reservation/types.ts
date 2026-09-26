@@ -25,11 +25,7 @@ export interface ManifestationOption {
   nom: string;
 }
 
-/** Ligne prévisionnelle d'une prestation (`LignePrestationSerializer`).
- *
- * C'est le prévisionnel : ce dont la prestation a besoin. La réservation porte
- * ensuite son propre réalisé (`LigneReservation`), d'où deux modèles distincts
- * — mais ce n'est pas une raison pour faire ressaisir la liste. */
+/** C'est le prévisionnel : ce dont la prestation a besoin. */
 export interface LignePrestationSummary {
   id: number;
   part: number;
@@ -50,7 +46,6 @@ export interface Prestation {
   lieu_detail: LieuSummary | null;
   // RES-09 : le prévisionnel saisi sur la prestation. `GET /prestations/{id}/`
   // le renvoyait déjà, le type l'ignorait — le formulaire de réservation
-  // repartait donc d'une liste vide. Recette Tassin du 07/09/2026, remarque 15.
   lignes?: LignePrestationSummary[];
 }
 

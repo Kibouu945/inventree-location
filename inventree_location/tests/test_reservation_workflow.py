@@ -1,9 +1,4 @@
-"""Tests du workflow de statut des réservations (SCRUM-74).
-
-Deux couches :
-- le service `workflow_service` (règles de transition, journal, validateur) ;
-- l'endpoint `reservations/<pk>/transition/` (GET transitions dispo, PATCH).
-"""
+"""Tests du workflow de statut des réservations (SCRUM-74)."""
 
 from __future__ import annotations
 

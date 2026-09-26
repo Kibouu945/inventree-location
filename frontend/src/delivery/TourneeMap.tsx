@@ -1,13 +1,10 @@
 // Carte de la tournée (LIV-04) : un marqueur numéroté par arrêt dans l'ordre
-// de passage, relié par le tracé du parcours. Tuiles OpenStreetMap, cohérent
-// avec le géocodage Nominatim déjà utilisé côté backend.
+// de passage, relié par le tracé du parcours.
 
 import { Stack, Text } from '@mantine/core';
 import L from 'leaflet';
 // La feuille de style est injectée à la main (voir `useFeuilleLeaflet`) : le
 // bundle du plugin est chargé en module par InvenTree, qui n'insère aucun
-// `<link>` vers le CSS émis à côté. Importée normalement, elle n'arrivait
-// jamais dans la page et la carte s'affichait en tuiles empilées.
 import leafletCss from 'leaflet/dist/leaflet.css?inline';
 import { useEffect, useMemo } from 'react';
 import {
@@ -45,14 +42,7 @@ const COULEURS: Record<StopKind, string> = {
   ramassage: '#9c36b5'
 };
 
-/**
- * Marqueur portant son numéro d'ordre.
- *
- * Tous les marqueurs sont des `divIcon` : le correctif classique sur les
- * icônes PNG par défaut de Leaflet (URLs cassées une fois bundlées par Vite)
- * n'a donc plus lieu d'être ici — il redeviendrait nécessaire le jour où un
- * `Marker` sans `icon` serait ajouté.
- */
+/** Marqueur portant son numéro d'ordre. */
 function iconeNumerotee(rang: number, kind: StopKind): L.DivIcon {
   return L.divIcon({
     className: '',
@@ -68,9 +58,8 @@ function AjusterVue({ stops }: { stops: TourneeStop[] }) {
   const map = useMap();
 
   useEffect(() => {
-    // Le widget dashboard fixe la largeur du conteneur *après* l'initialisation
-    // de la carte : sans `invalidateSize`, Leaflet garde la taille du premier
-    // rendu et pose les tuiles en décalé, sur une carte à moitié grise.
+    // Le widget dashboard fixe la largeur du conteneur *après*
+    // l'initialisation de la carte : sans `invalidateSize`, Leaflet garde la
     const observer = new ResizeObserver(() => map.invalidateSize());
     observer.observe(map.getContainer());
 

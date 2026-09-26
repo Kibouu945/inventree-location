@@ -1,9 +1,4 @@
 // Déclaration du retour d'une prestation (SCRUM-95) : qty rendue par ligne.
-//
-// Adaptation d'architecture : le plugin ne dispose pas de routeur client
-// (pages rendues par InvenTree via des dashboard items), la vue ligne par
-// ligne du bon de réservation est donc portée par une modale ouverte depuis
-// la liste des réservations plutôt qu'une route dédiée.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   Alert,
@@ -69,9 +64,7 @@ function toFormLignes(lignes: RetourLigneApi[]): RetourLigneValues[] {
   }));
 }
 
-/**
- * Formulaire de déclaration du retour d'une prestation, ligne par ligne.
- */
+/** Formulaire de déclaration du retour d'une prestation, ligne par ligne. */
 export function RetourForm({
   context,
   reservationId,
@@ -85,8 +78,7 @@ export function RetourForm({
   const [errors, setErrors] = useState<RetourErrors>({});
   const [partNames, setPartNames] = useState<Record<number, string>>({});
   // Le formulaire n'est initialisé qu'une fois par réservation : un refetch
-  // (retour de focus sur l'onglet, invalidation) ne doit pas écraser la
-  // saisie en cours du magasinier.
+  // (retour de focus sur l'onglet, invalidation) ne doit pas écraser la saisie
   const seededFor = useRef<number | null>(null);
 
   const query = useQuery<RetourResponse>(

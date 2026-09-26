@@ -1,22 +1,4 @@
-"""Modèles Django du plugin InvenTreeLocation (zone MVP, schéma DB-01 v2).
-
-Le catalogue matériel (`Part`, `PartCategory`) et l'historique stock
-(`StockItemTracking`) sont fournis nativement par InvenTree — on ne les
-recrée pas ici. Le plugin se limite à 8 tables propres :
-
-1. Client — Personne morale ou particulier, et ses Contact
-2. Profile — Extension OneToOne du User Django
-3. RentableItem — Extension OneToOne de `part.Part` (drapeau louable + champs
-   location) ; le stock physique reste celui d'InvenTree (`StockItem`)
-4. Manifestation — Événement (camp, formation, week-end)
-5. Prestation — Sous-événement / besoin matériel d'une Manifestation
-6. Lieu — Localisation physique rattachée à une Prestation
-7. Reservation — Demande de location liée à une Prestation
-8. LigneReservation — Détail (Part native × quantité) d'une Reservation
-9. ConflictHistory — Journal des conflits (stock / lieu)
-
-S'y ajoutent, avec le SAV et les ramassages, les tables du domaine retour.
-"""
+"""Modèles Django du plugin InvenTreeLocation (zone MVP, schéma DB-01 v2)."""
 
 from decimal import Decimal
 
@@ -45,12 +27,7 @@ class TypeClient(models.TextChoices):
 
 
 class StatutPrestation(models.TextChoices):
-    """Avancement d'une prestation.
-
-    Les articles ne sont modifiables qu'en `brouillon` et `planifiee` : un devis
-    accepté fait passer la prestation en `confirmee` et toute modification
-    ultérieure devient une ligne « hors devis » (cf. `EtatLigne`).
-    """
+    """Avancement d'une prestation."""
 
     BROUILLON = "brouillon", _("Brouillon")
     PLANIFIEE = "planifiee", _("Planifiée")
@@ -78,14 +55,7 @@ class StatutReservation(models.TextChoices):
 
 
 class EtatLivraison(models.TextChoices):
-    """Avancement d'une livraison prise en charge par un livreur (US-18/US-19).
-
-    Orthogonal au statut de la réservation : une réservation validée reste
-    « à livrer » tant que personne ne l'a prise, et la chaîne complète est
-    assignée → en cours → livrée (ou problème signalé). La valeur vide, qui
-    n'est pas un choix, dit « personne ne s'en occupe » : c'est l'état du pool
-    commun où tout livreur peut se servir.
-    """
+    """Avancement d'une livraison prise en charge par un livreur (US-18/US-19)."""
 
     ASSIGNEE = "assignee", _("Assignée")
     EN_COURS = "en_cours", _("En cours de livraison")
@@ -107,22 +77,7 @@ class StatutSavTicket(models.TextChoices):
 
 
 class EtatRetour(models.TextChoices):
-    """Vocabulaire unique de `LigneReservation.etat_retour`.
-
-    Trois fonctionnalités écrivaient cette colonne avec chacune ses valeurs —
-    `casse` pour le journal d'incidents et le check-in, `sav` / `detruit` /
-    `mixte` pour la saisie de ramassage. Un même retour s'affichait donc
-    différemment selon l'écran qui l'avait saisi. La nuance « au SAV » ou
-    « détruit » vit désormais dans les incidents et les tickets SAV, pas ici.
-
-    Quand plusieurs natures coexistent sur une ligne, **la plus grave
-    l'emporte** : c'est la règle de la PR #45, nommée par ses tests
-    (« casse prime sur manquant »). Le `mixte` de la PR #40 la contredisait
-    sans la remplacer — il disait qu'il s'était passé plusieurs choses sans dire
-    lesquelles, et le détail est de toute façon dans les incidents.
-
-    La valeur vide reste distincte : « pas encore pointé » n'est pas « OK ».
-    """
+    """Vocabulaire unique de `LigneReservation.etat_retour`."""
 
     OK = "ok", _("Rendu conforme")
     MANQUANT = "manquant", _("Manquant")
@@ -150,13 +105,7 @@ TAUX_TVA_CHOICES = [
 
 
 class EtatLigne(models.TextChoices):
-    """État d'une ligne de bon vis-à-vis du devis accepté (CDC §45).
-
-    Un devis signé ne verrouille pas le bon : une ligne ajoutée après coup est
-    « hors devis », une retirée est « annulée ». Ce couple rend la facture
-    calculable, et `ANNULEE` est la seule dispense à « livrer le bon en
-    entier ».
-    """
+    """État d'une ligne de bon vis-à-vis du devis accepté (CDC §45)."""
 
     NORMALE = "normale", _("Au devis")
     HORS_DEVIS = "hors_devis", _("Hors devis")
@@ -197,17 +146,7 @@ class TimestampedModel(models.Model):
 
 
 class Client(TimestampedModel):
-    """Personne morale ou particulier qui loue du matériel.
-
-    Anciennement `Groupe`, dont le docstring disait lui-même « organisation
-    propriétaire, mono-tenant » : c'était le tenant, pas le client. Le point du
-    09/09/2026 a tranché — un client est une personne morale, et chaque
-    interlocuteur est un `Contact`.
-
-    `email` est unique mais **nullable** : les clients repris n'en avaient pas,
-    et inventer une adresse mettrait de la fausse donnée en base. NULL ne
-    collisionne pas dans un index unique.
-    """
+    """Personne morale ou particulier qui loue du matériel."""
 
     nom = models.CharField(max_length=120, unique=True, verbose_name=_("nom"))
     adresse = models.TextField(blank=True, default="", verbose_name=_("adresse"))
@@ -252,12 +191,7 @@ class Client(TimestampedModel):
 
 
 class Contact(TimestampedModel):
-    """Personne physique rattachée à un client.
-
-    Sans compte : le client externe n'accède pas à la plateforme, c'est le
-    gestionnaire commercial qui le représente (09/09). `email` est unique
-    globalement et nullable, pour la même raison que sur `Client`.
-    """
+    """Personne physique rattachée à un client."""
 
     client = models.ForeignKey(
         Client,
@@ -333,9 +267,7 @@ class RentableItem(TimestampedModel):
     consommable = models.BooleanField(default=False, verbose_name=_("consommable"))
     is_virtual = models.BooleanField(default=False, verbose_name=_("article virtuel"))
     # Pas de champ « stock total » ici : le stock physique appartient à
-    # InvenTree (`StockItem`). Un compteur parallèle divergeait en silence dès
-    # qu'une casse, un achat ou un inventaire était saisi côté InvenTree.
-    # Cf. `conflicts.get_part_total_stock`.
+    # InvenTree (`StockItem`).
     caution = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -367,11 +299,7 @@ class RentableItem(TimestampedModel):
     )
     #: Coupe les alertes de seuil pour cet article, sans effacer les seuils
     #: eux-mêmes (CDC V06 : « seuil haut + seuil bas + booléen pour désactiver
-    #: les alertes »). Un article dont on connaît les seuils mais qu'on ne veut
-    #: pas voir remonter — surplus assumé, article en fin de vie.
-    # Tarification (CDC §46). Deux voies exclusives : grille propre
-    # (`PalierTarif`) ou table partagée (`TableRemise`). `prix_location_ht` est
-    # le prix de base, quand aucun palier ne mord.
+    # Tarification (CDC §46).
     prix_location_ht = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -430,9 +358,7 @@ class Manifestation(TimestampedModel):
         default=StatutManifestation.BROUILLON,
         verbose_name=_("statut"),
     )
-    # Couleur d'affichage choisie par le gestionnaire. Le calendrier des
-    # réservations garde ses couleurs par statut (`calendrier.STATUT_COULEURS`) :
-    # celle-ci est destinée au planning au niveau manifestation.
+    # Couleur d'affichage choisie par le gestionnaire.
     couleur = models.CharField(
         max_length=7,
         blank=True,
@@ -479,8 +405,7 @@ class Manifestation(TimestampedModel):
 
     @property
     def statut_effectif(self):
-        """Statut réel : brouillon/annulée explicites, en_cours/terminée dérivés
-        des dates dès qu'elle est planifiée."""
+        """Statut réel : brouillon/annulée explicites, en_cours/terminée dérivés"""
 
         if self.statut in (
             StatutManifestation.BROUILLON,
@@ -515,7 +440,6 @@ class Prestation(TimestampedModel):
     )
     # ORG-02 : une prestation se déroule sur un seul lieu (géolocalisé), qu'un
     # même lieu peut porter pour plusieurs prestations (base de CON-06).
-    # Nullable pour autoriser les brouillons de prestation.
     lieu = models.ForeignKey(
         "Lieu",
         on_delete=models.PROTECT,
@@ -554,13 +478,7 @@ class Prestation(TimestampedModel):
 
 
 class Lieu(TimestampedModel):
-    """Site physique géolocalisé, réutilisable par plusieurs prestations.
-
-    Autonome (ORG-01/ORG-02) : le lieu porte adresse et coordonnées GPS et
-    n'appartient plus à une prestation. C'est la prestation qui référence son
-    lieu unique (``Prestation.lieu``), un même lieu pouvant servir à plusieurs
-    prestations — socle de la détection de conflit de lieu (CON-06).
-    """
+    """Site physique géolocalisé, réutilisable par plusieurs prestations."""
 
     nom = models.CharField(max_length=200, verbose_name=_("nom"))
     description = models.TextField(
@@ -596,12 +514,7 @@ class Lieu(TimestampedModel):
 
 
 class LignePrestation(TimestampedModel):
-    """Article (Part natif) et quantité nécessaires à une prestation (RES-09).
-
-    Chaque prestation porte sa propre liste de matériel + quantités. Ces lignes
-    alimentent le calcul de stock disponible au jour (STK-01) et la détection
-    des conflits de stock.
-    """
+    """Article (Part natif) et quantité nécessaires à une prestation (RES-09)."""
 
     prestation = models.ForeignKey(
         Prestation,
@@ -703,7 +616,6 @@ class Reservation(TimestampedModel):
     forced = models.BooleanField(default=False, verbose_name=_("forcée"))
     # US-18 : les livraisons validées forment un pool commun ; le premier
     # livreur qui accepte se l'attribue, et peut la relâcher tant qu'il ne l'a
-    # pas commencée.
     livreur_assigne = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -805,11 +717,7 @@ class LigneReservation(TimestampedModel):
         default=0, verbose_name=_("quantité livrée")
     )
     #: Ce qui est revenu physiquement, conforme ou non — seule quantité de
-    #: retour stockée ici. Trois fonctionnalités avaient ajouté sept colonnes
-    #: pour dire ce que le registre `ReturnIncident` dit déjà (combien manque,
-    #: combien est cassé, combien est détruit, et faut-il facturer) ; elles se
-    #: contredisaient dès que deux écrans pointaient la même ligne. Cf.
-    #: `retours.quantites_du_retour` et la migration `0021`.
+    #: retour stockée ici.
     quantite_retournee = models.PositiveIntegerField(
         default=0, verbose_name=_("quantité revenue")
     )
@@ -857,8 +765,7 @@ class ReturnIncidentType(models.TextChoices):
 
 class ReturnIncident(TimestampedModel):
     # Déclaré explicitement : cette table a été créée en `BigAutoField`
-    # (migration d'origine). Sans cette ligne, `makemigrations` propose de la
-    # rétrograder en `AutoField` à chaque passage.
+    # (migration d'origine).
     id = models.BigAutoField(primary_key=True)
 
     line = models.ForeignKey(
@@ -892,8 +799,6 @@ class ReturnIncident(TimestampedModel):
     )
     #: Décision commerciale prise au constat, indépendante du type : un objet
     #: manquant n'est pas toujours refacturé (geste commercial, usure normale),
-    #: et un objet cassé peut l'être. C'est ce drapeau, et non le type, qui
-    #: alimente le total « facturé » du rapport de pertes (SCRUM-96).
     bill_client = models.BooleanField(
         default=False,
         verbose_name=_("facturer au client"),
@@ -907,10 +812,6 @@ class ReturnIncident(TimestampedModel):
         constraints = [
             # Le registre porte un total par nature, pas une suite de
             # signalements : `projeter_incidents` suppose cette unicité depuis
-            # toujours (`filter(...).first()` puis écriture), et tous les
-            # agrégats du stock réel la supposent aussi. Un POST direct sur
-            # l'endpoint pouvait créer un second enregistrement que la
-            # projection ne voyait jamais — invisible, et double compté.
             models.UniqueConstraint(
                 fields=["line", "type"],
                 name="incident_unique_par_ligne_et_type",
@@ -973,16 +874,10 @@ class ReservationStatusLog(TimestampedModel):
 
 
 class LivraisonStatusLog(TimestampedModel):
-    """Journal des changements d'état d'une livraison (US-19).
-
-    Distinct de `ReservationStatusLog`, qui suit le statut métier de la
-    réservation : ici on trace le terrain — qui a pris la livraison, quand elle
-    est partie, et la photo du problème éventuel.
-    """
+    """Journal des changements d'état d'une livraison (US-19)."""
 
     # Déclaré explicitement : cette table a été créée en `BigAutoField`
-    # (migration d'origine). Sans cette ligne, `makemigrations` propose de la
-    # rétrograder en `AutoField` à chaque passage.
+    # (migration d'origine).
     id = models.BigAutoField(primary_key=True)
 
     reservation = models.ForeignKey(
@@ -1052,17 +947,10 @@ class LivraisonStatusLog(TimestampedModel):
 
 
 class SavTicket(TimestampedModel):
-    """Ticket SAV ou destruction lié à une ligne de réservation.
-
-    SCRUM-112 :
-    - un article endommagé sort du stock réellement disponible ;
-    - il peut être réintégré après réparation ;
-    - les destructions restent consultables par période.
-    """
+    """Ticket SAV ou destruction lié à une ligne de réservation."""
 
     # Déclaré explicitement : cette table a été créée en `BigAutoField`
-    # (migration d'origine). Sans cette ligne, `makemigrations` propose de la
-    # rétrograder en `AutoField` à chaque passage.
+    # (migration d'origine).
     id = models.BigAutoField(primary_key=True)
 
     ligne_reservation = models.ForeignKey(
@@ -1161,8 +1049,7 @@ class ConflictHistory(TimestampedModel):
     """Historique des conflits détectés (ouverts et résolus)."""
 
     # Déclaré explicitement : cette table a été créée en `BigAutoField`
-    # (migration d'origine). Sans cette ligne, `makemigrations` propose de la
-    # rétrograder en `AutoField` à chaque passage.
+    # (migration d'origine).
     id = models.BigAutoField(primary_key=True)
 
     conflict_type = models.CharField(
@@ -1260,12 +1147,7 @@ class ConflictHistory(TimestampedModel):
 
 
 class TableRemise(TimestampedModel):
-    """Grille de remises par quantité, partagée par plusieurs objets.
-
-    Seconde des deux voies de tarification du CDC §46 ; `PalierTarif` est la
-    première. Exclusives par objet — règle applicative, elle porte sur
-    l'existence de lignes liées.
-    """
+    """Grille de remises par quantité, partagée par plusieurs objets."""
 
     nom = models.CharField(max_length=120, unique=True, verbose_name=_("nom"))
     description = models.TextField(
@@ -1315,10 +1197,7 @@ class PalierRemise(models.Model):
 
 
 class PalierTarif(models.Model):
-    """Grille de prix propre à un objet : à partir de N, tel prix unitaire HT.
-
-    Le prix est **absolu**, pas une remise (exemple du CDC §46).
-    """
+    """Grille de prix propre à un objet : à partir de N, tel prix unitaire HT."""
 
     rentable_item = models.ForeignKey(
         RentableItem,
@@ -1355,11 +1234,7 @@ class PalierTarif(models.Model):
 
 
 class StatutDevis(models.TextChoices):
-    """Cycle de vie d'un devis.
-
-    Un devis accepté n'a **aucune transition sortante** : c'est une pièce
-    signée. La suite se joue sur les lignes des bons (`EtatLigne`).
-    """
+    """Cycle de vie d'un devis."""
 
     BROUILLON = "brouillon", _("Brouillon")
     EMIS = "emis", _("Émis")
@@ -1379,12 +1254,7 @@ class SupportAcceptation(models.TextChoices):
 
 
 class Devis(TimestampedModel):
-    """Devis rattaché à une **manifestation**, pas à une réservation.
-
-    N↔M vers les bons (CDC §45, §82), d'où le `ManyToMany`. Montants et
-    libellé du signataire **figés à l'émission** : un devis signé ne change pas
-    de total quand le tarif catalogue bouge.
-    """
+    """Devis rattaché à une **manifestation**, pas à une réservation."""
 
     manifestation = models.ForeignKey(
         Manifestation,
@@ -1431,9 +1301,7 @@ class Devis(TimestampedModel):
         default="",
         verbose_name=_("motif du refus"),
     )
-    # Contact du client **ou** client lui-même. Instantané : si le contact part,
-    # le devis doit toujours dire qui a signé. La FK `signataire_contact`
-    # arrivera avec le modèle `Contact`.
+    # Contact du client **ou** client lui-même.
     signataire_libelle = models.CharField(
         max_length=200,
         blank=True,
@@ -1474,11 +1342,7 @@ class Devis(TimestampedModel):
 
 
 class LigneDevis(TimestampedModel):
-    """Ligne d'un devis — **instantané figé**, pas une vue sur le catalogue.
-
-    Prix, TVA et remise recopiés à l'émission : un devis se réédite à
-    l'identique six mois plus tard.
-    """
+    """Ligne d'un devis — **instantané figé**, pas une vue sur le catalogue."""
 
     devis = models.ForeignKey(
         Devis,
@@ -1535,10 +1399,7 @@ class LigneDevis(TimestampedModel):
 
 
 class FactureReservation(TimestampedModel):
-    """Facture, rattachée à **un ou plusieurs** devis (CDC §88).
-
-    Tables et clés étrangères seulement : aucun écran, aucun calcul de montant.
-    """
+    """Facture, rattachée à **un ou plusieurs** devis (CDC §88)."""
 
     numero = models.CharField(
         max_length=30,
@@ -1584,12 +1445,7 @@ class FactureReservation(TimestampedModel):
 
 
 class ModificationBon(TimestampedModel):
-    """Journal des modifications d'objets d'un bon après acceptation d'un devis.
-
-    Le CDC §45 exige quatre informations : personne, message, canal,
-    horodatage. Rattaché au **bon** et non à la ligne : `_replace_lignes`
-    recrée les lignes à chaque édition et effacerait le journal.
-    """
+    """Journal des modifications d'objets d'un bon après acceptation d'un devis."""
 
     reservation = models.ForeignKey(
         Reservation,
@@ -1646,20 +1502,7 @@ class ModificationBon(TimestampedModel):
 
 
 class Livraison(TimestampedModel):
-    """Un passage de livraison sur un bon — le `DeliveryTask` du schéma client.
-
-    Rattachée au **bon**, pas au lieu : le lieu est un attribut du passage, pas
-    sa clé (R26). Un bon se livre en une ou plusieurs fois (R23), d'où la
-    séquence ; le regroupement par lieu et par journée que voit le livreur est
-    une vue, calculée à la lecture (R25, R30).
-
-    **Table alimentée, pas encore faisant foi.** Les colonnes du bon restent la
-    vérité. Depuis le lot L7, le journal de livraison (`livraison.py`) réaligne
-    cette table à chaque changement d'état, dans la même transaction ;
-    `projeter_execution` reste là pour rattraper l'existant et
-    `verifier_projection` pour prouver que les deux concordent. Le renversement
-    de la vérité — la saisie qui écrit ici d'abord — est post-soutenance.
-    """
+    """Un passage de livraison sur un bon — le `DeliveryTask` du schéma client."""
 
     id = models.BigAutoField(primary_key=True)
 
@@ -1717,12 +1560,7 @@ class Livraison(TimestampedModel):
 
 
 class LivraisonLigne(TimestampedModel):
-    """Ce qu'un passage a effectivement déposé, ligne par ligne.
-
-    `quantite_rest_a_livrer` ne vit pas ici : c'est un agrégat sur tous les
-    passages du bon, donc un calcul (R27) — la colonne serait la faute que la
-    migration 0021 a corrigée ailleurs.
-    """
+    """Ce qu'un passage a effectivement déposé, ligne par ligne."""
 
     id = models.BigAutoField(primary_key=True)
 
@@ -1759,18 +1597,7 @@ class LivraisonLigne(TimestampedModel):
 
 
 class Ramassage(TimestampedModel):
-    """Un passage de ramassage sur un bon — le `PickupTask` du schéma client.
-
-    Le livreur compose sa liste en choisissant des **lieux** (R29), mais la
-    maille de stockage reste le bon : c'est ce que dit le schéma du CDC, et
-    c'est ce qui permet à un bon d'être ramassé en plusieurs fois comme à un
-    passage de couvrir plusieurs prestations d'un même lieu (R31) — par
-    regroupement à la lecture, pas par une clé.
-
-    `ramassage_termine` porte le `FullPickup` du CDC : sans lui, ce qui reste
-    sur un lieu non terminé serait déclaré perdu alors qu'un autre passage
-    viendra (R35).
-    """
+    """Un passage de ramassage sur un bon — le `PickupTask` du schéma client."""
 
     id = models.BigAutoField(primary_key=True)
 
@@ -1829,15 +1656,7 @@ class Ramassage(TimestampedModel):
 
 
 class RamassageArticle(TimestampedModel):
-    """Les quatre compteurs d'un passage de ramassage, ligne par ligne.
-
-    Le vocabulaire est celui arrêté avec le client (R32) : récupéré réintègre le
-    stock, cassé part en réparation, détruit et manquant en sortent. « À
-    facturer » est une décision du livreur, indépendante du type (R37).
-
-    Aucun plafond en base : un surplus est légitime, des objets circulent entre
-    lieux (R36). On signale à la saisie, on ne refuse pas.
-    """
+    """Les quatre compteurs d'un passage de ramassage, ligne par ligne."""
 
     id = models.BigAutoField(primary_key=True)
 

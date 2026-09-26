@@ -1,21 +1,4 @@
-"""Back-office Parts pour SCRUM-111.
-
-Objectif :
-- créer / modifier une Part InvenTree depuis le front ;
-- créer / modifier son RentableItem ;
-- créer un stock initial via StockItem ;
-- exposer une API simple réservée aux admins.
-
-Le stock n'est **pas** un champ de ce formulaire : il appartient à InvenTree et
-se lit via `conflicts.get_part_total_stock`. Le seul levier offert ici est
-`stock_initial`, qui crée un `StockItem` — c'est-à-dire du vrai stock InvenTree,
-pas un compteur parallèle (cf. `0010_remove_rentableitem_stock_total`).
-
-Note importante :
-Sur certaines versions InvenTree, un save() sur Part peut déclencher une tâche
-interne Django-Q qui plante avec KeyError('func') si la queue a été corrompue.
-Pour l'édition, on utilise donc QuerySet.update() afin d'éviter ce déclenchement.
-"""
+"""Back-office Parts pour SCRUM-111."""
 
 from django.db import transaction
 from django.db.models import Q
@@ -49,11 +32,7 @@ def _model_has_field(model, field_name: str) -> bool:
 
 
 def _get_default_stock_location():
-    """Retourne l'emplacement de stock par défaut, ou None s'il n'y en a pas.
-
-    On ne crée pas d'emplacement fantôme : le rangement du matériel est une
-    décision d'exploitation, pas un effet de bord d'un formulaire.
-    """
+    """Retourne l'emplacement de stock par défaut, ou None s'il n'y en a pas."""
 
     try:
         from stock.models import StockLocation
@@ -64,11 +43,7 @@ def _get_default_stock_location():
 
 
 def _create_stock_item(part, quantity):
-    """Crée un StockItem initial pour la Part.
-
-    Un échec n'est pas silencieux : l'admin a saisi une quantité, il doit
-    savoir si elle est entrée en stock ou non.
-    """
+    """Crée un StockItem initial pour la Part."""
 
     if quantity is None:
         return None
@@ -107,14 +82,7 @@ def _create_stock_item(part, quantity):
 
 
 def part_image_url(part) -> str | None:
-    """URL de la photo de la Part, ou None si elle n'en a pas.
-
-    `Part.image` est un champ fichier : son `str()` donne le nom du fichier,
-    pas une URL exploitable dans un `<img src>` (cf. le même correctif dans
-    `serializers.CatalogPartSerializer.get_image_url`). InvenTree renvoie de
-    son côté une image de remplacement (`blank_image.png`) quand le champ est
-    vide : on préfère `None`, pour que le front décide quoi afficher.
-    """
+    """URL de la photo de la Part, ou None si elle n'en a pas."""
 
     image = getattr(part, "image", None)
 
@@ -233,11 +201,7 @@ class PartBackOfficeSerializer(serializers.Serializer):
         }
 
     def _effective(self, attrs, field, default=False):
-        """Valeur du champ après application du patch.
-
-        En PATCH partiel, un champ absent vaut celui de l'objet en base : le
-        lire à `False` faisait passer les règles métier à côté de l'état réel.
-        """
+        """Valeur du champ après application du patch."""
 
         if field in attrs:
             return attrs[field]
@@ -328,11 +292,7 @@ class PartBackOfficeSerializer(serializers.Serializer):
 
     @transaction.atomic
     def update(self, part, validated_data):
-        """Met à jour une Part + son RentableItem.
-
-        On évite volontairement part.save() afin de ne pas déclencher les tâches
-        internes InvenTree qui peuvent planter avec KeyError('func').
-        """
+        """Met à jour une Part + son RentableItem."""
 
         from part.models import Part
 
@@ -417,29 +377,13 @@ class PartBackOfficeDetailView(generics.RetrieveUpdateAPIView):
 
 
 class PartImageSerializer(serializers.Serializer):
-    """Photo déposée sur une Part.
-
-    `ImageField` valide qu'il s'agit bien d'une image (Pillow l'ouvre) : sans
-    ça, un fichier quelconque serait stocké puis casserait la génération des
-    vignettes du catalogue.
-    """
+    """Photo déposée sur une Part."""
 
     image = serializers.ImageField(required=True)
 
 
 class PartBackOfficeImageView(APIView):
-    """Dépose (POST) ou retire (DELETE) la photo d'une Part.
-
-    Endpoint distinct du formulaire, qui reste en JSON : mélanger un fichier
-    dans le corps imposerait du multipart à tous les champs, où un booléen
-    devient « true » et un entier nul une chaîne vide.
-
-    Le CDC V06 range la photo parmi les attributs d'un objet (« un objet porte
-    […] une URL, des photos, un poids unitaire »), et le chapitre « Exigences
-    déjà satisfaites par Inventree » la donne pour acquise côté natif — mais
-    l'écran de gestion des objets du plugin, qui remplace la fiche native, n'en
-    offrait aucun champ (retour client du 02/09/2026).
-    """
+    """Dépose (POST) ou retire (DELETE) la photo d'une Part."""
 
     permission_classes = [BackOfficePermission]
     parser_classes = [MultiPartParser, FormParser]
@@ -463,19 +407,13 @@ class PartBackOfficeImageView(APIView):
 
         # `part.save()` et non `QuerySet.update()` : les vignettes InvenTree
         # (thumbnail 128 px, preview 256 px) sont produites par le champ au
-        # moment du save. Un `update()` écrirait le chemin en base sans jamais
-        # générer la miniature attendue par le catalogue.
         part.save()
         part.refresh_from_db()
 
         return Response({"image_url": part_image_url(part)})
 
     def delete(self, request, pk):
-        """Retire la photo et supprime le fichier.
-
-        `delete_orphans` est à False sur le champ d'InvenTree : sans ce
-        `delete()` explicite, le fichier resterait sur le disque.
-        """
+        """Retire la photo et supprime le fichier."""
 
         part = self._part(pk)
 

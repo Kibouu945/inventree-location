@@ -1,14 +1,4 @@
-"""Tests du back-office Parts (SCRUM-111).
-
-Points sensibles couverts :
-- le stock exposé est celui d'InvenTree (`StockItem`), jamais un compteur
-  local : `RentableItem.stock_total` n'existe plus depuis la migration
-  `0010_remove_rentableitem_stock_total` ;
-- `stock_initial` crée un vrai `StockItem` ;
-- les règles métier (PACK / consommable / virtuel, seuils) tiennent aussi en
-  PATCH partiel, où les champs absents valent ceux de la base ;
-- accès réservé au rôle `admin`.
-"""
+"""Tests du back-office Parts (SCRUM-111)."""
 
 from __future__ import annotations
 
@@ -230,11 +220,7 @@ class TestEdition:
         assert RentableItem.objects.get(part=part).consommable is True
 
     def test_patch_partiel_conserve_letat_virtuel(self, factory, admin):
-        """Règle métier évaluée sur l'état réel, pas sur les seuls champs envoyés.
-
-        Une Part déjà virtuelle ne doit pas pouvoir devenir consommable au
-        prétexte que `virtual` n'est pas dans le PATCH.
-        """
+        """Règle métier évaluée sur l'état réel, pas sur les seuls champs envoyés."""
 
         part = Part.objects.create(name="Prestation", virtual=True)
         RentableItem.objects.create(part=part, is_virtual=True)

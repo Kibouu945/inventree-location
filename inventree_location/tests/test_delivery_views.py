@@ -218,11 +218,7 @@ class TestDeliveryListView:
     def test_date_to_couvre_la_journee_entiere(
         self, factory, gestionnaire, prestation, part
     ):
-        """Filtrer sur « le 2 juin » doit montrer la tournée de ce jour-là.
-
-        Une borne au jour est lue comme minuit : un retrait prévu à 8 h 30
-        tombait hors filtre, et l'écran tournée du jour restait vide.
-        """
+        """Filtrer sur « le 2 juin » doit montrer la tournée de ce jour-là."""
 
         du_jour = _make_reservation(
             prestation,
@@ -310,8 +306,7 @@ class TestDeliveryListView:
     def test_le_contact_referent_alimente_les_cles_organisateur(
         self, factory, gestionnaire, prestation, part
     ):
-        """Les clés `organisateur_*` sont conservées, leur source change : le
-        contact référent de la manifestation."""
+        """Les clés `organisateur_*` sont conservées, leur source change : le"""
 
         reservation = _make_reservation(
             prestation,
@@ -379,11 +374,7 @@ class TestDeliveryListView:
     def test_quantite_totale_ignore_les_articles_virtuels(
         self, factory, gestionnaire, prestation, part
     ):
-        """Un service ne se charge pas dans le camion.
-
-        Le compter donnait au livreur un total différent de celui du bon de
-        ramassage, qui filtre déjà le virtuel.
-        """
+        """Un service ne se charge pas dans le camion."""
 
         reservation = Reservation.objects.create(
             prestation=prestation,
@@ -435,11 +426,7 @@ LIVRER_URL = "/plugin/inventree-location/deliveries/{pk}/livrer/"
 
 
 class TestMarquerLivree:
-    """Passage « validée → livrée » depuis la tournée du livreur.
-
-    Sans cet endpoint, aucun écran ne franchissait cette étape : le check-in,
-    le retour et la clôture restaient inatteignables depuis l'application.
-    """
+    """Passage « validée → livrée » depuis la tournée du livreur."""
 
     @pytest.fixture
     def reservation_validee(self, db, prestation):
@@ -509,12 +496,7 @@ class TestMarquerLivree:
 
 
 class TestQuantitesDeLaTournee:
-    """Ce que la tournée dit d'une ligne : demandée, déposée, restante.
-
-    Les deux dernières viennent des tables d'exécution, remplies depuis le lot
-    L7 : avant, l'écran n'avait que `quantite_livree`, la colonne du bon qu'aucun
-    endpoint n'écrit — elle valait 0 même sur un bon livré la veille.
-    """
+    """Ce que la tournée dit d'une ligne : demandée, déposée, restante."""
 
     def _ligne(self, factory, user, reservation):
         request = factory.get("/plugin/inventree-location/deliveries/")
@@ -578,13 +560,7 @@ class TestQuantitesDeLaTournee:
     def test_le_cout_de_la_liste_ne_depend_pas_du_nombre_de_bons(
         self, factory, gestionnaire, prestation, part
     ):
-        """Deux mesures plutôt qu'un plafond : quatre bons, puis douze.
-
-        Le même nombre de requêtes des deux côtés, parce que tout est joint ou
-        préchargé. Les deux régressions que cette égalité attrape : la quantité
-        déposée sans `lignes__livraisons`, qui coûte une requête par ligne, et
-        le nom du demandeur sans sa jointure, qui en coûte une par bon.
-        """
+        """Deux mesures plutôt qu'un plafond : quatre bons, puis douze."""
 
         def mesure():
             request = factory.get("/plugin/inventree-location/deliveries/")

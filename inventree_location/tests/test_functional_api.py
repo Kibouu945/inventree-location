@@ -1,11 +1,4 @@
-"""Tests fonctionnels de bout en bout.
-
-Contrairement aux tests de vues (qui instancient les vues via
-APIRequestFactory), ceux-ci passent par le routeur d'URLs réel
-(`tests.functional_urls`) et par l'authentification par token, comme en
-production : URL -> TokenAuthentication -> permission de rôle -> vue ->
-serializer -> base SQLite.
-"""
+"""Tests fonctionnels de bout en bout."""
 
 from __future__ import annotations
 

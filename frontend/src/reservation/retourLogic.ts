@@ -1,9 +1,4 @@
-/**
- * Logique pure de la déclaration de retour d'une prestation (SCRUM-95).
- *
- * Calcule le statut de retour du bon (aucun / partiel / complet) à partir des
- * quantités demandées et rendues par ligne — réplique la règle serveur.
- */
+/** Logique pure de la déclaration de retour d'une prestation (SCRUM-95). */
 
 export interface RetourLigneValues {
   id: number;
@@ -59,15 +54,7 @@ export function validateRetourLignes(
   return errors;
 }
 
-/**
- * Normalise les erreurs `lignes` renvoyées par le serveur.
- *
- * Deux formes coexistent : la vue renvoie un objet `{ "<id>": "message" }`,
- * mais une erreur de champ DRF (`quantite_rendue` non entier, par exemple)
- * arrive sous forme de *liste* alignée sur l'ordre envoyé. Rendue telle
- * quelle, cette liste d'objets était passée à React comme enfant et faisait
- * planter le widget.
- */
+/** Normalise les erreurs `lignes` renvoyées par le serveur. */
 export function normalizeRetourErrors(
   data: unknown,
   envoyees: RetourLigneValues[]

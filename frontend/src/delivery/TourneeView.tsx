@@ -1,6 +1,5 @@
 // Écran « tournée du jour » (LIV-04) : les livraisons et les ramassages de la
 // période, rangés dans un ordre de passage que le livreur peut optimiser puis
-// corriger à la main, avec la carte et l'itinéraire Google Maps correspondants.
 import {
   ActionIcon,
   Alert,

@@ -363,12 +363,7 @@ class TestRetourEndpointGardeFous:
 
 
 class TestRetourPerimetrePhysique:
-    """Un article virtuel n'a rien à rendre : il sort de la saisie retour.
-
-    Le laisser dedans classait « partiel » un bon dont tout le matériel était
-    revenu, parce que la prestation restait à zéro. Même périmètre que le bon
-    de ramassage et que `ramassages/<pk>/retour/`.
-    """
+    """Un article virtuel n'a rien à rendre : il sort de la saisie retour."""
 
     @pytest.fixture
     def ligne_physique_et_service(self, db, reservation_livree):

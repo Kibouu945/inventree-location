@@ -1,10 +1,4 @@
 // Écran « Client, manifestation, prestation & lieu » — arborescence F3.
-//
-// Navigation hiérarchique : client → manifestation → prestation →
-// bon de réservation → articles.
-//
-// Chargement au dépliage, un niveau à la fois, pour éviter de charger
-// toute l'arborescence en une seule requête.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   ActionIcon,
@@ -128,13 +122,7 @@ function Chevron({ ouvert }: { ouvert: boolean }) {
   );
 }
 
-/**
- * Bouton d'ajout de la maquette (F4).
- *
- * Il ouvre le formulaire existant plutôt qu'un formulaire de plus : la
- * création d'une prestation et celle d'un bon vivent déjà dans
- * `PrestationCreateModal` et `ReservationForm`.
- */
+/** Bouton d'ajout de la maquette (F4). */
 function Ajouter({
   quoi,
   onClick,
@@ -636,12 +624,6 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
   );
 
   // Repérage : quels clients portent une manifestation qui corresponde ?
-  //
-  // Les manifestations vivent un niveau sous des clients tous repliés. Sans ce
-  // repérage, taper dans la recherche ne changeait rien à l'écran — il aurait
-  // fallu déplier les clients un par un sans savoir lequel. Un seul appel
-  // répond pour tout l'arbre ; interroger chaque client en aurait fait un par
-  // client, et autant de fois qu'on tape une lettre.
   const filtresReperage = useMemo(
     () => filtresManifestations(rechercheDifferee, periode),
     [rechercheDifferee, periode]
@@ -672,10 +654,6 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
 
   // Une recherche qui aboutit ouvre d'elle-même les clients trouvés : ce qu'on
   // cherche est un niveau plus bas, laisser replié reviendrait à le cacher.
-  // L'ouverture passe par l'état plutôt que par un `ouvert` forcé au rendu,
-  // sinon le chevron devient un bouton mort — ici, on peut encore replier un
-  // client sans quitter sa recherche. On ajoute au lieu de remplacer : ce que
-  // l'utilisateur avait déplié avant de chercher lui est rendu intact.
   useEffect(() => {
     if (!rechercheActive || !reperage.data) {
       return;

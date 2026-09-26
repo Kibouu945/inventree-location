@@ -1,14 +1,4 @@
-"""Remplit les tables d'exécution depuis la vérité actuelle des bons.
-
-Rattrapage de la stratégie additive : les écrans n'écrivent pas encore ces
-tables, donc cette commande les construit — et les reconstruit après coup si la
-saisie a bougé. Idempotente : la clé d'identité d'un passage est
-`(bon, séquence)`, rejouer met à jour au lieu de dupliquer.
-
-    python manage.py projeter_execution
-    python manage.py projeter_execution --jour 2026-09-15
-    python manage.py projeter_execution --dry-run
-"""
+"""Remplit les tables d'exécution depuis la vérité actuelle des bons."""
 
 from datetime import date
 
@@ -54,7 +44,6 @@ class Command(BaseCommand):
 
         # Une seule transaction : une projection à moitié écrite serait pire
         # que pas de projection, `verifier_projection` la lirait comme une
-        # divergence sans pouvoir dire d'où elle vient.
         with transaction.atomic():
             for bon in bons:
                 resultat = projeter_le_bon(bon)

@@ -1,6 +1,5 @@
 // Calendrier mensuel des réservations (DIS-01) : vue d'ensemble pour le
 // gestionnaire, chaque réservation placée entre sa date de retrait et de
-// retour prévues, colorée par statut.
 
 import type { EventInput } from '@fullcalendar/core';
 import frLocale from '@fullcalendar/core/locales/fr';
@@ -12,9 +11,7 @@ import { useState } from 'react';
 
 const CALENDAR_URL = '/plugin/inventree-location/reservations/calendar/';
 
-/** Miroir de `STATUT_COULEURS` (`inventree_location/calendrier.py`) : les
- * pastilles des évènements viennent de l'API, cette légende doit donc lui
- * répondre statut pour statut. */
+/** pastilles des évènements viennent de l'API, cette légende doit donc lui */
 const STATUT_LEGEND: Array<{ label: string; color: string }> = [
   { label: 'Brouillon', color: '#868e96' },
   { label: 'Soumise', color: '#228be6' },

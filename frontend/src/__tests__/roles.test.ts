@@ -82,9 +82,7 @@ describe('canWriteReservations', () => {
 });
 
 describe('canCheckinReturns', () => {
-  // Miroir de ReturnCheckinPermission.write_roles côté serveur. Le
-  // gestionnaire arbitre les réservations mais ne pointe pas les retours :
-  // lui montrer le bouton lui vaudrait un 403 au POST.
+  // Miroir de ReturnCheckinPermission.write_roles côté serveur.
   it.each([
     ['admin', true],
     ['gestionnaire', false],
@@ -114,9 +112,7 @@ describe('canWriteCatalog', () => {
 });
 
 // Le retour et l'arbitrage ne se recouvrent pas : le magasinier déclare les
-// retours sans arbitrer, le gestionnaire arbitre sans déclarer. Le bouton
-// « Déclarer le retour » vivait dans la colonne d'arbitrage, donc invisible
-// pour sa propre persona.
+// retours sans arbitrer, le gestionnaire arbitre sans déclarer.
 describe('canDeclareRetour', () => {
   it('ouvert au magasinier et à l’admin', () => {
     expect(

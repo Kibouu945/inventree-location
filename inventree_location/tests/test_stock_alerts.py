@@ -155,10 +155,7 @@ def test_stock_alerts_notify_sends_email(manager, alert_setup, monkeypatch):
 
 @pytest.mark.django_db
 def test_virtual_article_never_raises_a_stock_alert(manager, alert_setup):
-    """Un service n'a pas de stock physique : ni seuil, ni tension.
-
-    Sans ce filtre il remontait en tension à 200 % de « 0 louable(s) ».
-    """
+    """Un service n'a pas de stock physique : ni seuil, ni tension."""
 
     service = Part.objects.create(name="Prestation nettoyage")
     RentableItem.objects.create(
@@ -200,18 +197,7 @@ def _alertes(manager):
 
 
 def test_seuil_bas_alerte_meme_sur_un_article_non_consommable(manager, alert_setup):
-    """Le seuil bas ne dépend plus du drapeau consommable.
-
-    Recette Tassin du 07/09/2026, remarque 11 : « le stock minimum de ce
-    produit est = 5, il y a 1 seul produit en stock pourtant on ne retrouve
-    pas ce produit dans la liste des alertes de stock ». L'article était du
-    matériel, pas un consommable, et la condition l'écartait — alors que le
-    CDC V06 (épic F, US 9) demande une alerte « lorsqu'un stock disponible
-    futur < seuil critique », sans distinguer la nature de l'objet.
-
-    Le seuil haut, lui, reste réservé au consommable : posé sur du matériel
-    louable, il déclenche une alerte de réapprovisionnement dénuée de sens.
-    """
+    """Le seuil bas ne dépend plus du drapeau consommable."""
 
     materiel = Part.objects.create(name="Tente 4 places")
     RentableItem.objects.create(
@@ -226,11 +212,7 @@ def test_seuil_bas_alerte_meme_sur_un_article_non_consommable(manager, alert_set
 
 
 def test_seuil_bas_retombe_sur_le_stock_minimum_dinventree(manager, alert_setup):
-    """Sans seuil de plugin, `Part.minimum_stock` fait foi.
-
-    Le client avait renseigné le champ natif d'InvenTree, que le plugin ne
-    lisait pas : deux champs pour une même notion, un seul consulté.
-    """
+    """Sans seuil de plugin, `Part.minimum_stock` fait foi."""
 
     materiel = Part.objects.create(name="Trousse de secours", minimum_stock=5)
     RentableItem.objects.create(
@@ -258,11 +240,7 @@ def test_seuil_bas_retombe_sur_le_stock_minimum_dinventree(manager, alert_setup)
 
 
 def test_stock_minimum_a_zero_nest_pas_un_seuil(manager, alert_setup):
-    """`minimum_stock` vaut 0 par défaut : ce n'est pas une consigne.
-
-    Le prendre pour un seuil mettrait en alerte tout article à stock nul,
-    c'est-à-dire l'essentiel d'une base fraîchement importée.
-    """
+    """`minimum_stock` vaut 0 par défaut : ce n'est pas une consigne."""
 
     materiel = Part.objects.create(name="Barrière Vauban", minimum_stock=0)
     RentableItem.objects.create(

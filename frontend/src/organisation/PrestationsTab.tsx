@@ -47,10 +47,7 @@ const MANIFESTATIONS_URL = '/plugin/inventree-location/manifestations/';
 const LIEUX_URL = '/plugin/inventree-location/lieux/';
 const CATALOG_URL = '/plugin/inventree-location/catalog/';
 
-// Taille de la liste déroulante d'articles. Volontairement plus courte que la
-// page du catalogue (50) : au-delà, un menu ne se parcourt plus, on filtre. Le
-// compte total est affiché quand la liste est tronquée, pour que l'utilisateur
-// sache qu'il doit affiner plutôt que de conclure à un article manquant.
+// Taille de la liste déroulante d'articles.
 const TAILLE_LISTE_ARTICLES = 30;
 
 interface FormState {
@@ -75,27 +72,7 @@ function emptyState(): FormState {
   };
 }
 
-/**
- * Sélecteur d'un article du catalogue + quantité.
- *
- * Recette Tassin du 07/09/2026, remarques 4, 5 et 8. Ce sélecteur tapait déjà
- * le même endpoint que le catalogue, mais ne lui passait que la recherche
- * plein-texte et `rentable: 'all'`. Trois conséquences, toutes signalées :
- *
- *   « Rechercher un article est très compliqué et pas ergonomique, il y a
- *     maintenant plus de 500 articles » — sans filtre de catégorie, il fallait
- *     connaître le libellé exact. Les catégories sont désormais là, et le
- *     backend étend le filtre aux sous-catégories.
- *
- *   « J'ai pu sélectionner un objet non louable » — le défaut est maintenant
- *     « Louable », et un article non louable ne peut pas être ajouté même en
- *     basculant sur « Tout », où il s'affiche barré d'un badge.
- *
- *   « Comment ai-je pu trouver "Banc de brasserie souple" alors que je ne le
- *     retrouve pas dans les produits ? » — ce n'était pas un cache : ce
- *     sélecteur montrait tout, le catalogue filtrait sur louable. Les deux
- *     écrans partagent désormais `buildCatalogQuery`, donc le même défaut.
- */
+/** Sélecteur d'un article du catalogue + quantité. */
 function ArticleAdder({
   context,
   onAdd
@@ -114,16 +91,13 @@ function ArticleAdder({
 
   // Mêmes paramètres que l'écran catalogue, aux deux réglages près qui sont
   // propres à une liste déroulante : la taille de page, et l'exclusion des
-  // articles inactifs — un article désactivé n'est pas réservable (SCRUM-111),
-  // le proposer à la saisie n'a pas de sens.
   const params = {
     ...buildCatalogQuery({
       search: debouncedSearch,
       categories,
       rentable,
       // La disponibilité affichée ici est celle du jour : la période de la
-      // prestation n'est pas forcément saisie quand on ajoute les articles,
-      // et le bandeau de pénurie sous le tableau, lui, la prend en compte.
+      // prestation n'est pas forcément saisie quand on ajoute les articles, et
       dateDebut: null,
       dateFin: null,
       page: 1
@@ -445,19 +419,7 @@ export function PrestationsTab({
     setModalOpen(true);
   }
 
-  /**
-   * Écrit un champ du formulaire depuis une valeur **déjà lue**.
-   *
-   * React remet `event.currentTarget` à `null` dès la fin du gestionnaire.
-   * Lire `event.currentTarget.value` *à l'intérieur* d'un updater
-   * `setState((s) => …)` marche donc par accident : tant que React évalue
-   * l'updater tout de suite (cas de la première frappe, chemin « eager »), la
-   * valeur est encore là ; dès qu'il le diffère, le callback lit `null.value`
-   * et le widget Organisation entier tombe en « Error rendering component ».
-   * C'est le plantage remonté par le client le 02/09/2026 sur la saisie du nom
-   * d'une prestation, reproductible dès la deuxième frappe sur InvenTree 1.5.
-   * Toujours capturer la valeur dans le gestionnaire, jamais dans l'updater.
-   */
+  /** Écrit un champ du formulaire depuis une valeur **déjà lue**. */
   function setField<K extends keyof FormState>(field: K, value: FormState[K]) {
     setState((current) => ({ ...current, [field]: value }));
   }
@@ -484,20 +446,6 @@ export function PrestationsTab({
   }
 
   // La pénurie de stock ne fait plus partie des conditions d'enregistrement.
-  //
-  // « Un article dépasse le stock disponible, le système bloque alors la
-  // réservation et seul annuler est possible. Il ne faut pas bloquer mais
-  // alerter » (recette Tassin du 07/09/2026, remarque 6, renvoyant aux épics E
-  // et F du CDC). Le CDC demande bien une alerte arbitrable — US 3 : « alerte
-  // immédiate dans une table avec tag de couleur, message expliquant :
-  // disponibles / réservés / manquants ». C'est notre backlog (STK-01, CON-04)
-  // qui avait durci la règle en blocage sec, et le résultat était une impasse :
-  // la prestation était perdue, donc pas de réservation, donc pas de livraison
-  // ni de ramassage — le cycle complet n'a jamais pu être déroulé en recette.
-  //
-  // Le garde-fou reste, mais là où il a un sens : le passage d'une réservation
-  // en statut « validée » refuse toujours une pénurie non forcée
-  // (`ReservationSerializer._validate_stock_conflicts_if_needed`).
   const canSubmit = useMemo(
     () =>
       Boolean(

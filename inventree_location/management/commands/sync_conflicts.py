@@ -1,9 +1,4 @@
-"""Historise les pénuries en cours qui ne figurent pas encore au registre.
-
-Le widget « Conflits actuels » synchronise déjà à chaque lecture. Cette
-commande sert aux instances sans consultation régulière du tableau de bord,
-et aux rattrapages après un import ou un ajustement de stock en masse.
-"""
+"""Historise les pénuries en cours qui ne figurent pas encore au registre."""
 
 from django.core.management.base import BaseCommand
 

@@ -1,32 +1,4 @@
-"""État d'un retour : un vocabulaire, un registre, une déduction.
-
-Trois fonctionnalités constatent le même fait — du matériel qui revient abîmé,
-manquant ou détruit — et chacune est arrivée avec sa propre écriture :
-
-- le **check-in retour** (SCRUM-94, PR #41) pose `quantite_retour_ok /
-  _manquant / _casse` sur la ligne ;
-- le **journal d'incidents** (SCRUM-93/96, PR #45 et #47) tient la table
-  `ReturnIncident`, que lisent l'historique 90 jours, le rapport de retour, son
-  PDF et le rapport de pertes ;
-- la **saisie du ramassage** (SCRUM-112, PR #40) pose `quantite_ramassee /
-  _sav / _detruite / _manquante` sur la même ligne.
-
-Résultat avant ce module : `etat_retour` avait **trois écrivains et trois
-vocabulaires** (`casse` d'un côté, `sav` et `detruit` de l'autre, `mixte` chez
-le troisième), la règle du check-in était écrite deux fois, et deux écrans
-pouvaient décrire le même retour différemment.
-
-Ce module fixe les trois points de convergence :
-
-1. **Un vocabulaire** — `EtatRetour` sur le modèle. `sav` et `detruit`
-   disparaissent : du point de vue de la ligne, un objet parti au SAV ou détruit
-   est un objet cassé. La nuance vit dans les incidents et les tickets SAV, pas
-   dans cette colonne.
-2. **Un registre** — `ReturnIncident`. Le check-in comme le ramassage y
-   projettent leurs quantités, si bien que tous les rapports voient les deux.
-3. **Une déduction** — `etat_retour_de_la_ligne`, appelée par les trois
-   écrivains, jamais réimplémentée.
-"""
+"""État d'un retour : un vocabulaire, un registre, une déduction."""
 
 from __future__ import annotations
 
@@ -63,17 +35,7 @@ CHAMPS_CHECKIN = (
 
 
 def quantite_attendue_au_retour(ligne) -> int:
-    """Combien d'unités doivent revenir de cette ligne.
-
-    Quatre endroits écrivaient `quantite_livree or quantite_demandee`, chacun
-    pour une raison différente : le plafond du registre d'incidents, celui de la
-    saisie de ramassage, la quantité à ramasser du bon et le total de la tournée.
-
-    Le repli sur `quantite_demandee` n'est pas une précaution : `quantite_livree`
-    n'est alimentée par aucun endpoint à ce jour et vaut donc 0 partout. Le jour
-    où elle le sera, la règle changera de comportement en production — d'où un
-    seul endroit à corriger, et un test qui distingue les deux valeurs.
-    """
+    """Combien d'unités doivent revenir de cette ligne."""
 
     return ligne.quantite_livree or ligne.quantite_demandee or 0
 
@@ -87,14 +49,7 @@ def quantites_depuis_payload(payload, champs):
 
 
 def quantites_du_retour(ligne) -> dict:
-    """Reconstitue les quantités d'un retour depuis le registre.
-
-    Ces chiffres étaient stockés en double sur la ligne — une colonne par écran,
-    sept en tout — alors qu'ils se déduisent du registre et de la seule quantité
-    qui ne s'en déduit pas : combien est revenu physiquement.
-
-    `ok` = revenu physiquement moins ce qui est revenu abîmé ou détruit.
-    """
+    """Reconstitue les quantités d'un retour depuis le registre."""
 
     par_type = dict.fromkeys(ReturnIncidentType.values, 0)
 
@@ -122,20 +77,7 @@ def facturer_le_client(ligne) -> bool:
 
 
 def projeter_incidents(ligne, user, quantites, *, facturer=None) -> None:
-    """Projette les quantités saisies par un écran dans le registre.
-
-    `quantites` associe un type d'incident à sa quantité. Les écrans passent ce
-    qu'ils ont reçu : plus aucune colonne de la ligne n'est lue, elles n'existent
-    plus (cf. migration 0021).
-
-    Idempotent : ré-enregistrer ajuste les quantités, et une quantité ramenée à
-    0 supprime l'incident correspondant — un incident n'a pas de cycle de vie
-    propre, contrairement au ticket SAV qu'on clôture pour garder la trace.
-
-    `facturer` vaut la décision commerciale de l'écran appelant, ou None quand
-    il n'en prend pas (le check-in ne facture rien) : dans ce cas le drapeau
-    déjà posé sur l'incident est conservé.
-    """
+    """Projette les quantités saisies par un écran dans le registre."""
 
     for type_incident, quantite in quantites.items():
         quantite = quantite or 0
@@ -172,16 +114,7 @@ def projeter_incidents(ligne, user, quantites, *, facturer=None) -> None:
 
 
 def etat_retour_du_pointage(ligne) -> str:
-    """État d'une ligne sans incident : pointée et conforme, ou pas pointée.
-
-    Toutes les natures de problème vivent dans le registre ; s'il est vide, il
-    ne reste qu'une question — quelqu'un a-t-il regardé cette ligne. La réponse
-    est `quantite_retournee`, seule colonne de retour conservée : « combien est
-    revenu physiquement ».
-
-    Le repli sert aussi à ne pas effacer un pointage quand le dernier incident
-    d'une ligne est supprimé.
-    """
+    """État d'une ligne sans incident : pointée et conforme, ou pas pointée."""
 
     if (ligne.quantite_retournee or 0) > 0:
         return EtatRetour.OK
@@ -190,14 +123,7 @@ def etat_retour_du_pointage(ligne) -> str:
 
 
 def etat_retour_de_la_ligne(ligne) -> str:
-    """L'état d'une ligne, déduit du registre puis du pointage.
-
-    Recalculé et non mémorisé au fil de l'eau : modifier ou supprimer un
-    incident doit ramener la ligne à son état réel, sinon elle reste figée sur
-    un incident qui n'existe plus.
-
-    Quand plusieurs natures coexistent, la plus grave l'emporte (`ORDRE_GRAVITE`).
-    """
+    """L'état d'une ligne, déduit du registre puis du pointage."""
 
     types = set(ligne.incidents.values_list("type", flat=True))
 

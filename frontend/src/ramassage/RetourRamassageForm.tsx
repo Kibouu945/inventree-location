@@ -1,9 +1,5 @@
 // SCRUM-112 — Saisie du retour d'un ramassage : ce qui revient en état, ce qui
 // part au SAV, ce qui est détruit, ce qui manque.
-//
-// Composant séparé du bon de ramassage : le bon s'imprime (cf. printableModal),
-// la saisie non. Les deux vivaient dans le même bloc et partaient à
-// l'imprimante avec leurs champs de formulaire.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   Alert,
@@ -208,9 +204,8 @@ export function RetourRamassageForm({
                     <Table.Td key={champ}>
                       <NumberInput
                         min={0}
-                        // Plafonner la saisie revient à la refuser en silence :
-                        // seul le manquant est borné, et par la même règle que
-                        // le serveur.
+                        // Plafonner la saisie revient à la refuser en silence
+                        // : seul le manquant est borné, et par la même règle
                         max={
                           champ === 'quantite_manquante'
                             ? line.quantiteAttendue

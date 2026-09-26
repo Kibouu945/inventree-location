@@ -1,10 +1,4 @@
-"""Tests du check-in retour ligne par ligne (SCRUM-94).
-
-Endpoint ``reservations/<pk>/checkin/`` :
-- GET  : accessible uniquement quand la réservation est au statut livrée.
-- POST : valide somme(ok + manquant + casse) == quantité demandée par ligne,
-  journalise les incidents, puis clôture la réservation.
-"""
+"""Tests du check-in retour ligne par ligne (SCRUM-94)."""
 
 from __future__ import annotations
 
@@ -371,7 +365,6 @@ class TestCheckinFieldsReadOnly:
 
         # Calculés depuis le registre, donc en lecture seule par construction :
         # une réécriture des lignes de la réservation ne peut plus les remettre
-        # à zéro.
         assert fields["quantite_retour_ok"].read_only
         assert fields["quantite_retour_manquant"].read_only
         assert fields["quantite_retour_casse"].read_only

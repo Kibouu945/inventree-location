@@ -61,14 +61,7 @@ function shortDate(iso: string): string {
   });
 }
 
-/**
- * Clés d'erreur DRF qui ne correspondent à aucun champ du formulaire.
- *
- * `detail` porte les refus non liés à un champ (réservation déjà validée,
- * conflit de stock, permission refusée) ; `conflicts` / `stock` portent les
- * données structurées qui l'accompagnent. Les afficher comme erreurs de champ
- * ne mène nulle part : aucun input ne les rend.
- */
+/** Clés d'erreur DRF qui ne correspondent à aucun champ du formulaire. */
 const NON_FIELD_ERROR_KEYS = ['detail', 'non_field_errors'];
 const IGNORED_ERROR_KEYS = [...NON_FIELD_ERROR_KEYS, 'conflicts', 'stock'];
 
@@ -122,13 +115,7 @@ function apiErrorMessage(error: unknown): string | null {
   return null;
 }
 
-/**
- * Formulaire unique de création et d'édition d'une réservation.
- *
- * En édition (`reservationId` fourni), charge la réservation existante et
- * enrichit ses lignes (nom, drapeau virtuel) via le catalogue avant de
- * pré-remplir le formulaire.
- */
+/** Formulaire unique de création et d'édition d'une réservation. */
 export function ReservationForm({
   context,
   reservationId,
@@ -138,11 +125,10 @@ export function ReservationForm({
 }: {
   context: InvenTreePluginContext;
   reservationId?: number;
-  /** Prestation imposée à la création — l'appelant sait déjà laquelle.
-   *
+  /**
    * Sert à l'arborescence, où l'on crée un bon depuis la ligne de sa
    * prestation : la poser ici déclenche la reprise habituelle de ses dates et
-   * de son matériel, comme si l'utilisateur l'avait choisie au sélecteur. */
+   */
   prestationId?: number;
   /** Masque toute action d'écriture (rôles sans droit — cf. roles.ts). */
   readOnly?: boolean;
@@ -197,11 +183,6 @@ export function ReservationForm({
 
   // La prestation choisie est chargée par son id, indépendamment de la
   // recherche : Mantine recopie le label de l'option dans `searchValue`, et ce
-  // label ("nom — manifestation (dates)") ne correspond à aucun résultat côté
-  // serveur, qui ne cherche que sur nom / manifestation__nom. Sans cette
-  // requête dédiée, l'encart lieu et le tooltip dates disparaissaient dès la
-  // sélection. Couvre aussi l'édition, où la prestation peut être hors des 20
-  // premiers résultats.
   const selectedPrestationQuery = useQuery<Prestation>(
     {
       queryKey: ['reservation-prestation', form.values.prestation],
@@ -259,9 +240,8 @@ export function ReservationForm({
         );
         form.setValues(values);
       });
-    // form est volontairement absent des deps : ce pré-remplissage ne doit
-    // se déclencher qu'au chargement de la réservation.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // form est volontairement absent des deps : ce pré-remplissage ne doit se
+    // déclencher qu'au chargement de la réservation. eslint-disable-next-line
   }, [existingQuery.data, context.api.get, form.setValues]);
 
   const selectedPrestation = useMemo(
@@ -280,16 +260,6 @@ export function ReservationForm({
   const effectiveReadOnly = readOnly || locked;
 
   // Reprise de la prestation, en création : dates et liste d'articles.
-  //
-  // Recette Tassin du 07/09/2026, remarques 14 et 15 — « reprendre les dates de
-  // la prestation », « il faut ressaisir toute la liste ? ». Les deux étaient
-  // déjà dans la réponse de `selectedPrestationQuery` juste au-dessus, on ne
-  // s'en servait que pour l'encart lieu et le tooltip.
-  //
-  // La reprise se rejoue à chaque changement de prestation — changer de
-  // prestation doit bien emmener ses dates et son matériel — mais une seule
-  // fois par prestation : sans ce garde-fou, le moindre re-fetch de la requête
-  // écraserait les quantités que l'utilisateur vient d'ajuster.
   const prestationReprise = useRef<number | null>(null);
 
   useEffect(() => {
@@ -314,7 +284,6 @@ export function ReservationForm({
 
     // Le drapeau « article virtuel » ne vient pas de la prestation : il est
     // porté par le catalogue, et c'est lui que valide la règle « au moins un
-    // article virtuel » à la soumission.
     context.api
       .get(CATALOG_URL, { params: { ids: partIds.join(','), rentable: 'all' } })
       .then((response) => {
@@ -324,8 +293,7 @@ export function ReservationForm({
         );
       });
     // `form` est volontairement absent des deps : la reprise suit la
-    // prestation, pas chaque frappe de l'utilisateur.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // prestation, pas chaque frappe de l'utilisateur. eslint-disable-next-line
   }, [
     selectedPrestation,
     isEdit,
@@ -367,8 +335,6 @@ export function ReservationForm({
 
         // On préfère le motif renvoyé par le serveur au message générique :
         // lui seul dit *pourquoi* (réservation déjà validée, conflit de stock,
-        // permission refusée). Conservé aussi dans un encart, la notification
-        // disparaissant au bout de quelques secondes.
         const message = apiErrorMessage(error);
 
         setSubmitError(message);

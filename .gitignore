@@ -180,3 +180,6 @@ docs/visite/visite.html
 
 # Version écrite par setuptools_scm à l'installation.
 inventree_location/_version.py
+
+# Sorties de mesure des tests de charge
+tests/charge/resultats*/

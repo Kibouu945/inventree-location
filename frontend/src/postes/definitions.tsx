@@ -1,12 +1,4 @@
 // Définition des postes : quels écrans, pour quels rôles.
-//
-// Un poste est l'écran unique d'un métier, à la place de l'empilement de
-// widgets refusé en revue du 09/09/2026. Les écrans sont **chargés
-// paresseusement** : sans ça le bundle embarquerait FullCalendar et Leaflet
-// pour un livreur qui n'ouvre ni planning ni carte.
-//
-// Cette table double `pages.POSTES` côté serveur, comme `roles.ts` double
-// `roles.py` : le serveur refuse, le client évite de proposer. À garder aligné.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   IconAlertTriangle,
@@ -132,8 +124,6 @@ const RESERVATIONS = onglet(
   ReservationsList
 );
 // La maquette du CDC : manifestations étalées sur les jours, fiche au survol.
-// L'ancien calendrier mensuel des réservations est remplacé — il montrait les
-// bons, pas les manifestations, et ni volume ni avancement.
 const PLANNING = onglet('planning', 'Planning', IconCalendarMonth, Planning);
 // Le fichier clients. Même écran que le back-office de l'admin, qui masque de
 // lui-même l'onglet Utilisateurs à qui ne gère pas les comptes.
@@ -226,12 +216,7 @@ export const POSTES: Record<string, PosteDefinition> = {
   }
 };
 
-/**
- * Le poste de l'utilisateur courant, ou `null` sans rôle métier.
- *
- * **Un seul** poste : règle « un acteur interne, un rôle ». L'admin a le poste
- * complet ; un superutilisateur est traité comme un admin.
- */
+/** Le poste de l'utilisateur courant, ou `null` sans rôle métier. */
 export function posteDeLUtilisateur(
   context: InvenTreePluginContext
 ): { cle: string; definition: PosteDefinition } | null {

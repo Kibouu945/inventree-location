@@ -1,6 +1,5 @@
 // Écran "Tournées livreur" : livraisons à effectuer, filtrables par date /
 // lieu / statut, avec bascule liste / calendrier / carte et bon de livraison
-// imprimable par ligne.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   Alert,
@@ -122,7 +121,6 @@ export function DeliveriesList({
       },
       // Le pool commun (US-18) change sous l'action d'autres livreurs : sans
       // ça, une livraison relâchée par un livreur reste invisible pour les
-      // autres tant qu'ils ne rechargent pas la page à la main.
       refetchInterval: 15000,
       refetchOnWindowFocus: true
     },
@@ -146,9 +144,8 @@ export function DeliveriesList({
         });
       },
       onError: (error: unknown) => {
-        // Course perdue (livraison prise entre-temps) : la vue est stale,
-        // on la resynchronise plutôt que de laisser le bouton « Accepter »
-        // réapparaître comme si de rien n'était.
+        // Course perdue (livraison prise entre-temps) : la vue est stale, on
+        // la resynchronise plutôt que de laisser le bouton « Accepter »
         context.queryClient.invalidateQueries({ queryKey: ['deliveries'] });
         notifications.show({
           title: 'Action impossible',
@@ -254,7 +251,6 @@ export function DeliveriesList({
 
   // La tournée mélange dépose et reprise : les ramassages ne sont chargés que
   // pour cette vue, et l'API les filtre par nom de lieu là où les livraisons
-  // le font par id — on retombe donc sur un filtrage client par id.
   const ramassagesQuery = useQuery<Page<Ramassage>>(
     {
       queryKey: ['tournee-ramassages', params.date_from, params.date_to],
@@ -363,8 +359,7 @@ export function DeliveriesList({
             updateFilters({
               dateRange: [value[0], value[1]],
               // Une période choisie remplace l'horizon plutôt que de s'y
-              // ajouter : sinon « Aujourd'hui » resterait allumé sur une
-              // liste qui montre le mois prochain.
+              // ajouter : sinon « Aujourd'hui » resterait allumé sur une liste
               horizon:
                 value[0] || value[1] ? 'tout' : DEFAULT_DELIVERY_FILTERS.horizon
             })

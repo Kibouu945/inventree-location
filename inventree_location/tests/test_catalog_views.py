@@ -1,9 +1,4 @@
-"""Tests de la vue catalogue et du bulk-update du drapeau louable.
-
-Hors container InvenTree, `part.Part` est l'app factice (cf. tests/part/).
-On y crée des Part + PartCategory pour exercer filtres, pagination et le
-câblage du drapeau louable sur RentableItem.
-"""
+"""Tests de la vue catalogue et du bulk-update du drapeau louable."""
 
 from __future__ import annotations
 
@@ -87,15 +82,7 @@ def _names(response):
 
 
 class TestCatalogCategoryCascade:
-    """Filtrer sur une catégorie doit ramener ses sous-catégories.
-
-    Recette Tassin du 07/09/2026, remarque 4 : « on aurait gagné en ergonomie
-    et efficacité à reprendre le type de recherche fait pour le catalogue avec
-    les libellés et les catégories, les sous-catégories ». Le filtre était
-    plat : demander « Mobilier » ne rendait que les articles rangés
-    directement dedans, et paraissait donc ne rien trouver dès que
-    l'arborescence était un peu profonde.
-    """
+    """Filtrer sur une catégorie doit ramener ses sous-catégories."""
 
     @pytest.fixture
     def arbre(self, db):
@@ -146,11 +133,7 @@ class TestCatalogCategoryCascade:
 
     @pytest.mark.django_db
     def test_categorie_inconnue_ne_rend_rien(self, factory, user, arbre):
-        """Un identifiant absent reste dans le filtre plutôt que d'être ignoré.
-
-        Le laisser tomber élargirait le résultat au lieu de le restreindre :
-        l'utilisateur verrait tout le catalogue en croyant filtrer.
-        """
+        """Un identifiant absent reste dans le filtre plutôt que d'être ignoré."""
 
         request = factory.get(CATALOG_URL, {"categories": "999999"})
         force_authenticate(request, user=user)

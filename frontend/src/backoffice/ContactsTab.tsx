@@ -1,14 +1,5 @@
 // Onglet « Contacts » du back-office — créer et éditer les interlocuteurs d'un
 // client (F1).
-//
-// L'API `/backoffice/contacts/` existait depuis la bascule « organisateur →
-// client + contact » (09/09), mais aucun écran ne s'y branchait : un contact ne
-// pouvait être créé que par le shell Django. Structure copiée de `ClientsTab` —
-// même pagination, même recherche débouncée, même gestion d'erreur.
-//
-// **Pas de suppression** : un contact a peut-être signé un devis, et un devis
-// signé doit rester lisible tel qu'il a été signé. Il se désactive, ce qui le
-// sort des sélecteurs sans le faire disparaître des pièces où il figure.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   Alert,
@@ -40,8 +31,7 @@ import type {
 } from './types';
 import { usePagedSearch } from './usePagedSearch';
 
-/** Valeur du filtre « tous clients confondus ».
- *
+/**
  * `null` ne convient pas : un `Select` Mantine rend `null` quand on efface, et
  * on ne distinguerait plus « aucun filtre » de « filtre vidé ».
  */

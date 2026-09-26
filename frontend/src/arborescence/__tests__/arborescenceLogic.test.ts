@@ -30,8 +30,7 @@ describe('filtresManifestations', () => {
 
   it('donne au dépliage les filtres du repérage, plus son client', () => {
     // La garantie qui compte : un client remonté par la recherche doit
-    // retrouver au moins une manifestation en s'ouvrant. Si les deux appels
-    // filtraient différemment, il s'ouvrirait sur du vide.
+    // retrouver au moins une manifestation en s'ouvrant.
     const reperage = filtresManifestations('Gala', 'futur');
     const depliage = filtresManifestations('Gala', 'futur', 3);
 

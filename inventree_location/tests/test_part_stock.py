@@ -1,8 +1,4 @@
-"""Le stock total d'un article vient d'InvenTree, pas du plugin.
-
-`RentableItem` ne porte plus de compteur : la quantité louable est la somme
-des `StockItem` réellement en stock dont le statut est louable.
-"""
+"""Le stock total d'un article vient d'InvenTree, pas du plugin."""
 
 from __future__ import annotations
 

@@ -115,8 +115,7 @@ class TestClient:
 
     @pytest.mark.django_db
     def test_plusieurs_clients_sans_email(self, client):
-        """L'index unique tolère les NULL : les clients repris n'ont pas d'adresse,
-        et en inventer une mettrait de la fausse donnée en base."""
+        """L'index unique tolère les NULL : les clients repris n'ont pas d'adresse,"""
 
         Client.objects.create(nom="Sans adresse 1")
         Client.objects.create(nom="Sans adresse 2")
@@ -136,8 +135,7 @@ class TestContact:
 
     @pytest.mark.django_db
     def test_email_unique_globalement(self, client):
-        """Un même interlocuteur ne peut pas avoir deux fiches sous la même
-        adresse, même chez deux clients différents."""
+        """Un même interlocuteur ne peut pas avoir deux fiches sous la même"""
 
         autre = Client.objects.create(nom="Autre client")
         Contact.objects.create(client=client, nom="Durand", email="p@exemple.test")
@@ -184,8 +182,7 @@ class TestProfile:
         assert _get_on_delete(Profile, "user") == models.CASCADE
 
     def test_aucun_rattachement_a_un_client(self):
-        """Un acteur interne n'appartient à aucun client (09/09) : le champ a
-        été supprimé, il ne doit pas revenir."""
+        """Un acteur interne n'appartient à aucun client (09/09) : le champ a"""
 
         assert not hasattr(Profile, "groupe")
 
@@ -246,8 +243,7 @@ class TestManifestation:
         assert _get_on_delete(Manifestation, "contact") == models.PROTECT
 
     def test_plus_d_organisateur(self):
-        """Remplacé par le contact référent : le client externe n'a pas de
-        compte."""
+        """Remplacé par le contact référent : le client externe n'a pas de"""
 
         assert not hasattr(Manifestation, "organisateur")
 

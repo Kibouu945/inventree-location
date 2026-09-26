@@ -189,7 +189,6 @@ def test_compute_conflicts_requires_valid_period():
 
 # ---------------------------------------------------------------------------
 # Tests DB de compute_conflicts (CON-01)
-#
 # compute_conflicts interroge la base réelle ; ces tests garantissent que la
 # requête ORM cible le bon champ (lignes__part) et détecte les chevauchements.
 # ---------------------------------------------------------------------------

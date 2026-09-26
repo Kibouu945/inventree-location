@@ -1,32 +1,4 @@
-"""Projection de l'exécution terrain : livraison et ramassage.
-
-Les colonnes du bon restent la vérité. Ce module **recalcule** ce que les
-tables d'exécution devraient contenir à partir de cette vérité, ce qui permet
-trois choses sans toucher un seul endpoint d'écriture :
-
-1. remplir les tables (`projeter_execution`) ;
-2. vérifier qu'elles n'ont pas divergé (`verifier_projection`), en n'écrivant
-   rien ;
-3. lire la tournée d'une journée à la maille que demande le livreur — par lieu,
-   avec le récapitulatif tous lieux confondus (R25, R30).
-
-**Jamais d'instance en filtre, toujours un identifiant.** Le chargeur de
-plugins d'InvenTree importe `models` deux fois : un bon obtenu depuis une
-commande d'administration est une instance d'une *autre* classe que celle que
-voient les clés étrangères d'ici, et Django refuse la requête (« Must be
-"Reservation" instance »). Les relations inverses ont le même défaut. D'où les
-`_id` partout dans ce module, et les querysets explicites plutôt que
-`reservation.livraisons`.
-
-Logique isolée de `views.py` pour rester testable : `core.py` n'est pas
-importable hors InvenTree, comme `roles.py`, `retours.py` ou `livraison.py`.
-
-**Ce que la vérité actuelle permet de savoir.** Aucun endpoint ne saisit de
-livraison partielle : un bon est livré en entier ou pas du tout. La projection
-pose donc, pour un bon livré, une quantité livrée égale à la quantité sortie.
-Le jour où la saisie partielle existera (lot L7), c'est cette fonction qui
-changera, pas les écrans.
-"""
+"""Projection de l'exécution terrain : livraison et ramassage."""
 
 from __future__ import annotations
 
@@ -68,31 +40,13 @@ PREMIER_PASSAGE = 1
 
 
 def _lignes_du_bon(reservation_id: int):
-    """Les lignes du bon, relues en base plutôt que prises sur l'instance.
-
-    Recalculer, c'est relire. Un appelant qui a préchargé ses lignes
-    (`prefetch_related`) puis modifié leurs quantités par d'autres instances —
-    c'est mot pour mot ce que fait la saisie de ramassage — porte un cache
-    périmé, et la projection écrivait alors des zéros là où la vérité disait
-    quatre. Le cas s'est produit, il est couvert par un test.
-    """
+    """Les lignes du bon, relues en base plutôt que prises sur l'instance."""
 
     return LigneReservation.objects.filter(reservation_id=reservation_id)
 
 
 def quantite_deposee(ligne) -> int:
-    """Ce que tous les passages ont déposé sur cette ligne.
-
-    Le chiffre que l'écran de livraison affiche en « livrée », et la seule
-    source juste : la colonne `quantite_livree` du bon n'a aucun écrivain (cf.
-    `retours.py`), et plusieurs passages ne tiendraient de toute façon pas dans
-    une colonne (R23).
-
-    Deux chemins pour le même résultat. Quand l'appelant a préchargé la relation
-    (`prefetch_related("lignes__livraisons")`), on somme son cache : une liste de
-    bons coûte alors une requête, pas une par ligne. Sinon on agrège par
-    identifiant — jamais par instance, pour la raison donnée en tête de module.
-    """
+    """Ce que tous les passages ont déposé sur cette ligne."""
 
     cache = getattr(ligne, "_prefetched_objects_cache", None) or {}
 
@@ -108,22 +62,13 @@ def quantite_deposee(ligne) -> int:
 
 
 def quantite_restant_a_livrer(ligne) -> int:
-    """Ce qu'il reste à déposer sur cette ligne, tous passages confondus.
-
-    Calculé, jamais stocké (R27) : une colonne se désynchroniserait du premier
-    passage supplémentaire.
-    """
+    """Ce qu'il reste à déposer sur cette ligne, tous passages confondus."""
 
     return max(quantite_attendue_au_retour(ligne) - quantite_deposee(ligne), 0)
 
 
 def livraison_attendue(reservation) -> dict | None:
-    """Ce que la table de livraison devrait contenir pour ce bon.
-
-    `None` quand le bon n'est pas sorti, ou quand sa prestation n'a pas de lieu
-    — un brouillon sans lieu est légitime (R13) et ne doit rien projeter. C'est
-    la condition pour que la projection ne casse aucune fixture existante.
-    """
+    """Ce que la table de livraison devrait contenir pour ce bon."""
 
     if reservation.statut not in STATUTS_LIVRES:
         return None
@@ -150,12 +95,7 @@ def livraison_attendue(reservation) -> dict | None:
 
 
 def ramassage_attendu(reservation) -> dict | None:
-    """Ce que la table de ramassage devrait contenir pour ce bon.
-
-    Les quatre compteurs viennent du registre d'incidents, seule source des
-    natures (R32) : la projection ne réinvente aucun chiffre, elle change de
-    maille. « À facturer » suit la décision déjà portée par les incidents (R37).
-    """
+    """Ce que la table de ramassage devrait contenir pour ce bon."""
 
     if reservation.statut not in STATUTS_RAMASSES:
         return None
@@ -194,15 +134,7 @@ def ramassage_attendu(reservation) -> dict | None:
 
 
 def _retracter(modele, reservation_id: int) -> None:
-    """Retire le passage projeté d'un bon qui n'en attend plus.
-
-    Borné au passage **projeté** (`PREMIER_PASSAGE`) et non à tous les passages
-    du bon : le jour où la saisie partielle en créera d'autres, ceux-là seront de
-    la vérité saisie, et les retirer serait une perte de données — ce sera un
-    arbitrage, pas une suppression.
-
-    Les lignes et les articles partent avec, par cascade.
-    """
+    """Retire le passage projeté d'un bon qui n'en attend plus."""
 
     modele.objects.filter(
         reservation_id=reservation_id, sequence=PREMIER_PASSAGE
@@ -211,15 +143,7 @@ def _retracter(modele, reservation_id: int) -> None:
 
 @transaction.atomic
 def projeter_le_bon(reservation) -> dict:
-    """Aligne les tables d'exécution d'un bon sur la vérité actuelle.
-
-    Idempotent : la clé d'identité du passage est `(bon, séquence)`, donc
-    rejouer la projection met à jour au lieu de dupliquer.
-
-    Aligner, c'est aussi **retirer** : un bon livré puis annulé n'attend plus
-    aucun passage, et le laisser en place était une divergence que
-    `divergences_du_bon` signalait sans que rien ne puisse la corriger.
-    """
+    """Aligne les tables d'exécution d'un bon sur la vérité actuelle."""
 
     resultat = {"livraison": None, "ramassage": None}
 
@@ -282,11 +206,7 @@ def projeter_le_bon(reservation) -> dict:
 
 
 def divergences_du_bon(reservation) -> list[str]:
-    """Écarts entre les tables d'exécution et la vérité, sans rien écrire.
-
-    C'est le garde-fou de la stratégie additive : si la projection dérive, on
-    l'apprend par cette commande, pas par un chiffre faux à l'écran.
-    """
+    """Écarts entre les tables d'exécution et la vérité, sans rien écrire."""
 
     ecarts = []
     attendue = livraison_attendue(reservation)
@@ -307,7 +227,6 @@ def divergences_du_bon(reservation) -> list[str]:
 
         # Les dates se comparent depuis le 17/09/2026 : un passage sans heure
         # réelle sur un bon livré est passé inaperçu parce que seuls le lieu et
-        # les quantités étaient confrontés.
         for champ in ("date_prevue", "date_reelle"):
             if getattr(livraison, champ) != attendue[champ]:
                 ecarts.append(
@@ -362,11 +281,7 @@ def divergences_du_bon(reservation) -> list[str]:
 
 
 def bons_du_jour(jour, queryset=None):
-    """Les bons dont le matériel doit sortir ce jour-là.
-
-    « La journée » est celle du fuseau de l'application, jamais `dt.date()` sur
-    de l'UTC (R43) : un créneau de 23 h à Paris appartient au bon jour.
-    """
+    """Les bons dont le matériel doit sortir ce jour-là."""
 
     if queryset is None:
         queryset = Reservation.objects.all()
@@ -381,15 +296,7 @@ def bons_du_jour(jour, queryset=None):
 
 
 def tournee_du_jour(jour, queryset=None) -> dict:
-    """La tournée d'une journée, groupée par lieu, avec le récapitulatif global.
-
-    Le récapitulatif tous lieux confondus sert au chargement du véhicule : le
-    livreur a besoin de savoir combien de tables partent au total, pas
-    seulement combien par arrêt (R25). Les quantités affichées par lieu sont la
-    somme de la journée sur ce lieu, parce que des objets circulent d'un lieu à
-    l'autre (R30) — c'est une règle d'affichage, elle ne change pas la maille de
-    stockage.
-    """
+    """La tournée d'une journée, groupée par lieu, avec le récapitulatif global."""
 
     par_lieu: dict[int | None, dict] = {}
     total: dict[int, dict] = {}
@@ -414,9 +321,8 @@ def tournee_du_jour(jour, queryset=None) -> dict:
                 "part": ligne.part_id,
                 "part_nom": ligne.part.name,
                 "quantite_demandee": ligne.quantite_demandee,
-                # `quantite_livree` est la colonne du bon, que personne n'écrit ;
-                # `quantite_deposee` est ce que les passages disent. Les deux
-                # cohabitent le temps que les écrans basculent sur la seconde.
+                # `quantite_livree` est la colonne du bon, que personne n'écrit
+                # ; `quantite_deposee` est ce que les passages disent.
                 "quantite_livree": ligne.quantite_livree,
                 "quantite_deposee": quantite_deposee(ligne),
                 "quantite_attendue": attendue,

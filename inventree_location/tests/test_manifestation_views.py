@@ -387,12 +387,7 @@ class TestClientList:
 
 @pytest.mark.django_db
 class TestChampsDuPlanning:
-    """Les quatre informations que la maquette Planning affiche au survol.
-
-    Elles sont calculées par la vue, pas par le sérialiseur : agréger
-    manifestation par manifestation ferait une requête par barre du planning.
-    Le repli du sérialiseur reste testé, parce qu'il sert au détail.
-    """
+    """Les quatre informations que la maquette Planning affiche au survol."""
 
     def _liste(self, factory, user):
         request = factory.get(MANIF_URL)
@@ -472,8 +467,7 @@ class TestChampsDuPlanning:
     def test_le_volume_n_est_pas_multiplie_par_le_nombre_de_bons(
         self, factory, gestionnaire
     ):
-        """Le piège des agrégations jointes : deux `Sum` sur deux jointures
-        dans la même requête se multiplient l'une l'autre."""
+        """Le piège des agrégations jointes : deux `Sum` sur deux jointures"""
 
         self._manifestation_avec_bons(
             gestionnaire,
@@ -501,8 +495,7 @@ class TestChampsDuPlanning:
     def test_la_liste_ne_fait_pas_une_requete_par_manifestation(
         self, factory, gestionnaire, django_assert_max_num_queries
     ):
-        """Le vrai enjeu des annotations : un planning de dix manifestations
-        ne doit pas coûter dix fois le prix d'une."""
+        """Le vrai enjeu des annotations : un planning de dix manifestations"""
 
         for _ in range(10):
             self._manifestation_avec_bons(
@@ -518,12 +511,7 @@ class TestChampsDuPlanning:
 
 @pytest.mark.django_db
 class TestFenetreDuPlanning:
-    """`from` / `to` : ce qui **chevauche** la fenêtre, pas ce qui y tient.
-
-    Le planning se déplace d'une semaine à l'autre et d'un mois à l'autre :
-    sans le chevauchement, une manifestation d'une semaine disparaîtrait dès
-    qu'on affiche son deuxième jour.
-    """
+    """`from` / `to` : ce qui **chevauche** la fenêtre, pas ce qui y tient."""
 
     def _noms(self, factory, user, params):
         request = factory.get(MANIF_URL, params)
@@ -585,12 +573,7 @@ class TestFenetreDuPlanning:
 
 @pytest.mark.django_db
 class TestFiltreParClient:
-    """« Rechercher les manifestations d'un client défini » (recette du 11/09).
-
-    Le paramètre est distinct de `search`, qui porte sur le nom de la
-    manifestation : au téléphone, on cherche par client ; dans une liste, on
-    cherche par nom.
-    """
+    """« Rechercher les manifestations d'un client défini » (recette du 11/09)."""
 
     def _noms(self, factory, user, **params):
         request = factory.get(MANIF_URL, params)
@@ -680,11 +663,7 @@ class TestDesactivation:
         assert "désactivé" in str(serializer.errors["contact"][0])
 
     def test_une_manifestation_existante_reste_modifiable(self, db):
-        """Le cas qui compte : l'historique ne se verrouille pas.
-
-        Le client est désactivé après coup ; sa manifestation doit continuer de
-        s'éditer, sans quoi désactiver un client gèlerait tout son passé.
-        """
+        """Le cas qui compte : l'historique ne se verrouille pas."""
 
         client = Client.objects.create(nom="Association dissoute", actif=True)
         manifestation = Manifestation.objects.create(

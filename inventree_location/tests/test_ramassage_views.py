@@ -1,17 +1,4 @@
-"""Tests des endpoints de ramassage (SCRUM-89).
-
-Couvre :
-- `RamassageListView` : liste, filtre `lieu`, exclusion des statuts terminés ;
-- `BonRamassageView`  : bon de ramassage d'une réservation ;
-- `RamassageSerializer` : le lieu exposé suit `Prestation.lieu` (ORG-02, un seul
-  lieu par prestation) et vaut ``None`` quand la prestation n'en a pas.
-
-Le champ `lieu` est testé explicitement : le code d'origine interrogeait
-``prestation__lieux``, la relation inverse d'avant la migration 0008, ce qui
-faisait répondre 500 à l'endpoint sans qu'aucun test ne le voie.
-
-Même pattern que `test_lieu_views.py` : `APIRequestFactory` + `force_authenticate`.
-"""
+"""Tests des endpoints de ramassage (SCRUM-89)."""
 
 from __future__ import annotations
 

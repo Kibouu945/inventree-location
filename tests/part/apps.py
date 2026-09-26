@@ -1,9 +1,4 @@
-"""App Django factice fournissant un modèle `Part` minimal pour les tests.
-
-En production, ce label `part` correspond à l'app native d'InvenTree. Ici on
-en fournit un strict minimum pour que les FK `"part.Part"` du plugin
-résolvent quand la suite tourne hors container InvenTree.
-"""
+"""App Django factice fournissant un modèle `Part` minimal pour les tests."""
 
 from django.apps import AppConfig
 

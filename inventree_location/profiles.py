@@ -6,12 +6,7 @@ from .models import Profile
 
 
 def user_profile(user):
-    """Profil de l'utilisateur, `None` s'il n'en a pas.
-
-    On attrape `ObjectDoesNotExist` et non `Profile.DoesNotExist` : dans le
-    conteneur, le chargeur de plugins importe `models` deux fois et les deux
-    classes ne coïncident pas.
-    """
+    """Profil de l'utilisateur, `None` s'il n'en a pas."""
 
     if user is None:
         return None

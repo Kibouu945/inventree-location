@@ -1,14 +1,4 @@
-"""Client HTTP minimal pour l'API REST d'InvenTree.
-
-Conçu pour être utilisé depuis le plugin (ou des scripts/tests externes) afin
-d'interroger une instance InvenTree via son API publique, en s'authentifiant
-avec un token DRF.
-
-Pas d'auto-pagination dans cette V1 : les méthodes `list_*` retournent
-directement la charge utile renvoyée par InvenTree (en général un dict avec
-`count`, `next`, `previous`, `results`). L'appelant gère la pagination s'il
-en a besoin.
-"""
+"""Client HTTP minimal pour l'API REST d'InvenTree."""
 
 from __future__ import annotations
 
@@ -36,20 +26,7 @@ class InvenTreeAPIError(Exception):
 
 
 class InvenTreeClient:
-    """Client HTTP authentifié pour l'API InvenTree.
-
-    Exemple
-    -------
-    >>> client = InvenTreeClient(base_url="http://localhost:8000", token="...")
-    >>> parts = client.list_parts(category=3, active=True)
-    >>> part = client.get_part(42)
-
-    Le client peut être utilisé comme context manager pour fermer proprement
-    la session HTTP sous-jacente :
-
-    >>> with InvenTreeClient(base_url=..., token=...) as client:
-    ...     client.list_categories()
-    """
+    """Client HTTP authentifié pour l'API InvenTree."""
 
     def __init__(
         self,

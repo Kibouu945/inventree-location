@@ -24,11 +24,10 @@ export const DEFAULT_DELIVERY_FILTERS: DeliveryFiltersState = {
   ordre: []
 };
 
-/** Aujourd'hui au format `AAAA-MM-JJ`, dans le fuseau du poste.
- *
+/**
  * Le serveur compare à la journée entière dans son propre fuseau
  * (`Europe/Paris`, cf. `_borne_journee`) : envoyer une date nue plutôt qu'un
- * horodatage évite de retrancher un jour depuis un navigateur décalé. */
+ */
 export function aujourdhuiIso(maintenant: Date = new Date()): string {
   const mois = String(maintenant.getMonth() + 1).padStart(2, '0');
   const jour = String(maintenant.getDate()).padStart(2, '0');
@@ -64,8 +63,7 @@ export function buildDeliveryQuery(
   }
 
   // `date_from` filtre sur la date de retour, `date_to` sur celle de retrait :
-  // borner les deux à aujourd'hui garde les tournées *en cours* ce jour-là,
-  // y compris celles commencées la veille et rendues demain.
+  // borner les deux à aujourd'hui garde les tournées *en cours* ce jour-là, y
   if (filters.horizon === 'jour') {
     params.date_from = aujourdhui;
     params.date_to = aujourdhui;
@@ -76,12 +74,7 @@ export function buildDeliveryQuery(
   return params;
 }
 
-/**
- * Clés d'URL du widget Livraisons.
- *
- * Préfixées : plusieurs widgets partagent la même URL de dashboard (cf.
- * `reservationParams.ts` / `urlState.ts`).
- */
+/** Clés d'URL du widget Livraisons. */
 export const DELIVERY_URL_KEYS = [
   'livr_from',
   'livr_to',
@@ -128,7 +121,6 @@ export function serializeDeliveryFilters(
 
   // L'horizon est écrit dès qu'il n'est plus le défaut, y compris « tout » :
   // sans cela, « voir toutes les livraisons » redeviendrait « aujourd'hui » au
-  // moindre rechargement, puisqu'une absence de clé vaut défaut.
   if (filters.horizon !== DEFAULT_DELIVERY_FILTERS.horizon) {
     search.set('livr_horizon', filters.horizon);
   }

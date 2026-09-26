@@ -1,10 +1,4 @@
-"""RBAC des widgets dashboard : visibilité pilotée par les 7 groupes métier.
-
-Vérifie ``roles.visible_dashboard_widget_keys`` — la logique extraite de
-``core.get_ui_dashboard_items`` (``core`` n'est pas importable hors InvenTree,
-d'où le test sur le helper pur). Le filtrage doit reposer sur les rôles, PAS
-sur ``is_staff`` (cf. cahier des charges).
-"""
+"""RBAC des widgets dashboard : visibilité pilotée par les 7 groupes métier."""
 
 from __future__ import annotations
 
@@ -20,8 +14,7 @@ User = get_user_model()
 POSTE = "inventree-location-poste"
 
 #: Dérivé du mapping et non figé en dur : un widget ajouté à
-#: ``DASHBOARD_WIDGET_ROLES`` sans toucher ce test faisait échouer cinq cas d'un
-#: coup, sans que la régression concerne les rôles.
+#: ``DASHBOARD_WIDGET_ROLES`` sans toucher ce test faisait échouer cinq cas
 ALL_WIDGETS = set(roles.DASHBOARD_WIDGET_ROLES)
 
 #: Rôles disposant d'un poste de travail. Les écrans métier ne sont plus des

@@ -1,12 +1,4 @@
-"""Service métier pour gérer le workflow de statut des réservations.
-
-**Deuxième point d'écriture des tables d'exécution (lot L7).** Les six
-appelants de `transition_reservation_status` — le bouton « livrer » du
-gestionnaire, l'arbitrage de statut, le retour complet, le check-in retour,
-l'annulation d'une manifestation et le journal du livreur — passent tous par
-ici : greffer la projection sur le service plutôt que sur chacun d'eux, c'est
-une seule écriture au lieu de six, et aucun appelant futur à ne pas oublier.
-"""
+"""Service métier pour gérer le workflow de statut des réservations."""
 
 from django.db import transaction
 from django.utils import timezone
@@ -94,11 +86,7 @@ def transition_reservation_status(reservation, new_status, user=None, comment=""
 
     colonnes = ["statut", "validateur", "updated_at"]
 
-    # L'heure réelle du dépôt, sur ce chemin aussi. Le journal du livreur
-    # l'écrit de son côté, mais un bon livré par le bouton « Marquer livrée »
-    # n'y passe pas : son passage restait sans heure, et la vérification ne le
-    # voyait pas — elle ne comparait pas les dates. Vu en recette navigateur le
-    # 17/09/2026.
+    # L'heure réelle du dépôt, sur ce chemin aussi.
     if (
         new_status == StatutReservation.LIVREE
         and reservation.date_retrait_reelle is None
@@ -106,10 +94,7 @@ def transition_reservation_status(reservation, new_status, user=None, comment=""
         reservation.date_retrait_reelle = timezone.now()
         colonnes.append("date_retrait_reelle")
 
-    # Le statut, sa trace et sa projection : une seule transaction. Une table
-    # d'exécution qui survivrait à un statut annulé serait précisément la
-    # divergence que le lot L6 s'est donné les moyens de détecter. `atomic`
-    # s'imbrique en point de sauvegarde quand l'appelant en ouvre déjà une.
+    # Le statut, sa trace et sa projection : une seule transaction.
     with transaction.atomic():
         reservation.save(update_fields=colonnes)
 

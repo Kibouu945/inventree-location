@@ -1,9 +1,4 @@
-"""Back-office clients et contacts.
-
-Anciennement le back-office « groupes ». Le point du 09/09/2026 a fait du client
-une personne morale et de chaque interlocuteur un `Contact` — sans compte, le
-client externe n'accédant pas à la plateforme.
-"""
+"""Back-office clients et contacts."""
 
 from __future__ import annotations
 
@@ -90,12 +85,7 @@ class TestAcces:
         assert _list(factory, account).status_code == status.HTTP_403_FORBIDDEN
 
     def test_gestionnaire_autorise(self, factory, db):
-        """R5 : « un gestionnaire client gère un ou plusieurs clients ».
-
-        Le fichier clients est son outil de travail — il le tient au téléphone.
-        Lui refuser l'accès l'obligeait à demander à un administrateur
-        d'enregistrer son propre interlocuteur.
-        """
+        """R5 : « un gestionnaire client gère un ou plusieurs clients »."""
 
         account = User.objects.create_user(
             username="gestionnaire-fichier", password=STRONG_PASSWORD
@@ -132,12 +122,7 @@ class TestAcces:
         assert _list(factory, root).status_code == status.HTTP_200_OK
 
     def test_contacts_suivent_les_clients(self, factory, db):
-        """Les contacts vont avec le fichier : c'est le même geste métier.
-
-        Ouvrir les clients au gestionnaire sans leurs interlocuteurs l'aurait
-        laissé créer une fiche qu'il ne peut pas remplir — une manifestation
-        demande un contact référent.
-        """
+        """Les contacts vont avec le fichier : c'est le même geste métier."""
 
         account = User.objects.create_user(username="gest", password=STRONG_PASSWORD)
         account.groups.add(Group.objects.get(name=roles.GESTIONNAIRE))
@@ -336,8 +321,7 @@ class TestContacts:
         assert [item["nom"] for item in response.data["results"]] == ["Martin"]
 
     def test_desactivation(self, factory, admin):
-        """Un contact qui part sort des listes sans disparaître des devis
-        qu'il a signés."""
+        """Un contact qui part sort des listes sans disparaître des devis"""
 
         client = Client.objects.create(nom="Mairie")
         contact = Contact.objects.create(client=client, nom="Durand")

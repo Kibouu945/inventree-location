@@ -1,8 +1,5 @@
-// RBAC métier côté front — miroir de inventree_location/roles.py & permissions.py.
-//
-// La visibilité des actions (boutons créer / soumettre / éditer) est pilotée par
-// les 7 groupes métier, PAS par is_staff. Le backend reste la source d'autorité
-// (les endpoints renvoient 403) ; ce module ne fait que masquer l'UI en amont.
+// RBAC métier côté front — miroir de inventree_location/roles.py &
+// permissions.py.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 
 export const ADMIN = 'admin';
@@ -24,12 +21,7 @@ export const CLIENT_DESK_ROLES = [ADMIN, GESTIONNAIRE];
 export const RETURN_CHECKIN_ROLES = [ADMIN, MAGASINIER];
 export const RESERVATION_RETOUR_ROLES = [ADMIN, MAGASINIER];
 
-/**
- * Rôles (noms de groupes) de l'utilisateur courant.
- *
- * `context.user` est le store InvenTree (`UserStateProps`) : les données sont
- * derrière `getUser()`, et `groups` est un tableau d'objets `{ pk, name }`.
- */
+/** Rôles (noms de groupes) de l'utilisateur courant. */
 export function userRoles(context: InvenTreePluginContext): string[] {
   const groups = context.user?.getUser?.()?.groups;
 

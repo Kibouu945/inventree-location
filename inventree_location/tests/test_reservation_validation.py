@@ -1,10 +1,4 @@
-"""Tests des règles métier de `ReservationSerializer.validate` (RES-03).
-
-Brouillon : sauvegarde permissive (aucun champ obligatoire).
-Soumission (statut != brouillon) : demandeur, prestation, dates, au moins une
-ligne et au moins un article virtuel (RentableItem.is_virtual=True)
-deviennent obligatoires, et la période doit couvrir la prestation.
-"""
+"""Tests des règles métier de `ReservationSerializer.validate` (RES-03)."""
 
 from __future__ import annotations
 
@@ -243,9 +237,7 @@ class TestSoumissionStricte:
 
 
 class TestClientContactDesactive:
-    """Le bon engage réellement du matériel : la garde porte donc jusqu'ici,
-    même en brouillon — contrairement aux autres règles de cette méthode,
-    permissives en brouillon."""
+    """Le bon engage réellement du matériel : la garde porte donc jusqu'ici,"""
 
     @pytest.mark.django_db
     def test_refuse_meme_en_brouillon_si_client_inactif(

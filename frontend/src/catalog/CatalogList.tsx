@@ -52,13 +52,7 @@ function initialFilters(): CatalogFiltersState {
   return parseFilters(window.location.search);
 }
 
-/**
- * Écran liste du catalogue louable (CAT-02 / CAT-03).
- *
- * Tableau paginé du matériel InvenTree exposé par le plugin, avec recherche
- * debouncée, filtre par catégorie (multi), filtre louable et état porté par
- * l'URL.
- */
+/** Écran liste du catalogue louable (CAT-02 / CAT-03). */
 export function CatalogList({ context }: { context: InvenTreePluginContext }) {
   const [filters, setFilters] = useState<CatalogFiltersState>(initialFilters);
   const [debouncedSearch] = useDebouncedValue(filters.search, 300);
@@ -89,16 +83,13 @@ export function CatalogList({ context }: { context: InvenTreePluginContext }) {
   const rows = query.data?.results ?? [];
 
   // Les options venaient des seules lignes de la page courante : la liste
-  // était incomplète, et se réduisait encore à chaque filtrage — un filtre
-  // qui rétrécit à mesure qu'on s'en sert. Elles viennent maintenant de
-  // l'arbre des catégories InvenTree, comme sur les autres écrans.
+  // était incomplète, et se réduisait encore à chaque filtrage — un filtre qui
   const categoryOptions = useCategoryOptions(context);
 
   const pages = totalPages(query.data?.count ?? 0);
 
   // L'en-tête dit sur quoi porte le chiffre. « Disponible aujourd'hui » sur
-  // une colonne qui, en réalité, répondait pour la période demandée aurait
-  // été pire que l'ancien libellé.
+  // une colonne qui, en réalité, répondait pour la période demandée aurait été
   const libelleDisponibilite = useMemo(
     () => libelleColonneDisponibilite(filters.dateDebut, filters.dateFin),
     [filters.dateDebut, filters.dateFin]

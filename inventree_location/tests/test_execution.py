@@ -1,22 +1,4 @@
-"""Projection de l'exécution terrain (lot L6), puis sa greffe (lot L7).
-
-Les tables `Livraison` / `Ramassage` sont alimentées par recalcul depuis les
-colonnes du bon, qui restent la vérité. Ce que ces tests doivent prouver :
-
-- la projection est **idempotente** — rejouée, elle met à jour, elle ne
-  duplique pas ;
-- elle ne projette **rien** quand la prestation n'a pas de lieu, condition pour
-  ne casser aucune fixture existante ;
-- la vérification **voit** une divergence et **n'écrit rien** ;
-- la quantité restant à livrer est un **agrégat**, pas une colonne ;
-- et surtout : **aucun endpoint d'écriture n'a été touché**, donc le stock réel
-  ne bouge pas d'un pouce.
-
-Les trois dernières classes appartiennent au lot suivant : les trois points
-d'écriture — le journal du livreur, le passage de statut, la saisie de
-ramassage — écrivent désormais ces tables eux-mêmes, et chaque greffe se prouve
-par « aucune divergence ».
-"""
+"""Projection de l'exécution terrain (lot L6), puis sa greffe (lot L7)."""
 
 from __future__ import annotations
 
@@ -313,12 +295,7 @@ class TestCommandes:
 
 @pytest.mark.django_db
 class TestNonRegressionDuStock:
-    """Le critère de fin du lot : aucun endpoint d'écriture n'a bougé.
-
-    `get_unavailable_stock_quantity` est la seule source des manquants pour le
-    stock réel. Projeter ne doit strictement rien y changer — c'est ce qui rend
-    la stratégie additive sans risque.
-    """
+    """Le critère de fin du lot : aucun endpoint d'écriture n'a bougé."""
 
     def test_projeter_ne_change_pas_le_stock_indisponible(self, bon_livre):
         part = bon_livre["part"]
@@ -348,19 +325,7 @@ def bon_a_livrer(db):
 
 @pytest.mark.django_db
 class TestGreffeDuJournalDeLivraison:
-    """Le journal de livraison écrit les tables d'exécution (lot L7, greffe 1).
-
-    Ce que ces tests doivent prouver :
-
-    - un passage n'apparaît **qu'au dépôt**, pas à l'assignation : tant que le
-      matériel n'est pas sorti, il n'y a rien à consigner ;
-    - le passage est écrit par le geste du livreur, **sans commande** — c'est
-      toute la différence avec le lot L6 ;
-    - l'heure réelle du dépôt est enfin écrite quelque part, et le passage la
-      porte ;
-    - et la greffe se prouve comme prévu : `verifier_projection` ne trouve
-      **aucune divergence** juste après.
-    """
+    """Le journal de livraison écrit les tables d'exécution (lot L7, greffe 1)."""
 
     def test_accepter_ne_projette_aucun_passage(self, bon_a_livrer):
         """Prendre une livraison n'est pas la faire : rien n'est encore sorti."""
@@ -411,12 +376,7 @@ class TestGreffeDuJournalDeLivraison:
         assert Livraison.objects.get().date_reelle == bon.date_retrait_reelle
 
     def test_l_heure_du_depot_ne_s_ecrit_qu_une_fois(self, bon_a_livrer):
-        """Ce qui garantit l'unicité, c'est la machine à états, pas un garde.
-
-        Un détour par « problème » est légitime (`TRANSITIONS_ETAT`) et n'écrit
-        pas l'heure ; « livrée » est terminal, donc un second dépôt est refusé
-        avant d'avoir pu la réécrire.
-        """
+        """Ce qui garantit l'unicité, c'est la machine à états, pas un garde."""
 
         bon = bon_a_livrer["reservation"]
         livreur = bon_a_livrer["demandeur"]
@@ -492,12 +452,7 @@ class TestGreffeDuJournalDeLivraison:
 
 @pytest.mark.django_db
 class TestGreffeDuPassageDeStatut:
-    """Le service de statut écrit les tables d'exécution (lot L7, greffe 2).
-
-    Greffée sur `transition_reservation_status` et non sur ses appelants : le
-    bouton « livrer » du gestionnaire, l'arbitrage, le retour complet, le
-    check-in et l'annulation d'une manifestation y passent tous.
-    """
+    """Le service de statut écrit les tables d'exécution (lot L7, greffe 2)."""
 
     def test_livrer_sans_passer_par_le_livreur_ecrit_le_passage(self, bon_a_livrer):
         """Le gestionnaire livre au clavier : la table suit quand même."""
@@ -516,12 +471,7 @@ class TestGreffeDuPassageDeStatut:
         assert divergences_du_bon(bon) == []
 
     def test_le_retour_ecrit_le_ramassage_depuis_le_registre(self, bon_a_livrer):
-        """Les quatre compteurs viennent du registre, jamais d'un payload.
-
-        Quatre unités sorties, trois revenues dont une abîmée, une déclarée
-        manquante : le `recupere` est la seule valeur *déduite* (revenu moins
-        abîmé), les trois autres sont des incidents.
-        """
+        """Les quatre compteurs viennent du registre, jamais d'un payload."""
 
         bon = bon_a_livrer["reservation"]
         ligne = bon_a_livrer["ligne"]
@@ -546,12 +496,7 @@ class TestGreffeDuPassageDeStatut:
         assert divergences_du_bon(bon) == []
 
     def test_annuler_un_bon_livre_retire_son_passage(self, bon_a_livrer):
-        """Arbitrage à confirmer côté métier, voir le rapport du lot.
-
-        `livraison_attendue` ne reconnaît un passage qu'à un bon dont le
-        matériel est sorti ; un bon annulé n'en est plus un, donc la table cesse
-        de porter la trace d'une livraison qui a pourtant eu lieu.
-        """
+        """Arbitrage à confirmer côté métier, voir le rapport du lot."""
 
         bon = bon_a_livrer["reservation"]
 
@@ -577,13 +522,7 @@ class TestGreffeDuPassageDeStatut:
 
 @pytest.mark.django_db
 class TestGreffeDeLaSaisieDeRamassage:
-    """La saisie de ramassage écrit les tables d'exécution (lot L7, greffe 3).
-
-    Par l'endpoint réel : cette vue pose son statut à la main, sans passer par
-    `transition_reservation_status`, et c'est justement ce qui en fait un
-    troisième point d'écriture. Un test qui appellerait la projection
-    directement ne prouverait pas ça.
-    """
+    """La saisie de ramassage écrit les tables d'exécution (lot L7, greffe 3)."""
 
     def test_la_saisie_ecrit_le_passage_de_ramassage(self, bon_a_livrer):
         bon = bon_a_livrer["reservation"]
@@ -623,8 +562,7 @@ class TestGreffeDeLaSaisieDeRamassage:
         assert article.quantite_cassee == 1
         assert article.quantite_detruite == 1
         # Déclarée par la saisie, pas déduite : R31 (« le manquant se déduit »)
-        # est une règle d'écran, que F7 portera. Le serveur, lui, enregistre ce
-        # que l'écran envoie.
+        # est une règle d'écran, que F7 portera.
         assert article.quantite_manquante == 1
         assert article.facturer_client is True
 
@@ -657,12 +595,7 @@ class TestGreffeDeLaSaisieDeRamassage:
 
 @pytest.mark.django_db
 class TestRelectureDesLignes:
-    """La projection relit les lignes, elle ne croit pas l'instance reçue.
-
-    Le bug qui a coûté la greffe 3 : la saisie de ramassage précharge ses
-    lignes, puis les modifie par d'autres instances. Projeter depuis le cache
-    écrivait des zéros là où la vérité disait quatre.
-    """
+    """La projection relit les lignes, elle ne croit pas l'instance reçue."""
 
     def test_un_cache_perime_ne_fait_pas_mentir_la_projection(self, bon_livre):
         bon = bon_livre["reservation"]
@@ -684,11 +617,7 @@ class TestRelectureDesLignes:
 
 @pytest.mark.django_db
 class TestQuantiteDeposee:
-    """« Combien a été effectivement déposé » — la valeur qu'affiche F6.
-
-    Somme des passages, pas la colonne du bon. Et deux chemins pour la lire :
-    le cache de l'appelant quand il a préchargé, une agrégation sinon.
-    """
+    """« Combien a été effectivement déposé » — la valeur qu'affiche F6."""
 
     def test_sans_passage_rien_n_est_depose(self, bon_livre):
         ligne = bon_livre["ligne"]
@@ -728,13 +657,7 @@ class TestQuantiteDeposee:
 
 @pytest.mark.django_db
 class TestHeureDuDepot:
-    """L'heure réelle du dépôt, sur les deux chemins qui y mènent.
-
-    Le journal du livreur l'écrit ; le bouton « Marquer livrée » du gestionnaire
-    ne passe pas par lui. Le passage restait donc sans heure, et la vérification
-    ne le voyait pas — elle ne comparait pas les dates. Trouvé en recette
-    navigateur, ces trois tests ferment le trou.
-    """
+    """L'heure réelle du dépôt, sur les deux chemins qui y mènent."""
 
     def test_le_bouton_du_gestionnaire_ecrit_l_heure(self, bon_a_livrer):
         bon = bon_a_livrer["reservation"]

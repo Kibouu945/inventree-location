@@ -1,9 +1,4 @@
-"""Tests de la détection de conflits basée sur le stock (US-03 / SCRUM-76).
-
-Couvre le moteur `detect_reservation_conflicts` (aucun conflit, conflit
-partiel/total, article virtuel ignoré), l'endpoint de check (200 / 409) et
-le refus de validation d'une réservation en conflit non forcé.
-"""
+"""Tests de la détection de conflits basée sur le stock (US-03 / SCRUM-76)."""
 
 from datetime import timedelta
 
@@ -180,11 +175,7 @@ def test_partial_conflict_when_requesting_more_than_available(stock_setup):
 
 @pytest.mark.django_db
 def test_other_prestation_forecast_is_counted(stock_setup):
-    """Le prévisionnel d'une autre prestation engage le stock, sans réservation.
-
-    Sans cela, la détection de conflit et le catalogue annonçaient deux
-    disponibilités différentes pour le même article à la même date.
-    """
+    """Le prévisionnel d'une autre prestation engage le stock, sans réservation."""
 
     now = stock_setup["now"]
     part = stock_setup["part"]
@@ -315,13 +306,7 @@ def test_validation_refused_when_validee_and_conflict(stock_setup):
 
 @pytest.mark.django_db
 def test_forced_reservation_bypasses_the_block(stock_setup):
-    """`forced=True` valide malgré le conflit (US-03, « forcer malgré »).
-
-    SCRUM-105 voulait bloquer toute sauvegarde en conflit, y compris forcée.
-    La règle retenue reste celle de develop : le blocage ne porte que sur le
-    passage en « validée », et le forçage reste la porte de sortie de
-    l'arbitrage.
-    """
+    """`forced=True` valide malgré le conflit (US-03, « forcer malgré »)."""
 
     candidate = _make_candidate(
         stock_setup, qty=1, statut=StatutReservation.VALIDEE, forced=True
@@ -332,11 +317,7 @@ def test_forced_reservation_bypasses_the_block(stock_setup):
 
 @pytest.mark.django_db
 def test_non_validee_status_is_saved_despite_conflict(stock_setup):
-    """Une réservation non validée se sauvegarde malgré le conflit.
-
-    L'arbitrage a lieu à la validation : refuser la sauvegarde empêcherait
-    l'organisateur d'enregistrer sa demande.
-    """
+    """Une réservation non validée se sauvegarde malgré le conflit."""
 
     candidate = _make_candidate(stock_setup, qty=1, statut=StatutReservation.SOUMISE)
 
@@ -439,11 +420,7 @@ def test_stock_availability_endpoint_returns_200_when_available(gestionnaire, st
 def test_resoudre_un_conflit_de_stock_exige_que_la_penurie_ait_disparu(
     gestionnaire, stock_setup
 ):
-    """« Résoudre » ne doit jamais taire une pénurie encore réelle.
-
-    Avant, l'endpoint posait `state = resolved` sans rien vérifier : le
-    registre annonçait « traité » pendant qu'il manquait toujours du matériel.
-    """
+    """« Résoudre » ne doit jamais taire une pénurie encore réelle."""
 
     from inventree_location.models import ConflictHistory, ConflictState, ConflictType
 
@@ -489,12 +466,7 @@ def test_resoudre_un_conflit_de_stock_exige_que_la_penurie_ait_disparu(
 
 @pytest.mark.django_db
 def test_une_penurie_nee_apres_coup_entre_au_registre(gestionnaire, stock_setup):
-    """Le stock peut baisser hors de toute écriture de réservation.
-
-    Avant, seule `register_stock_conflict_history` écrivait, au moment de
-    l'enregistrement : une pénurie née d'une perte de stock s'affichait dans
-    « Conflits actuels » sans jamais entrer à l'historique.
-    """
+    """Le stock peut baisser hors de toute écriture de réservation."""
 
     from inventree_location.conflicts import sync_conflict_registry
     from inventree_location.models import ConflictHistory, ConflictState, ConflictType

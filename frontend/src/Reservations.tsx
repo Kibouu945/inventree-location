@@ -7,9 +7,7 @@ import {
 import { ReservationsList } from './reservation/ReservationsList';
 import { WidgetScroll } from './WidgetScroll';
 
-/**
- * Fonction appelée par InvenTree pour rendre l'écran réservations.
- */
+/** Fonction appelée par InvenTree pour rendre l'écran réservations. */
 export function renderInvenTreeLocationReservations(
   context: InvenTreePluginContext
 ) {

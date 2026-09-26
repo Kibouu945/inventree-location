@@ -1,21 +1,4 @@
-"""STK-01 — Calcul du stock disponible au jour entier.
-
-Le stock est unique et partagé entre toutes les manifestations et tous les
-organisateurs. La disponibilité se calcule au **jour** : on arrondit la période
-de la prestation au jour entier (conforme CDC « jour entier, quelle que soit la
-plage horaire »). Les heures ne servent qu'à la logistique livraison/ramassage.
-
-Pour un article donné :
-
-    disponible = stock total louable − quantités déjà engagées
-
-où « déjà engagées » couvre les **deux** façons dont le matériel est retenu sur
-une période : le prévisionnel porté par les lignes de prestation (RES-09) et le
-réalisé porté par les lignes des réservations bloquantes (CON-04). Voir
-`compute_engaged_quantities` pour la règle de réconciliation entre les deux.
-Les articles virtuels (services, ex. « nettoyage ») n'ont pas de stock physique
-et sont ignorés.
-"""
+"""STK-01 — Calcul du stock disponible au jour entier."""
 
 from __future__ import annotations
 
@@ -59,42 +42,7 @@ def compute_engagement_details(
     exclude_prestation_id=None,
     exclude_reservation_id=None,
 ) -> dict[int, list[dict]]:
-    """Détail, par article, des prestations qui l'engagent sur la période.
-
-    Même règle de réconciliation que `compute_engaged_quantities` (dont c'est
-    la version détaillée), mais on garde de quoi nommer le responsable d'une
-    pénurie : sans cela, un conflit causé par le seul prévisionnel d'une
-    prestation ne désignait rien à l'utilisateur.
-
-    Deux tables décrivent le même besoin matériel :
-
-    - `LignePrestation` — le **prévisionnel** : ce dont la prestation a besoin
-      (RES-09) ;
-    - `LigneReservation` — le **réalisé** : ce que les réservations au statut
-      bloquant (cf. `CONFLICT_STATUSES`) retiennent effectivement.
-
-    Les sommer double-compterait la réservation qui matérialise le
-    prévisionnel de sa propre prestation ; n'en lire qu'une seule rendait
-    invisible la moitié des engagements — c'est ce qui faussait la répartition
-    d'un même article entre plusieurs réservations. On retient donc, **par
-    prestation et par article**, le plus grand des deux : le prévisionnel tient
-    lieu de réservation tant qu'aucune n'est posée, et s'efface dès que les
-    réservations le dépassent.
-
-    Exclusions :
-
-    - `exclude_prestation_id` : ignore tout ce qui appartient à cette
-      prestation (ses lignes **et** ses réservations) — une prestation ne se
-      concurrence pas elle-même.
-    - `exclude_reservation_id` : ignore cette réservation, ainsi que le
-      prévisionnel de sa prestation dont elle est justement la
-      matérialisation. Les **autres** réservations de la même prestation
-      restent comptées.
-
-    Retourne ``{part_id: [{"prestation_id", "prestation_nom", "quantite",
-    "origine", "reservation_numeros"}]}`` où ``origine`` vaut ``"prevision"``
-    ou ``"reservations"`` selon celle des deux qui l'emporte.
-    """
+    """Détail, par article, des prestations qui l'engagent sur la période."""
 
     from .models import LignePrestation, LigneReservation, Reservation
 
@@ -194,11 +142,7 @@ def compute_engaged_quantities(
     exclude_prestation_id=None,
     exclude_reservation_id=None,
 ) -> dict[int, int]:
-    """Quantités déjà engagées par article sur la période, au jour entier.
-
-    Vue agrégée de `compute_engagement_details`, dont la docstring porte la
-    règle de réconciliation prévisionnel / réalisé et le sens des exclusions.
-    """
+    """Quantités déjà engagées par article sur la période, au jour entier."""
 
     details = compute_engagement_details(
         part_ids,
@@ -221,13 +165,7 @@ def compute_stock_availability(
     exclude_prestation_id=None,
     exclude_reservation_id=None,
 ) -> dict:
-    """Disponibilité au jour de chaque article demandé.
-
-    `requested_lines` est un itérable de dicts ``{"part_id", "quantite"}``.
-    Retourne ``{"has_shortage": bool, "lines": [...]}`` : une ligne par article
-    non-virtuel avec stock total, quantité déjà engagée, disponible, manquant et
-    drapeau de pénurie.
-    """
+    """Disponibilité au jour de chaque article demandé."""
 
     from part.models import Part
 
@@ -296,22 +234,7 @@ def compute_parts_availability(
     exclude_prestation_id=None,
     exclude_reservation_id=None,
 ) -> dict[int, int]:
-    """Disponibilité au jour d'un ensemble de parts, hors prestation existante.
-
-    Sert au catalogue (CAT-02) et au sélecteur de matériel d'une réservation :
-    on veut « combien de X reste-t-il de disponible pour telle période ? »
-    sans avoir à demander une quantité précise au préalable.
-
-    Sans période fournie, on utilise la journée courante **du fuseau métier**
-    (`timezone.localdate()`, cf. INVENTREE_TIMEZONE) : `date.today()` suivait
-    le fuseau du processus, si bien qu'entre minuit UTC et minuit local la
-    disponibilité « du jour » portait sur la veille ou le lendemain. Les
-    articles virtuels (pas de stock physique) sont absents du résultat —
-    l'appelant doit les traiter à part.
-
-    `exclude_reservation_id` sert à l'édition d'une réservation existante :
-    sans lui, ses propres quantités se compteraient contre elle.
-    """
+    """Disponibilité au jour d'un ensemble de parts, hors prestation existante."""
 
     part_ids = [int(pid) for pid in part_ids]
 
@@ -337,11 +260,7 @@ def compute_parts_availability(
 
 
 def compute_prestation_stock(prestation) -> dict:
-    """Disponibilité au jour des articles d'une prestation enregistrée.
-
-    S'exclut elle-même du calcul du « déjà engagé » (ses propres lignes ne
-    doivent pas être comptées comme concurrentes).
-    """
+    """Disponibilité au jour des articles d'une prestation enregistrée."""
 
     lignes = [
         {"part_id": ligne.part_id, "quantite": ligne.quantite}

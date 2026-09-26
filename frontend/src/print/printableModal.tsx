@@ -1,20 +1,4 @@
-/**
- * Impression d'un bon affiché dans une modale Mantine.
- *
- * Deux pièges, tous deux vérifiés au navigateur :
- *
- * 1. `window.print()` imprime la page entière. Le dashboard monte plusieurs
- *    widgets : sans masquer le reste, le bon part noyé au milieu.
- * 2. Masquer le reste ne suffit pas. `.mantine-Modal-content` défile
- *    (`overflow: auto`, `max-height`) et `.mantine-Modal-inner` est en
- *    `position: fixed` : la modale ne laissait donc imprimer que sa partie
- *    visible à l'écran — le bon de ramassage sortait coupé après sa première
- *    ligne de tableau. Il faut remettre ces conteneurs à plat.
- *
- * Usage : envelopper le contenu à imprimer dans `className={PRINT_AREA}`, les
- * boutons dans `className={PRINT_HIDE}`, et monter `<PrintableModalStyles />`
- * dans la modale.
- */
+/** Impression d'un bon affiché dans une modale Mantine. */
 
 export const PRINT_AREA = 'inventree-location-print-area';
 export const PRINT_HIDE = 'inventree-location-print-hide';

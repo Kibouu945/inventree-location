@@ -1,9 +1,4 @@
-"""Pool commun des livraisons et progression d'état (US-18 / US-19).
-
-Passe par le routeur d'URL réel et l'authentification par token, comme
-`test_functional_api.py` : ces endpoints se jouent au multipart et au `DELETE`,
-deux choses qu'un appel direct à la vue ne vérifie pas.
-"""
+"""Pool commun des livraisons et progression d'état (US-18 / US-19)."""
 
 from __future__ import annotations
 

@@ -8,13 +8,7 @@ export const CLIENTS_URL = `${BASE}/clients/`;
 export const CONTACTS_URL = `${BASE}/contacts/`;
 export const PARTS_URL = `${BASE}/parts/`;
 
-/**
- * Photo d'un objet : endpoint distinct du formulaire.
- *
- * Le formulaire reste en JSON ; y glisser un fichier imposerait du multipart à
- * tous les champs, où un booléen devient « true » et un entier nul une chaîne
- * vide. POST pour déposer, DELETE pour retirer.
- */
+/** Photo d'un objet : endpoint distinct du formulaire. */
 export function partImageUrl(partId: number): string {
   return `${PARTS_URL}${partId}/image/`;
 }

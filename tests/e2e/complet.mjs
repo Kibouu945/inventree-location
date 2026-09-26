@@ -1,23 +1,4 @@
 // Scénario complet : tout le cycle, conflit de stock compris.
-//
-// `nominal.mjs` suit une chaîne simple — un client, une prestation, un bon.
-// Celui-ci joue la situation réelle : deux prestations sur deux lieux et
-// à horaires serrés, deux bons qui demandent ensemble plus que le stock, le
-// conflit annoncé, le stock complété, puis une livraison en deux temps — un
-// lieu livré, l'autre plus tard — et enfin le retour.
-//
-// C'est le scénario de démonstration : il montre ce qu'un tableur ne sait pas
-// faire, dans l'ordre où le métier le vit.
-//
-// La « livraison partielle » se lit à deux niveaux, tous deux réels :
-// - Scène — place centrale porte deux bons ; livrer le premier sans le second
-//   la fait passer « partielle » (l'écran l'affiche jaune), livrer le second
-//   la fait passer « complète » (vert).
-// - Tant que Buvette — parc n'a rien reçu, la manifestation entière reste
-//   « partielle » ; elle ne passe « complète » qu'une fois les deux lieux
-//   livrés.
-// Le tout se termine avant l'heure de début des deux prestations — sans quoi
-// la démonstration raconterait une livraison en retard.
 import { chromium } from 'playwright';
 
 const BASE = 'http://localhost:8000';
@@ -46,8 +27,7 @@ let ctx;
 let page;
 const T = (n) => page.waitForTimeout(n);
 
-/** Ouvre une session avec le compte du métier, et attend que son poste soit là.
- *
+/**
  * Attendre la navigation du poste plutôt qu'un délai fixe : le widget est un
  * import dynamique, et sur une machine chargée huit secondes ne suffisent pas.
  */
@@ -161,10 +141,7 @@ const AUJOURD_HUI = new Date().getDate();
 const DANS_DEUX_JOURS = new Date(Date.now() + 2 * 864e5).getDate();
 
 // Deux prestations serrées, le même jour : quinze minutes de battement entre
-// la fin de l'une et le début de l'autre. Assez de marge après « maintenant »
-// pour que toute la livraison — les deux temps — se termine avant que la
-// première ne commence ; ce n'est pas gardé par le serveur, c'est la
-// démonstration qui doit le rester.
+// la fin de l'une et le début de l'autre.
 const MAINTENANT = new Date();
 
 /** À la minute ronde : le bon reprend ces horaires en les affichant sans les
@@ -245,14 +222,9 @@ await etape('3. La manifestation, sur trois jours à partir d\'aujourd\'hui', as
 });
 
 /** Crée une prestation depuis l'arborescence, sur la manifestation filtrée. */
-/** Amène l'arborescence sur la manifestation du scénario.
- *
- * L'arbre part du client depuis F3, et le filtre client d'autrefois a disparu —
- * il faisait doublon avec le niveau. Ce scénario le sélectionnait encore :
- * l'étape 4 attendait trente secondes un champ absent, puis tombait, et sept
- * étapes suivaient en cascade. La recherche fait le même chemin : elle ne garde
- * que les clients portant une manifestation qui corresponde, et les déplie.
- * Elle est différée de 300 ms côté écran.
+/**
+ * L'arbre part du client depuis F3, et le filtre client d'autrefois a disparu
+ * — il faisait doublon avec le niveau.
  */
 async function ouvrirLaManifestation() {
   await page.getByPlaceholder(/Rechercher une manifestation/i).fill(NOM_MANIF);
@@ -362,9 +334,7 @@ await etape('6. Validation — le serveur refuse au-delà du stock, et dit de co
   await nav('Réservations').click();
   await T(3500);
 
-  // On tente, on lit le refus, on complète, on retente. C'est la boucle réelle
-  // du gestionnaire : le serveur ne se contente pas de refuser, il chiffre le
-  // manque et nomme les bons qui occupent le parc.
+  // On tente, on lit le refus, on complète, on retente.
   let valides = 0;
   for (const [rang, numero] of BONS.entries()) {
     const cliquer = async () => {
@@ -470,19 +440,14 @@ await etape('8. Le gestionnaire complète le parc : le bon passe', async () => {
   return `+${penurie.missing_quantity} en stock — ${TROP.numero} : ${apres.body?.statut}`;
 });
 
-/** Cherche « Partiel » ou « Complet » dans le filtre d'avancement.
- *
+/**
  * Purement informatif : la table hiérarchique ne montrait, aux deux essais de
  * ce scénario, qu'une seule des deux prestations sous la manifestation malgré
- * des bons livrés sur les deux — sans lien avec l'avancement lui-même. Le
- * verdict qui compte pour le scénario vient de l'API (`etatManifestation`) ;
- * celui-ci ne fait que dire ce que l'écran affiche, pour qui regarde en
- * direct.
+ * des bons livrés sur les deux — sans lien avec l'avancement lui-même.
  */
 async function manifestationDansLeFiltre(libelle) {
   // Observation, jamais une preuve : si le segment n'existe pas (liste vide,
   // filtre absent), on le dit et on continue — le verdict qui compte vient de
-  // `etatManifestation`, déjà établi avant cet appel.
   try {
     await page.getByText(libelle, { exact: true }).first().click({ timeout: 5000 });
     await T(3000);
@@ -546,19 +511,13 @@ async function livrerUnBon(numero) {
   return false;
 }
 
-/** Élargit le filtre de la tournée à toutes les journées.
- *
+/**
  * L'écran du livreur s'ouvre sur « Aujourd'hui », et c'est le bon défaut : sa
- * tournée est celle du jour. Mais le scénario place ses créneaux quatre-vingt-
- * dix minutes après l'heure de lancement — passé 22 h 30, ils basculent sur
- * demain et la liste s'affiche vide. Joué à 22 h 45, le scénario échouait donc
- * sur une application saine.
+ * tournée est celle du jour.
  */
 async function toutesLesJournees() {
   // `SegmentedControl` de Mantine : un `label`, pas un `button` — un
-  // `getByRole('button')` ne trouve rien. Et pas de garde silencieux : un
-  // helper qui ne fait rien sans le dire coûte une passe complète du scénario
-  // pour être découvert.
+  // `getByRole('button')` ne trouve rien.
   await page.locator('label').filter({ hasText: /^Tout$/ }).first().click();
   await T(2500);
 }
@@ -600,8 +559,7 @@ await etape('9a. Livraison partielle — Scène livrée, Buvette encore à faire
 
 await etape('9b. Le reste, livré plus tard — la manifestation passe complète', async () => {
   // « Plus tard » : le second passage du livreur, pas la même minute que le
-  // premier. Le second bon de la Scène (TROP) et celui de la Buvette sont
-  // livrés ensemble, ce qui clôt les deux lieux d'un coup.
+  // premier.
   await nav('Livraisons').click();
   await T(3000);
   await page.getByText('Liste', { exact: true }).first().click();
@@ -633,8 +591,7 @@ await etape('9b. Le reste, livré plus tard — la manifestation passe complète
   await page.screenshot({ path: `${process.env.SHOTS_DIR ?? '.'}/complet-livraison-complete.png` });
 
   // La promesse du scénario : tout ceci s'est terminé avant que la première
-  // prestation ne commence. Ce n'est pas une règle du serveur — rien ne
-  // l'empêcherait —, c'est ce que la démonstration doit rester vraie.
+  // prestation ne commence.
   const maintenant = new Date();
   if (maintenant >= DEBUT_A) {
     throw new Error(
@@ -651,11 +608,7 @@ await etape('10. Ramassage — poste magasinier', async () => {
   await connexion('demo_magasinier', 'Demo!2026');
   await nav('Ramassages').click();
   await T(4500);
-  // Déplier, et le dire quand ça ne déplie pas. La version d'avant sautait
-  // chaque niveau absent par un `if (count())`, puis rendait « arborescence
-  // dépliée » dans les deux branches de son ternaire : l'étape passait au vert
-  // sans avoir rien ouvert, et un écran de ramassage mort se serait lu comme
-  // un succès.
+  // Déplier, et le dire quand ça ne déplie pas.
   const manif = page.getByText(NOM_MANIF).first();
   await manif.waitFor({ timeout: 15000 });
   await manif.click();

@@ -1,7 +1,5 @@
 // Pop-up de création rapide d'une prestation depuis le formulaire de
 // réservation (RES-08) : évite de quitter le formulaire pour rattacher une
-// nouvelle prestation à une manifestation existante. La prestation créée est
-// renvoyée via `onCreated` pour sélection automatique côté appelant.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import { Button, Group, Modal, Select, Stack, TextInput } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
@@ -68,9 +66,7 @@ function emptyState(manifestationId: number | null): FormState {
 
 /**
  * Pop-up (modal Mantine) créant une prestation sans quitter le formulaire de
- * réservation (RES-08). Pré-rattachée à `manifestationId` quand la
- * réservation en cours en connaît déjà une (via sa prestation courante) ;
- * sinon l'utilisateur choisit la manifestation dans la pop-up.
+ * réservation (RES-08).
  */
 export function PrestationCreateModal({
   context,
@@ -85,11 +81,10 @@ export function PrestationCreateModal({
   /** Manifestation à pré-sélectionner (celle de la prestation déjà choisie
    * dans le formulaire, s'il y en a une). */
   manifestationId: number | null;
-  /** Libellé du bouton d'action.
-   *
+  /**
    * « et sélectionner » n'a de sens qu'appelé depuis le formulaire de
-   * réservation, où la prestation créée vient se poser dans le champ. Depuis
-   * l'arborescence, il n'y a rien à sélectionner ensuite. */
+   * réservation, où la prestation créée vient se poser dans le champ.
+   */
   libelleAction?: string;
   onClose: () => void;
   onCreated: (prestation: Prestation) => void;
@@ -105,9 +100,6 @@ export function PrestationCreateModal({
 
   // Repart d'un état vierge (rattaché à la manifestation courante) à chaque
   // ouverture, pour ne pas réafficher la saisie d'une création précédente.
-  // `manifestationId` est volontairement absent des deps : un changement en
-  // arrière-plan pendant que la pop-up est ouverte ne doit pas écraser la
-  // saisie en cours de l'utilisateur.
   useEffect(() => {
     if (opened) {
       setState(emptyState(manifestationId));

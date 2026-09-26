@@ -1,8 +1,5 @@
-// Bon de livraison imprimable (US livreur) : détail d'une livraison + impression
-// via CSS d'impression + window.print(). Pas de dépendance PDF pour l'instant —
-// un futur modèle PDF pourra remplacer ce rendu sans toucher à l'assemblage des
-// données (cf. DeliveriesList / types.ts). Les règles d'impression sont
-// partagées avec le bon de ramassage (cf. print/printableModal.tsx).
+// Bon de livraison imprimable (US livreur) : détail d'une livraison +
+// impression via CSS d'impression + window.print(). Pas de dépendance PDF pour
 import {
   Button,
   Divider,

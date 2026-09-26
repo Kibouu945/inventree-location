@@ -1,22 +1,4 @@
-"""Composition du tableau de bord InvenTree à partir des rôles du plugin.
-
-InvenTree ouvre un tableau de bord **vide** : les widgets d'un plugin n'y
-figurent que si l'utilisateur va les chercher un par un dans « Add Widget ».
-Le client a testé l'instance en ligne et en a conclu qu'il avait « la version de
-base d'InvenTree » — rien de ce qui a été développé n'était visible. On pose
-donc les écrans nous-mêmes dès qu'un rôle est attribué.
-
-La disposition vit côté serveur, dans `users.models.UserProfile.widgets`, au
-format que produit react-grid-layout :
-
-    {"layouts": {"lg": [{"i": ..., "x": 0, "y": 0, "w": 12, "h": 8,
-                         "minW": 12, "minH": 8}, ...], "sm": [...]},
-     "widgets": ["p-inventree-location-inventree-location-catalog", ...]}
-
-Ce module ne contient que le calcul pur — aucun accès base, aucun import
-InvenTree — pour rester testable hors de la stack, comme `roles` et
-`conflicts` (`core` n'est pas importable en pytest).
-"""
+"""Composition du tableau de bord InvenTree à partir des rôles du plugin."""
 
 from __future__ import annotations
 
@@ -25,14 +7,10 @@ from . import roles
 #: Slug du plugin tel qu'InvenTree le préfixe aux identifiants de widget.
 PLUGIN_SLUG = "inventree-location"
 
-#: Gabarit de chaque widget, dans l'ordre où on veut les empiler sur le
-#: tableau de bord. Les valeurs doublent les `options` de
-#: `core.get_ui_dashboard_items` : InvenTree ne les applique qu'à l'ajout
-#: manuel, on les reproduit donc ici pour une pose automatique identique.
+#: Gabarit de chaque widget, dans l'ordre où on veut les empiler sur le tableau
+#: de bord.
 WIDGET_SIZES: dict[str, tuple[int, int]] = {
-    # Le poste tient lieu de page : pleine largeur, en tête. La hauteur est un
-    # compromis — la boîte est exprimée en lignes de grille et ne sait rien de
-    # la fenêtre (cf. `postes/Poste.tsx`).
+    # Le poste tient lieu de page : pleine largeur, en tête.
     "inventree-location-poste": (12, 10),
     "inventree-location-catalog": (12, 8),
     "inventree-location-organisation": (12, 8),
@@ -88,11 +66,7 @@ def _layout_entry(key: str, y: int) -> dict:
 
 
 def _ordered(keys) -> list[str]:
-    """Clés connues, dans l'ordre d'affichage, sans doublon.
-
-    `WIDGET_SIZES` fait foi pour l'ordre : une clé absente est ignorée plutôt
-    que posée sans gabarit (elle sortirait en boîte minuscule, illisible).
-    """
+    """Clés connues, dans l'ordre d'affichage, sans doublon."""
 
     wanted = set(keys)
 
@@ -119,12 +93,7 @@ def build_dashboard_state(widget_keys) -> dict:
 
 
 def _existing_layouts(current) -> dict[str, list[dict]]:
-    """Layouts exploitables d'un état existant, quelle qu'en soit la forme.
-
-    Le champ est un JSON libre, nullable, écrit par le navigateur : on ne peut
-    pas supposer qu'il est bien formé. Tout ce qui n'est pas une liste de
-    dictionnaires est traité comme absent plutôt que de faire échouer la pose.
-    """
+    """Layouts exploitables d'un état existant, quelle qu'en soit la forme."""
 
     if not isinstance(current, dict):
         return {}
@@ -150,16 +119,7 @@ def _existing_layouts(current) -> dict[str, list[dict]]:
 
 
 def merge_dashboard_state(current, allowed_keys) -> dict:
-    """Met l'état existant en cohérence avec les widgets autorisés.
-
-    Non destructif, parce qu'un changement de rôle ne doit pas effacer un
-    tableau de bord que l'utilisateur a rangé lui-même :
-
-    - les widgets du cœur d'InvenTree ne sont jamais touchés ;
-    - les widgets du plugin devenus interdits sont retirés ;
-    - les widgets nouvellement autorisés sont ajoutés **sous** l'existant ;
-    - l'ordre et les tailles déjà en place sont conservés.
-    """
+    """Met l'état existant en cohérence avec les widgets autorisés."""
 
     allowed = set(_ordered(allowed_keys))
     layouts = _existing_layouts(current)

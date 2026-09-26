@@ -1,6 +1,5 @@
 // Vue calendrier des livraisons (US livreur) : un badge par jour indique le
 // nombre de livraisons dont le retrait est prévu ce jour-là ; un clic filtre
-// la liste sur cette journée.
 import { Group, Indicator, Stack, Text } from '@mantine/core';
 import { Calendar } from '@mantine/dates';
 import { useMemo } from 'react';

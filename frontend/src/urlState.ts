@@ -1,16 +1,4 @@
-/**
- * Partage de la query string entre widgets du dashboard.
- *
- * Plusieurs widgets du plugin (Catalogue, Réservations, …) sont montés
- * simultanément sur `/web/home` et se synchronisent tous sur la même URL. Si
- * chacun réécrit la query string entière avec sa propre sérialisation, le
- * dernier à se synchroniser efface les filtres des autres — et deux widgets
- * qui utilisent la même clé pour des filtres différents se contaminent
- * mutuellement.
- *
- * Chaque widget ne réécrit donc que les clés qu'il possède et préserve le
- * reste.
- */
+/** Partage de la query string entre widgets du dashboard. */
 
 /** Réécrit dans l'URL les seules clés possédées par l'appelant. */
 export function syncOwnedParams(

@@ -40,14 +40,7 @@ export function buildReservationQuery(
   return params;
 }
 
-/**
- * Clés d'URL du widget Réservations.
- *
- * Préfixées : le widget Catalogue est monté sur le même dashboard et possède
- * déjà `q` / `cat` / `rentable` / `page`, avec un sens différent (catégorie de
- * Part vs catégorie des lignes de réservation). Sans préfixe, les deux widgets
- * s'écrasent et se contaminent.
- */
+/** Clés d'URL du widget Réservations. */
 export const RESERVATION_URL_KEYS = [
   'resa_q',
   'resa_statut',

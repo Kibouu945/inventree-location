@@ -1,15 +1,5 @@
 // Écran « Planning » — la maquette du cahier des charges : les manifestations
 // étalées sur les jours, leur couleur, leur statut, et au survol la fiche avec
-// le client, l'interlocuteur, le volume et l'avancement des livraisons.
-//
-// La maquette et la recette du 11/09 demandent **une ligne par prestation**.
-// La barre de la manifestation est conservée et se déplie sur ses prestations :
-// on garde la vue d'ensemble — couleur, volume total, avancement — tout en
-// donnant le détail, là où descendre sec d'un cran l'aurait perdue.
-//
-// Pas de bibliothèque de Gantt : une grille CSS suffit, et la vue
-// chronologique de FullCalendar est payante. L'ancien écran (calendrier
-// mensuel des réservations) reste disponible sous l'onglet Réservations.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   ActionIcon,
@@ -188,8 +178,7 @@ function FichePrestation({
   );
 }
 
-/** Le fond d'une ligne : les colonnes de la grille, week-ends et jour courant.
- *
+/**
  * Une piste par ligne et non un fond unique derrière toutes : les lignes se
  * déplient et se replient, leur nombre change, et un fond absolu devrait être
  * redimensionné à la main à chaque bascule.
@@ -248,8 +237,7 @@ function geometrie(barre: Barre<LignePlanning>, largeurColonne: number) {
   };
 }
 
-/** Le chevron de dépliage d'une manifestation.
- *
+/**
  * Désactivé — et non caché — quand la manifestation n'a aucune prestation dans
  * la période : la colonne des noms garde son alignement, et le survol dit
  * pourquoi il ne se passe rien.
@@ -340,7 +328,6 @@ export function Planning({ context }: { context: InvenTreePluginContext }) {
 
   // Les prestations de la **fenêtre**, en une requête, et non celles de chaque
   // manifestation au dépliage : déplier devient instantané, et le nombre de
-  // requêtes ne dépend plus du nombre de lignes ouvertes.
   const prestationsQuery = useQuery<Page<PrestationPlanning>>(
     {
       queryKey: [
@@ -372,11 +359,7 @@ export function Planning({ context }: { context: InvenTreePluginContext }) {
   );
 
   // Ce qui est réellement montrable : une prestation ne s'affiche que sous la
-  // barre de sa manifestation. Les dates d'une prestation sont bornées par
-  // celles de sa manifestation — mais par le sérialiseur seulement, pas par la
-  // base : une donnée écrite hors API peut déborder, et compter ici les
-  // prestations chargées plutôt que les prestations placées annoncerait des
-  // lignes que personne ne peut voir.
+  // barre de sa manifestation.
   const prestationsAffichees = placees.reduce(
     (total, barre) => total + (sousLignes.get(barre.sujet.id)?.length ?? 0),
     0
@@ -396,7 +379,6 @@ export function Planning({ context }: { context: InvenTreePluginContext }) {
 
   // La grille occupe la largeur du panneau : le planning est posé dans un
   // poste de travail dont la largeur dépend de l'écran, et une grille figée y
-  // laissait un tiers de vide à droite.
   const { ref: cadre, width: largeurCadre } = useElementSize();
   const largeurColonne = largeurDeColonne(
     fenetre.echelle,
@@ -654,9 +636,8 @@ export function Planning({ context }: { context: InvenTreePluginContext }) {
                                           HAUTEUR.sousBarre) /
                                         2,
                                       height: HAUTEUR.sousBarre,
-                                      // La couleur de la manifestation, en
-                                      // plus clair : la sous-ligne se rattache
-                                      // à l'œil à sa barre.
+                                      // La couleur de la manifestation, en plus
+                                      // clair : la sous-ligne se rattache à
                                       background:
                                         manifestation.couleur || '#868e96',
                                       opacity: 0.55,

@@ -200,15 +200,7 @@ class TestReservationNestedLignes:
 
 
 class TestProtectionDuRegistreDeRetour:
-    """Éditer les lignes d'un bon qui porte un constat effaçait ce constat.
-
-    `_replace_lignes` supprime toutes les lignes avant de les recréer, et cette
-    suppression **cascade** sur le registre d'incidents et sur les tickets SAV.
-    La vue refuse déjà l'édition au-delà de « soumise », ce qui limite le trou
-    sans le fermer : l'endpoint des incidents accepte n'importe quelle ligne,
-    statut du bon compris, donc un brouillon peut parfaitement porter un
-    incident — et le perdait à la première édition de ses lignes.
-    """
+    """Éditer les lignes d'un bon qui porte un constat effaçait ce constat."""
 
     @pytest.fixture
     def bon_pointe(self, db, user, prestation, part):

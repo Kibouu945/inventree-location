@@ -1,20 +1,4 @@
 // Cas alternatifs : ce que le système doit refuser, tolérer, ou masquer.
-//
-// Le scénario **fabrique son propre bon** — manifestation, prestation, bon,
-// conduit jusqu'à « livrée » — et ne travaille que sur celui-là.
-//
-// Il attrapait autrefois le premier bon `livree` ou `retournee` que rendait
-// `/reservations/`, trié `-date_demande` : donc le plus récent, c'est-à-dire
-// celui que `nominal.mjs` venait de créer, ou n'importe lequel de la base de
-// démonstration. Il lui écrivait 99 récupérés dessus, et la base mentait
-// jusqu'à ce qu'on pense à la remettre en état à la main.
-//
-// Ce qu'il laisse : le bon fabriqué, **clôturé** en fin de course. On ne peut
-// pas le supprimer — le serveur ne supprime qu'un brouillon, et refuse d'y
-// revenir une fois le bon livré. Clôturé, il sort des écrans Livraisons et
-// Ramassages (leur requête exclut `cloturee`) : il ne gêne plus personne et
-// reste lisible comme une pièce ordinaire. Sa manifestation porte l'horodatage
-// de la campagne, pour qu'on sache d'où il sort.
 import { chromium } from 'playwright';
 
 const BASE = 'http://localhost:8000';
@@ -57,17 +41,15 @@ async function connecte(user, pass) {
 
 const iso = (d) => d.toISOString().replace(/\.\d{3}Z$/, 'Z');
 
-/** Fabrique le bon du scénario et le conduit jusqu'à « livrée ».
- *
- * Quelques contraintes du serveur, payées une fois chacune :
- *  - la manifestation se crée **sans statut** : posée « planifiée » alors
- *    qu'elle commence maintenant, son statut effectif passe « en cours » et
- *    elle n'accepte plus de prestation ;
- *  - un bon veut son `demandeur` (le gérant interne) et des lignes en
- *    `quantite_demandee` ;
- *  - `date_retour_prevue` est obligatoire pour que le bon entre dans l'écran
- *    Ramassages, dont la requête écarte les bons qui n'en ont pas ;
- *  - un bon livré n'est plus modifiable : les dates se posent à la création.
+/**
+ * Quelques contraintes du serveur, payées une fois chacune : - la
+ * manifestation se crée **sans statut** : posée « planifiée » alors qu'elle
+ * commence maintenant, son statut effectif passe « en cours » et elle
+ * n'accepte plus de prestation ; - un bon veut son `demandeur` (le gérant
+ * interne) et des lignes en `quantite_demandee` ; - `date_retour_prevue` est
+ * obligatoire pour que le bon entre dans l'écran Ramassages, dont la requête
+ * écarte les bons qui n'en ont pas ; - un bon livré n'est plus modifiable :
+ * les dates se posent à la création.
  */
 async function fabriquerLeBon() {
   const clients = await api('/clients/?page_size=1');
@@ -176,7 +158,6 @@ await cas('A. Ramassage : récupérer PLUS que ce qui est sorti', async () => {
     await T(page, 4500);
     // L'écran s'ouvre sur l'arborescence (F7) ; le bouton « Voir » vit sur la
     // ligne plate de la vue « Liste ». `SegmentedControl` de Mantine rend un
-    // `label`, pas un `button`.
     await page.locator('label').filter({ hasText: /^Liste$/ }).first().click();
     await T(page, 3000);
     // Sa ligne à lui, repérée par son numéro : prendre la première venue
@@ -249,8 +230,7 @@ await cas('E. Conflits de stock', async () => {
     const txt = (await page.locator('body').innerText()).replace(/\n+/g, ' | ');
     await page.screenshot({ path: `${process.env.SHOTS_DIR ?? '.'}/alt-e-conflits.png` });
     // Compter les lignes ne prouvait rien : n'importe quel tableau non vide
-    // passait. Le registre doit nommer un bon et chiffrer le manque, sinon
-    // l'écran n'a pas fait son travail.
+    // passait.
     const nomme = /RES-\d{4}-\d{4}/.test(txt);
     return {
       ok: lignes > 0 && nomme,
@@ -264,7 +244,6 @@ await cas('E. Conflits de stock', async () => {
 await cas('F. Manifestation dont la fin précède le début', async () => {
   // Le client se lit, il ne se devine pas : « 1 » en dur n'existe plus dès
   // qu'une base repart de zéro, et le refus serait alors celui du client
-  // introuvable, pas celui des dates.
   const client = ((await api('/clients/?page_size=1')).body?.results ?? [])[0];
   const r = await api('/manifestations/', {
     method: 'POST',

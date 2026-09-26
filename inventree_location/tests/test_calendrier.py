@@ -1,8 +1,4 @@
-"""Calendrier mensuel des réservations (DIS-01).
-
-Passe par le routeur réel : c'est FullCalendar qui appelle cet endpoint à
-chaque changement de mois, avec les bornes de la fenêtre affichée.
-"""
+"""Calendrier mensuel des réservations (DIS-01)."""
 
 from __future__ import annotations
 
@@ -27,9 +23,7 @@ User = get_user_model()
 
 URL = "/plugin/inventree-location/reservations/calendar/"
 
-#: Fenêtre par défaut des tests : le mois des fixtures. Les deux bornes sont
-#: obligatoires côté serveur (le calendrier n'est pas paginé, c'est la période
-#: qui est bornée).
+#: Fenêtre par défaut des tests : le mois des fixtures.
 FENETRE = {"from": "2026-06-01", "to": "2026-06-30"}
 
 pytestmark = [pytest.mark.django_db, pytest.mark.urls("tests.functional_urls")]

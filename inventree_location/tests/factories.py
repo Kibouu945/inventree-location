@@ -1,17 +1,4 @@
-"""Aides de construction d'objets pour les tests.
-
-Deux familles. La mise en stock : le stock physique appartient à InvenTree, un
-article n'a de quantité que par ses `StockItem` (hors container, l'app `stock`
-factice de `tests/stock/`). Et la chaîne métier `client → manifestation →
-prestation → réservation → ligne`, que chaque fichier de tests reconstruisait à
-l'identique.
-
-Les builders remplissent tout ce qui est obligatoire et créent les parents
-manquants. Un test qui ne s'intéresse pas au client n'a donc plus à le nommer.
-
-Tout est surchargeable par `**overrides` : un test qui affirme quelque chose sur
-une valeur la passe explicitement.
-"""
+"""Aides de construction d'objets pour les tests."""
 
 from __future__ import annotations
 
@@ -75,11 +62,7 @@ _compteur = itertools.count(1)
 
 
 def _maintenant():
-    """Heure de référence, sans microsecondes.
-
-    Les assertions de dates comparent des chaînes ISO renvoyées par l'API :
-    des microsecondes rendaient certaines comparaisons instables.
-    """
+    """Heure de référence, sans microsecondes."""
 
     return timezone.now().replace(microsecond=0)
 
@@ -146,11 +129,7 @@ def make_lieu(**overrides):
 
 
 def make_manifestation(client=None, contact=None, **overrides):
-    """Manifestation, avec son client créé au besoin.
-
-    Le contact reste optionnel : la colonne est nullable, et la plupart des
-    tests n'ont rien à en dire.
-    """
+    """Manifestation, avec son client créé au besoin."""
 
     debut = overrides.pop("date_debut", None) or _maintenant()
 
@@ -210,11 +189,7 @@ def make_ligne(reservation=None, part=None, **overrides):
 
 
 def creer_chaine(*, quantite=1, stock=None, **overrides):
-    """La chaîne complète, d'un coup.
-
-    Retourne un dictionnaire des objets créés — c'est ce que la plupart des
-    fixtures reconstruisaient à la main.
-    """
+    """La chaîne complète, d'un coup."""
 
     client = overrides.pop("client", None) or make_client()
     demandeur = overrides.pop("demandeur", None) or make_user()

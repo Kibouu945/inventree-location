@@ -1,19 +1,4 @@
-"""Permissions DRF basées sur les rôles (TR-03).
-
-Chaque vue REST déclare une permission dérivée de `RoleBasedPermission` qui
-distingue lecture (méthodes sûres) et écriture. Un superutilisateur passe
-toujours ; un utilisateur sans rôle connu est refusé.
-
-Mapping appliqué aux endpoints existants (les actions retours / livraisons /
-SAV arriveront avec leurs endpoints aux sprints suivants) :
-
-| Ressource     | Lecture            | Écriture                          |
-|---------------|--------------------|-----------------------------------|
-| Catalogue     | tous les rôles     | admin, gestionnaire               |
-| Lieux         | tous les rôles     | admin, gestionnaire               |
-| Réservations  | tous les rôles     | admin, gestionnaire               |
-| Livraisons    | tous les rôles     | admin, gestionnaire               |
-"""
+"""Permissions DRF basées sur les rôles (TR-03)."""
 
 from __future__ import annotations
 
@@ -80,24 +65,13 @@ class DeliveryPermission(RoleBasedPermission):
 
 
 class MarquerLivreePermission(RoleBasedPermission):
-    """Marquer une réservation livrée : celui qui livre, plus l'encadrement.
-
-    Écriture volontairement étroite, distincte de `ReservationPermission` :
-    ouvrir cette dernière au livreur lui donnerait aussi la validation, le
-    refus et l'annulation d'une réservation.
-    """
+    """Marquer une réservation livrée : celui qui livre, plus l'encadrement."""
 
     write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.LIVREUR)
 
 
 class DeliveryAssignationPermission(RoleBasedPermission):
-    """Prendre, relâcher et faire avancer une livraison : le livreur, plus
-    l'encadrement qui doit pouvoir dépanner une tournée en cours.
-
-    Même périmètre que `MarquerLivreePermission`, dont elle reste distincte :
-    marquer livré est une transition de statut métier, s'attribuer une livraison
-    n'en est pas une.
-    """
+    """Prendre, relâcher et faire avancer une livraison : le livreur, plus"""
 
     write_roles = (roles.ADMIN, roles.GESTIONNAIRE, roles.LIVREUR)
 
@@ -115,11 +89,6 @@ class PrestationRetourPermission(RoleBasedPermission):
 
 
 class SavPermission(RoleBasedPermission):
-    """Tickets SAV et objets détruits (SCRUM-112) : rôle sav.
-
-    Le défaut de `RoleBasedPermission` n'ouvre l'écriture qu'à l'admin : le
-    rôle dont c'est précisément le métier — « tickets réparation + historique »
-    dans `roles.py` — ne pouvait que lire ses propres tickets.
-    """
+    """Tickets SAV et objets détruits (SCRUM-112) : rôle sav."""
 
     write_roles = (roles.ADMIN, roles.SAV)

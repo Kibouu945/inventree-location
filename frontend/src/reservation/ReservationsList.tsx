@@ -105,9 +105,7 @@ function initialFilters(): ReservationFiltersState {
   return parseReservationFilters(window.location.search);
 }
 
-/**
- * Écran liste des réservations
- */
+/** Écran liste des réservations */
 export function ReservationsList({
   context
 }: {
@@ -139,13 +137,11 @@ export function ReservationsList({
     syncUrl(effectiveFilters);
     // Changer de filtre remet à la première page : rester à l'offset courant
     // affichait une page vide dès que le nouveau filtre rendait moins de
-    // résultats que l'offset.
     setOffset(0);
   }, [effectiveFilters]);
 
   // La liste est paginée côté serveur depuis SCRUM-101 : sans ces contrôles,
   // le widget affichait les 50 premières réservations sans rien dire des
-  // suivantes.
   const params = {
     ...buildReservationQuery(effectiveFilters),
     limit: String(PAGE_SIZE),
@@ -202,9 +198,8 @@ export function ReservationsList({
         return response.data;
       },
       onSuccess: (_data, variables) => {
-        // Une réservation validée entre dans la tournée du livreur et dans
-        // les ramassages : sans ça, ces deux listes restaient périmées
-        // jusqu'au prochain rechargement de page.
+        // Une réservation validée entre dans la tournée du livreur et dans les
+        // ramassages : sans ça, ces deux listes restaient périmées jusqu'au
         context.queryClient.invalidateQueries({ queryKey: ['reservations'] });
         context.queryClient.invalidateQueries({ queryKey: ['deliveries'] });
         context.queryClient.invalidateQueries({ queryKey: ['ramassages'] });
@@ -230,7 +225,6 @@ export function ReservationsList({
 
   // Mêmes options que le catalogue et que le sélecteur d'articles : la même
   // requête était réécrite ici, et deux variantes dégradées existaient
-  // ailleurs (recette du 07/09/2026, remarque 4).
   const categoryOptions = useCategoryOptions(context);
 
   function updateFilters(patch: Partial<ReservationFiltersState>) {

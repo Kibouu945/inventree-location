@@ -1,9 +1,4 @@
-"""Tests des vues Prestation (ORG-01 / ORG-02 / RES-09 / STK-01).
-
-Couvre le CRUD prestation, le rattachement à un lieu unique géolocalisé, la
-liste d'articles + quantités imbriquée, la validation des dates dans la
-manifestation et l'alerte (non bloquante) sur stock insuffisant.
-"""
+"""Tests des vues Prestation (ORG-01 / ORG-02 / RES-09 / STK-01)."""
 
 from __future__ import annotations
 
@@ -266,17 +261,7 @@ class TestPrestationCreate:
     def test_insufficient_stock_alerte_mais_nenregistre_pas_moins(
         self, factory, user, manifestation, lieu
     ):
-        """Une pénurie de stock alerte, elle ne refuse plus l'enregistrement.
-
-        Recette Tassin du 07/09/2026, remarque 6 : « le système bloque alors la
-        réservation et seul annuler est possible. Il ne faut pas bloquer mais
-        alerter. (Voir les Epic E & F) ». Une prestation porte le prévisionnel ;
-        le refus d'écriture laissait l'utilisateur sans issue et cassait le
-        cycle réservation → livraison → ramassage dès la première étape.
-
-        Le garde-fou n'a pas disparu, il a changé de place : voir
-        `TestReservationStockConflict` pour le refus au passage en « validée ».
-        """
+        """Une pénurie de stock alerte, elle ne refuse plus l'enregistrement."""
 
         part = _make_part("Chaise", stock=3)
         payload = {
@@ -304,12 +289,7 @@ class TestPrestationCreate:
     def test_penurie_reste_visible_sur_le_previsionnel(
         self, factory, user, manifestation, lieu
     ):
-        """Ne plus bloquer ne veut pas dire ne plus signaler.
-
-        L'écran interroge `stock-preview` en direct : la pénurie doit y
-        ressortir, avec la quantité manquante, sans quoi « alerter » se
-        réduirait à « laisser passer ».
-        """
+        """Ne plus bloquer ne veut pas dire ne plus signaler."""
 
         from inventree_location.stock import compute_prestation_stock
 
@@ -377,12 +357,7 @@ class TestPrestationDetail:
 
 @pytest.mark.django_db
 class TestChampsDuPlanningPrestation:
-    """Le planning déplié : chaque prestation porte son volume et son avancement.
-
-    C'est la même mesure qu'à la maille manifestation, un cran plus bas. Elle
-    est calculée par la vue et non par le sérialiseur, pour la même raison :
-    agréger prestation par prestation ferait une requête par sous-ligne.
-    """
+    """Le planning déplié : chaque prestation porte son volume et son avancement."""
 
     def _liste(self, factory, user, **params):
         request = factory.get(PRESTATIONS_URL, params)
@@ -435,12 +410,7 @@ class TestChampsDuPlanningPrestation:
     def test_les_prestations_totalisent_leur_manifestation(
         self, factory, user, manifestation, prestation
     ):
-        """Le point de la maille dépliée : les sous-lignes font la barre.
-
-        Deux mesures différentes — le prévisionnel de la prestation d'un côté,
-        les bons de l'autre — donneraient un planning où le détail contredit
-        l'ensemble.
-        """
+        """Le point de la maille dépliée : les sous-lignes font la barre."""
 
         from inventree_location.tests.factories import make_prestation
         from inventree_location.views import ManifestationListCreateView
@@ -475,8 +445,7 @@ class TestChampsDuPlanningPrestation:
     def test_le_detail_retombe_sur_le_calcul_ligne_a_ligne(
         self, factory, user, prestation
     ):
-        """Sans annotation — le détail n'en pose pas —, le repli doit rendre
-        la même chose que la liste."""
+        """Sans annotation — le détail n'en pose pas —, le repli doit rendre"""
 
         self._bons(prestation, user, [StatutReservation.LIVREE])
 
@@ -516,12 +485,7 @@ class TestChampsDuPlanningPrestation:
 
 @pytest.mark.django_db
 class TestFenetreDuPlanningPrestation:
-    """`from` / `to` : ce qui **chevauche** la fenêtre, pas ce qui y tient.
-
-    Même règle qu'à la maille manifestation : une prestation commencée la
-    semaine dernière et qui court encore doit apparaître dans la semaine
-    affichée, sinon le planning perd ce qui est en cours.
-    """
+    """`from` / `to` : ce qui **chevauche** la fenêtre, pas ce qui y tient."""
 
     def _noms(self, factory, user, **params):
         request = factory.get(PRESTATIONS_URL, params)
@@ -533,12 +497,7 @@ class TestFenetreDuPlanningPrestation:
 
     @pytest.fixture
     def trois_prestations(self, manifestation):
-        """Trois prestations ancrées à midi, heure de Paris.
-
-        À midi et pas à `now()` : le serveur compare au **jour** dans le fuseau
-        métier, et une fixture créée à 22 h UTC tombe déjà le lendemain à
-        Paris — le test mesurerait alors le décalage, pas la règle.
-        """
+        """Trois prestations ancrées à midi, heure de Paris."""
 
         from inventree_location.tests.factories import make_prestation
 

@@ -1,7 +1,4 @@
 // Types du planning (maquette « Planning » du cahier des charges).
-//
-// Miroir de `ManifestationSerializer` et de `PrestationSerializer` : on ne type
-// que ce que l'écran affiche.
 
 /** Avancement des livraisons : combien de bons sont sortis, sur combien. */
 export interface EtatLivraison {
@@ -10,11 +7,10 @@ export interface EtatLivraison {
   a_livrer: number;
 }
 
-/** Ce qui se pose sur la grille : un intervalle de jours qui porte un nom.
- *
+/**
  * Le planning se lit à deux mailles — la manifestation en barre, ses
  * prestations en sous-lignes — et les deux se placent exactement de la même
- * façon. C'est ce que ce type dit, et c'est pourquoi `placer` est générique.
+ * façon.
  */
 export interface LignePlanning {
   id: number;
@@ -40,8 +36,7 @@ export interface ManifestationPlanning extends LignePlanning {
   prestations_count: number;
 }
 
-/** Une prestation, telle que la lit le planning déplié.
- *
+/**
  * Son volume et son avancement sont la même mesure que ceux de sa
  * manifestation, un cran plus bas : les sous-lignes d'une barre la totalisent.
  */
@@ -56,19 +51,16 @@ export interface PrestationPlanning extends LignePlanning {
 /** La bascule de la maquette. */
 export type VuePlanning = 'gantt' | 'liste';
 
-/** Ce qu'on regarde — nommé comme on en parle, pas comme c'est découpé.
- *
+/**
  * Le grain des colonnes se déduit de l'échelle : une journée tient en une
  * colonne, une semaine en sept, un mois en autant de jours qu'il en a, une
- * année en douze mois. Il ne se choisit pas séparément.
+ * année en douze mois.
  */
 export type EchellePlanning = 'jour' | 'semaine' | 'mois' | 'annee';
 
-/** Fenêtre affichée : une échelle et un point d'ancrage.
- *
+/**
  * Le nombre de colonnes n'est pas stocké — il se déduit : sept pour une
- * semaine, la longueur du mois pour un mois, douze pour une année. Le stocker
- * autoriserait un février de trente-et-un jours.
+ * semaine, la longueur du mois pour un mois, douze pour une année.
  */
 export interface FenetrePlanning {
   echelle: EchellePlanning;
@@ -88,8 +80,7 @@ export interface Colonne {
   weekend: boolean;
 }
 
-/** Placement d'une barre dans la grille : colonne de départ et largeur.
- *
+/**
  * Générique sur ce qu'elle place : une manifestation pour une barre, une
  * prestation pour une sous-ligne.
  */
