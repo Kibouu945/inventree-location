@@ -57,11 +57,7 @@ def to_day_period(
     start: DateOrDateTime,
     end: DateOrDateTime,
 ) -> tuple[datetime, datetime]:
-    """Normalise une période en bornes jour entier.
-
-    La réservation est saisie en date/heure, mais le calcul de disponibilité
-    et de conflit se fait au jour entier (CDC).
-    """
+    """Normalise une période en bornes jour entier."""
 
     start_dt = normalize_to_datetime(start)
     end_dt = normalize_to_datetime(end, end=True)
@@ -152,14 +148,7 @@ def compute_part_availability(
     *,
     exclude_resa_id: Optional[int] = None,
 ) -> dict:
-    """Disponibilité prévisionnelle d'un article sur une période, au jour entier.
-
-    S'appuie sur `compute_engagement_details`, le moteur d'engagement partagé
-    avec le catalogue et la fiche prestation. La version d'origine sommait les
-    seules `LigneReservation`, ce qui ignorait le prévisionnel des prestations
-    et redonnait deux disponibilités différentes pour un même article à la même
-    date — exactement le défaut corrigé côté develop.
-    """
+    """Disponibilité prévisionnelle d'un article sur une période, au jour entier."""
 
     from .models import RentableItem
     from .stock import compute_engagement_details
@@ -215,7 +204,6 @@ def compute_part_availability(
 
 # ---------------------------------------------------------------------------
 # Détection de conflits basée sur le stock (US-03 / SCRUM-76)
-#
 # Couche de plus haut niveau construite sur `compute_conflicts` : pour une
 # réservation donnée, on compare la quantité demandée au stock projeté
 # (stock total − quantités déjà réservées sur la période) de chaque ligne.
@@ -225,13 +213,6 @@ RESERVATION_DIRECT_LINK = "/api/plugin/inventree-location/reservations/{pk}/"
 
 
 #: Statuts InvenTree dont le stock est réellement louable.
-#:
-#: InvenTree considère « disponibles » les statuts OK, Attention, Endommagé et
-#: Retourné (`StockStatusGroups.AVAILABLE_CODES`). Le métier est plus strict :
-#: « un objet endommagé sort du stock réellement disponible ; seules les
-#: réservations suivantes ne voient que le stock réellement bon » (ticket
-#: ramassage / SAV). On écarte donc Endommagé et Attention, en plus des
-#: statuts qu'InvenTree exclut déjà (Détruit, Rejeté, Perdu, Quarantaine).
 RENTAL_STOCK_STATUSES = (
     10,  # OK
     85,  # Retourné (rentré de chez un client, de nouveau louable)
@@ -239,20 +220,7 @@ RENTAL_STOCK_STATUSES = (
 
 
 def get_part_total_stock(part, rentable_item=None) -> int:
-    """Retourne le stock physique louable d'une Part, selon InvenTree.
-
-    InvenTree est la source de vérité du « combien en avons-nous » : le plugin
-    somme les `StockItem` réellement en stock (`IN_STOCK_FILTER` natif) dont le
-    statut est louable (cf. `RENTAL_STOCK_STATUSES`). Le plugin n'entretient
-    plus de compteur parallèle : `RentableItem` ne porte que ce qu'InvenTree ne
-    sait pas dire (louable, consommable, virtuel, caution, seuils).
-
-    Hors container InvenTree (suite pytest sans app `stock`), on retombe sur
-    les attributs de stock exposés par l'objet, puis sur 0.
-
-    `rentable_item` n'est plus lu ; le paramètre subsiste pour les appelants
-    qui l'ont déjà sous la main et éviteraient une requête.
-    """
+    """Retourne le stock physique louable d'une Part, selon InvenTree."""
 
     quantity = _rental_stock_quantity(part)
 
@@ -263,18 +231,7 @@ def get_part_total_stock(part, rentable_item=None) -> int:
 
 
 def get_parts_total_stock(parts) -> dict[int, int]:
-    """Stock physique louable de plusieurs Parts, en **une** requête.
-
-    Même définition que `get_part_total_stock`, appliquée à un lot : un
-    regroupement par article plutôt qu'un agrégat par article. Appelée en
-    boucle, la version unitaire coûtait une requête par article — cent là où
-    deux suffisent, sur cinquante articles louables (cf.
-    `docs/test-de-charge.md`).
-
-    Rend un dictionnaire `{part_id: quantité}` couvrant **tous** les articles
-    reçus, y compris ceux sans exemplaire : un article absent du résultat de
-    l'agrégat en a zéro, et l'appelant ne doit pas avoir à distinguer les deux.
-    """
+    """Stock physique louable de plusieurs Parts, en **une** requête."""
 
     parts = list(parts)
 
@@ -290,12 +247,7 @@ def get_parts_total_stock(parts) -> dict[int, int]:
 
 
 def _stock_depuis_les_attributs(part) -> int:
-    """Repli hors container InvenTree : ce que l'objet Part sait dire de lui.
-
-    La suite pytest tourne avec une app `stock` factice ; d'autres contextes
-    n'en ont aucune. On lit alors les attributs de stock exposés par l'objet,
-    puis on rend zéro.
-    """
+    """Repli hors container InvenTree : ce que l'objet Part sait dire de lui."""
 
     for attr in ("total_stock", "in_stock", "stock", "quantity"):
         value = getattr(part, attr, None)
@@ -328,8 +280,7 @@ def _stock_louable_queryset():
     queryset = StockItem.objects.filter(status__in=RENTAL_STOCK_STATUSES)
 
     # `IN_STOCK_FILTER` porte la définition InvenTree de « physiquement en
-    # stock » (ni vendu, ni consommé, ni chez un client, quantité > 0). On s'y
-    # adosse plutôt que de la réécrire, qui dériverait à la première évolution.
+    # stock » (ni vendu, ni consommé, ni chez un client, quantité > 0).
     in_stock_filter = getattr(StockItem, "IN_STOCK_FILTER", None)
 
     if in_stock_filter is not None:
@@ -354,11 +305,7 @@ def _rental_stock_quantity(part):
 
 
 def _rental_stock_quantities(part_ids):
-    """Idem pour un lot d'articles, en une requête — None si `stock` est absent.
-
-    Seuls les articles ayant au moins un exemplaire louable figurent dans le
-    résultat ; c'est à l'appelant de compléter par zéro.
-    """
+    """Idem pour un lot d'articles, en une requête — None si `stock` est absent."""
 
     from django.db.models import Sum
 
@@ -377,22 +324,7 @@ def _rental_stock_quantities(part_ids):
 
 
 class ContexteDeConflits:
-    """Tout ce qu'il faut pour arbitrer des conflits, chargé une fois.
-
-    Arbitrer une réservation demande quatre choses par article : sa nature
-    (louable ou virtuel), son stock, ce qui l'engage déjà sur la période, et
-    les réservations avec qui il est partagé. Lues une réservation à la fois,
-    ces quatre choses coûtaient autant de requêtes par ligne — et le widget en
-    parcourt plusieurs milliers.
-
-    Le contexte les charge une fois pour tout un lot d'articles et pour la
-    période qui englobe toutes les fenêtres à interroger. Chaque fenêtre est
-    ensuite arbitrée en mémoire. Le nombre de requêtes ne dépend plus du
-    nombre de réservations.
-
-    C'est un cache de lecture, construit pour la durée d'un appel : il ne voit
-    pas les écritures faites après lui.
-    """
+    """Tout ce qu'il faut pour arbitrer des conflits, chargé une fois."""
 
     def __init__(self, part_ids, date_debut, date_fin):
         from part.models import Part
@@ -408,7 +340,6 @@ class ContexteDeConflits:
         }
         # Les articles sont portés ici plutôt que joints aux lignes de chaque
         # réservation : une jointure posée sur le manager de relation ignore le
-        # préchargement du parcours et relance une requête par réservation.
         self.parts = {
             part.pk: part for part in Part.objects.filter(pk__in=self.part_ids)
         }
@@ -444,15 +375,7 @@ class ContexteDeConflits:
         exclude_reservation_id=None,
         exclude_prestation_forecast_id=None,
     ):
-        """Le détail des engagements d'un article sur une fenêtre donnée.
-
-        `exclude_prestation_forecast_id` écarte le prévisionnel dont la
-        réservation exclue est la matérialisation : sans lui, une réservation
-        se heurterait au besoin qu'elle est en train de couvrir. L'appelant le
-        fournit — c'est `reservation.prestation_id`, qu'il a sous la main — là
-        où le déduire de l'index le rendrait faux pour une réservation non
-        bloquante, absente de cet index.
-        """
+        """Le détail des engagements d'un article sur une fenêtre donnée."""
 
         from .stock import reduire_engagements
 
@@ -465,12 +388,7 @@ class ContexteDeConflits:
         ).get(part_id, [])
 
     def partageurs(self, part_id, debut, fin, *, exclude_reservation_id=None):
-        """Les réservations bloquantes qui se partagent l'article sur la période.
-
-        Même définition que `compute_conflicts`, tirée du même index : une
-        réservation au statut bloquant dont la période chevauche celle-ci, au
-        jour entier.
-        """
+        """Les réservations bloquantes qui se partagent l'article sur la période."""
 
         from .stock import day_ranges_overlap
 
@@ -497,25 +415,7 @@ class ContexteDeConflits:
 
 
 def detect_reservation_conflicts(reservation, contexte=None) -> dict:
-    """Détecte les conflits de stock d'une réservation, ligne par ligne.
-
-    Pour chaque ligne : stock projeté = stock total − somme des quantités
-    déjà réservées sur la période (réservations dont le statut est bloquant,
-    cf. ``CONFLICT_STATUSES``). Un conflit est levé quand la quantité
-    demandée dépasse le stock projeté.
-
-    Les articles virtuels (services, ex. « nettoyage ») sont ignorés : ils
-    ne portent pas de contrainte de stock physique.
-
-    `contexte` — un `ContexteDeConflits` déjà chargé — évite de relire la base
-    pour chaque ligne. Sans lui, la fonction en construit un pour elle seule :
-    c'est le cas du garde-fou de validation, qui n'arbitre qu'une réservation.
-    Le widget, qui en parcourt plusieurs milliers, en partage un unique. Les
-    deux passent par le même arbitrage, sans quoi le formulaire et le tableau
-    de bord pourraient se contredire.
-
-    Retourne ``{"has_conflict": bool, "reservation": pk, "conflicts": [...]}``.
-    """
+    """Détecte les conflits de stock d'une réservation, ligne par ligne."""
 
     empty = {"has_conflict": False, "reservation": reservation.pk, "conflicts": []}
 
@@ -547,7 +447,6 @@ def detect_reservation_conflicts(reservation, contexte=None) -> dict:
 
         # Le détail nominatif sert deux fois : il donne la quantité engagée, et
         # il nomme la prestation responsable quand la pénurie ne vient que du
-        # prévisionnel, sans aucune réservation à montrer.
         engagements = contexte.engagements(
             part_id,
             start,
@@ -601,22 +500,7 @@ def reservation_has_conflicts(reservation) -> bool:
 
 
 def list_current_conflicts() -> List[dict]:
-    """Liste les réservations actuellement en pénurie de stock, regroupées.
-
-    Un conflit n'est **pas** un simple chevauchement : deux réservations
-    peuvent porter le même article aux mêmes dates sans se gêner tant que le
-    stock suffit (4 + 3 sur 10 en stock n'est pas un conflit). Ce sont les
-    quantités qui décident, via `detect_reservation_conflicts` — le même
-    moteur que le garde-fou de validation, pour que le widget et le formulaire
-    ne se contredisent pas.
-
-    Chaque entrée représente un *groupe* : une réservation en pénurie et les
-    réservations qui se partagent avec elle l'article manquant. Les
-    réservations déjà rattachées à un groupe ne réapparaissent pas comme
-    entrées distinctes. `shortages` détaille les articles en cause et la
-    quantité manquante ; une pénurie peut venir du seul prévisionnel d'une
-    prestation, auquel cas `conflict_count` vaut 0.
-    """
+    """Liste les réservations actuellement en pénurie de stock, regroupées."""
 
     from django.db.models import Max, Min
 
@@ -633,10 +517,7 @@ def list_current_conflicts() -> List[dict]:
         .order_by("date_retrait_prevue", "date_retour_prevue", "pk")
     )
 
-    # Un seul chargement pour tout le parcours. Arbitrée une par une, chaque
-    # réservation relisait la base pour chacune de ses lignes : le coût suivait
-    # le produit du nombre de réservations par celui des lignes, et l'écran ne
-    # rendait plus (cf. `docs/test-de-charge.md`).
+    # Un seul chargement pour tout le parcours.
     bornes = queryset.aggregate(
         debut=Min("date_retrait_prevue"), fin=Max("date_retour_prevue")
     )
@@ -705,17 +586,7 @@ def list_current_conflicts() -> List[dict]:
 
 
 def sync_conflict_registry(current_conflicts=None) -> int:
-    """Inscrit au registre les pénuries en cours qui n'y figurent pas encore.
-
-    `register_stock_conflict_history` n'écrit qu'au moment où une réservation
-    est enregistrée. Une pénurie née après coup — du stock perdu, cassé ou
-    ajusté — n'entrait donc jamais à l'historique : elle s'affichait dans
-    « Conflits actuels » sans entrée à traiter. Le backlog demande d'historiser
-    tous les conflits, pas seulement ceux qui bloquent une saisie.
-
-    Ne referme rien : la clôture reste un geste humain, et `conflict_still_active`
-    en vérifie déjà le bien-fondé. Retourne le nombre d'entrées ouvertes.
-    """
+    """Inscrit au registre les pénuries en cours qui n'y figurent pas encore."""
 
     from .models import ConflictHistory, ConflictState, ConflictType, Reservation
 
@@ -780,9 +651,6 @@ def register_stock_conflict_history(reservation, conflict_result: dict) -> None:
         for conflicting_id in conflicting_ids:
             # Clés étrangères passées par `_id`, jamais par instance : le
             # chargeur de plugins importe `models` deux fois et une instance
-            # issue de l'autre exemplaire fait lever « Must be "Reservation"
-            # instance ». Le bug ne sortait qu'au premier conflit réel, donc
-            # jamais sur une base neuve.
             ConflictHistory.objects.get_or_create(
                 conflict_type=ConflictType.STOCK,
                 state=ConflictState.OPEN,
@@ -817,10 +685,7 @@ def detect_location_reservation_conflicts(reservation) -> dict:
     if not start or not end or not reservation.prestation_id:
         return empty
 
-    # ORG-02 : une prestation se déroule sur un *seul* lieu. La version
-    # d'origine parcourait `prestation.lieux`, la relation inverse d'un
-    # `Lieu.prestation` supprimé depuis (migration 0008) — elle levait donc
-    # une AttributeError sur le schéma actuel.
+    # ORG-02 : une prestation se déroule sur un *seul* lieu.
     current_place = reservation.prestation.lieu
 
     if current_place is None:
@@ -899,12 +764,7 @@ def location_key_of(conflict: dict) -> str:
 
 
 def conflict_still_active(conflict) -> tuple[bool, str]:
-    """Dit si la cause d'une entrée d'historique tient encore, et laquelle.
-
-    Rejoue le détecteur correspondant au type du conflit : c'est la situation
-    du moment qui décide, jamais l'état stocké. Sans cette relecture, « résoudre »
-    ne faisait que taire le registre pendant que le conflit restait entier.
-    """
+    """Dit si la cause d'une entrée d'historique tient encore, et laquelle."""
 
     from .models import ConflictType
 

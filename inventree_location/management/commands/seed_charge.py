@@ -1,25 +1,4 @@
-"""Jeu de données de **volume**, pour le test de charge.
-
-`seed_demo` construit une scène : quatre manifestations lisibles, un conflit
-posé à la main, de quoi rejouer une démonstration. Elle ne dit rien de la
-tenue du serveur, parce qu'une base de vingt lignes ne dit jamais rien de ça.
-
-Cette commande-ci ne cherche aucune lisibilité : elle amène la base à **N
-réservations réparties sur une année**, la cible annoncée par le client étant
-10 000 par an (réponse du 20 mai, ticket PERF-01). Deux choses la distinguent
-d'un `seed_demo --repeat` :
-
-- elle est **cumulative**. `--total 2000` puis `--total 5000` complète au lieu
-  de tout refaire : on mesure les paliers sans repayer la génération à chaque
-  fois, et surtout sans que le palier suivant change autre chose que le volume.
-- elle écrit en `bulk_create`. `Reservation.save()` fabrique le numéro par une
-  lecture de la table à chaque insertion : 10 000 allers-retours, et une
-  génération qui durerait plus longtemps que la mesure. Les numéros sont donc
-  calculés ici, dans la même forme `RES-AAAA-NNNN` que le modèle.
-
-Tout ce qu'elle crée porte le préfixe `MARQUEUR` : c'est lui qui rend `--reset`
-possible sans toucher aux données de démonstration ni aux vraies.
-"""
+"""Jeu de données de **volume**, pour le test de charge."""
 
 from __future__ import annotations
 
@@ -53,15 +32,10 @@ MARQUEUR = "CHG"
 #: taille dessert la vitesse ; en deçà, on paie trop d'allers-retours.
 LOT = 2000
 
-#: Taille des tranches de suppression. Bien plus petite que `LOT` : supprimer
-#: coûte plus cher qu'insérer, chaque objet enfant en `CASCADE` étant chargé en
-#: mémoire pour propager la suppression.
+#: Taille des tranches de suppression.
 LOT_SUPPRESSION = 250
 
 #: Répartition des statuts de réservation, pour une année déjà bien avancée.
-#: Les passées sont clôturées, les proches livrées, les lointaines attendent.
-#: Seuls les statuts « bloquants » pèsent sur le calcul de disponibilité — une
-#: base entièrement clôturée mesurerait un serveur qui n'a rien à arbitrer.
 STATUTS_PASSES = [
     (StatutReservation.CLOTUREE, 70),
     (StatutReservation.LIVREE, 20),
@@ -205,12 +179,7 @@ class Command(BaseCommand):
     # -- suppression --------------------------------------------------------
 
     def _nettoyer(self):
-        """Supprime le jeu de charge, et lui seul.
-
-        L'ordre suit les `PROTECT` du modèle : une prestation refuse de partir
-        tant qu'une réservation la référence, un article tant qu'une ligne le
-        cite.
-        """
+        """Supprime le jeu de charge, et lui seul."""
 
         from part.models import Part
         from stock.models import StockItem
@@ -240,20 +209,7 @@ class Command(BaseCommand):
         self.stdout.write("  jeu de charge supprimé")
 
     def _supprimer_par_lots(self, queryset, libelle):
-        """Supprime par tranches, plutôt que d'un seul `delete()`.
-
-        Toutes les relations qui pointent vers une réservation sont en
-        `CASCADE` : `delete()` charge donc en mémoire chaque objet enfant pour
-        propager la suppression. Sur dix mille réservations et leurs vingt-cinq
-        mille lignes, cela demande au serveur une empreinte qu'il n'a pas — la
-        première version a tourné une demi-heure sur un VPS à 3,9 Go sans
-        rendre la main.
-
-        Découper borne cette empreinte et rend la progression visible. Chaque
-        tranche est sa propre transaction : une interruption laisse une base
-        cohérente, simplement à moitié nettoyée, et relancer la commande
-        reprend là où elle s'était arrêtée.
-        """
+        """Supprime par tranches, plutôt que d'un seul `delete()`."""
 
         modele = queryset.model
         total = queryset.count()
@@ -432,13 +388,7 @@ class Command(BaseCommand):
         demandeur,
         lignes_max,
     ):
-        """Crée `combien` réservations, chacune avec sa prestation.
-
-        Une manifestation porte plusieurs prestations — c'est le cas réel, et
-        c'est aussi celui qui compte pour les écrans : l'arborescence déplie
-        par manifestation, et la détection de conflit de lieu compare des
-        prestations entre elles.
-        """
+        """Crée `combien` réservations, chacune avec sa prestation."""
 
         maintenant = timezone.now()
         debut_annee = maintenant.replace(
@@ -543,7 +493,6 @@ class Command(BaseCommand):
 
         # `bulk_create` ne remplit les clés étrangères des enfants que si les
         # parents ont déjà leur `pk` : d'où l'ordre, et d'où le fait de garder
-        # les objets Python plutôt que de relire la base entre deux lots.
         Manifestation.objects.bulk_create(manifestations, batch_size=LOT)
         Prestation.objects.bulk_create(prestations, batch_size=LOT)
         LignePrestation.objects.bulk_create(lignes_prestation, batch_size=LOT)

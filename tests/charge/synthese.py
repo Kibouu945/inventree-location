@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Croise les rapports d'une campagne et rend deux tableaux.
-
-Le premier lit le coût par endpoint à mesure que la base grossit : c'est celui
-qui désigne les endpoints dont le coût suit le volume, et donc le code à
-corriger. Le second lit la capacité à volume fixé : c'est celui qui donne le
-nombre d'utilisateurs simultanés tenus.
-
-    python tests/charge/synthese.py tests/charge/resultats/
-"""
+"""Croise les rapports d'une campagne et rend deux tableaux."""
 
 from __future__ import annotations
 

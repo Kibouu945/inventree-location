@@ -284,14 +284,7 @@ def test_seuil_du_plugin_prime_sur_celui_dinventree(manager, alert_setup):
 
 
 class TestCoutDesAlertes:
-    """Le coût de l'écran ne doit pas suivre le nombre d'articles louables.
-
-    Trois grandeurs étaient lues article par article : le stock possédé
-    (`get_part_total_stock`), la disponibilité du jour, et la tension projetée
-    sur trente jours. La première et la troisième lançaient chacune leur propre
-    agrégat — cent requêtes pour cinquante articles, six secondes sur la
-    production (cf. `docs/test-de-charge.md`). Elles sont désormais groupées.
-    """
+    """Le coût de l'écran ne doit pas suivre le nombre d'articles louables."""
 
     @staticmethod
     def _creer_articles(combien, seuil_bas=20):
@@ -324,13 +317,7 @@ class TestCoutDesAlertes:
 
     @pytest.mark.django_db
     def test_le_cout_ne_depend_pas_du_nombre_d_articles(self, manager, alert_setup):
-        """Deux mesures plutôt qu'un plafond : cinq articles, puis vingt.
-
-        Un plafond chiffré se périmerait à la première jointure ajoutée ;
-        l'égalité, elle, dit exactement ce qu'on veut dire — le coût est
-        constant. C'est elle qui échouera si quelqu'un remet un agrégat dans
-        la boucle.
-        """
+        """Deux mesures plutôt qu'un plafond : cinq articles, puis vingt."""
 
         self._creer_articles(5)
         self._mesurer(manager)  # la première passe amorce les caches
@@ -344,12 +331,7 @@ class TestCoutDesAlertes:
     def test_le_groupement_ne_change_pas_les_alertes_rendues(
         self, manager, alert_setup
     ):
-        """Le regroupement est un refactor : les alertes doivent être les mêmes.
-
-        Un article sans aucun exemplaire en stock tombe sous son seuil bas — et
-        c'est le cas que le regroupement risquait de perdre, puisqu'il est
-        absent du résultat de l'agrégat.
-        """
+        """Le regroupement est un refactor : les alertes doivent être les mêmes."""
 
         category = PartCategory.objects.create(name="Cat sans stock")
         depourvu = Part.objects.create(name="Jamais acheté", category=category)

@@ -396,13 +396,7 @@ class TestPartAvailabilityHistogram:
     def test_article_immateriel_est_signale_plutot_que_vide(
         self, factory, user, categorie
     ):
-        """Un service n'a pas d'histogramme — encore faut-il le dire.
-
-        `days` vide vaut aussi pour « aucun jour ne passe le filtre de
-        semaine ». Sans drapeau, l'écran servait le message du filtre à qui
-        avait choisi un article immatériel, et l'invitait à corriger un
-        réglage qui n'y était pour rien.
-        """
+        """Un service n'a pas d'histogramme — encore faut-il le dire."""
 
         service = Part.objects.create(name="Nettoyage", category=categorie)
         RentableItem.objects.create(part=service, is_virtual=True)
@@ -420,14 +414,7 @@ class TestPartAvailabilityHistogram:
     def test_le_cout_ne_depend_pas_du_nombre_de_jours(
         self, factory, user, categorie
     ):
-        """Deux mesures plutôt qu'un plafond : sept jours, puis trente et un.
-
-        La première version interrogeait les engagements *dans* la boucle des
-        journées — deux requêtes par barre affichée, chacune relisant tout
-        l'historique de l'article. L'égalité dit ce qu'on veut dire : le
-        chargement est unique, la réduction se fait en mémoire. C'est elle qui
-        échouera si quelqu'un remet une requête dans la boucle.
-        """
+        """Deux mesures plutôt qu'un plafond : sept jours, puis trente et un."""
 
         part = Part.objects.create(name="Barnum", category=categorie)
         RentableItem.objects.create(part=part)

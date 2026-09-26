@@ -594,14 +594,7 @@ class TestQuantitesDeLaTournee:
 
 
 class TestPaginationDeLaTournee:
-    """La tournée était la seule liste du plugin sans pagination.
-
-    Elle renvoyait toutes les réservations validées ou livrées, avec sept
-    jointures et trois préchargements, pour un écran qui en montre une journée :
-    6,8 s à 10 000 réservations (cf. `docs/test-de-charge.md`). Le coût par bon
-    était déjà borné — c'est l'objet du test voisin — mais leur *nombre* ne
-    l'était pas.
-    """
+    """La tournée était la seule liste du plugin sans pagination."""
 
     @staticmethod
     def _appeler(factory, utilisateur, **params):
@@ -651,12 +644,7 @@ class TestPaginationDeLaTournee:
         assert page["next"] is not None
 
     def test_la_taille_de_page_est_plafonnee(self, factory):
-        """Sans plafond, `?page_size=100000` rétablirait le comportement d'avant.
-
-        On interroge le paginateur plutôt que l'endpoint : prouver le plafond
-        par la réponse demanderait de créer cinq cents bons pour observer qu'il
-        n'en revient pas cinq cent un.
-        """
+        """Sans plafond, `?page_size=100000` rétablirait le comportement d'avant."""
 
         paginateur = DeliveryListView.pagination_class()
 
@@ -672,12 +660,7 @@ class TestPaginationDeLaTournee:
     def test_l_ordre_de_tournee_survit_a_la_pagination(
         self, factory, gestionnaire, prestation, part
     ):
-        """Le tri par retrait croissant est l'ordre du camion : il doit être global.
-
-        Paginer un queryset non ordonné rendrait les pages instables ; ici
-        l'ordre vient du `get_queryset`, et la première page est bien celle des
-        premiers retraits.
-        """
+        """Le tri par retrait croissant est l'ordre du camion : il doit être global."""
 
         for jour in ("05", "03", "04"):
             _make_reservation(

@@ -1,10 +1,4 @@
-"""Commande `seed_charge` : jeu de données de volume.
-
-Un générateur de charge qui se trompe rend la mesure fausse sans le dire :
-des réservations sans lignes ne coûtent rien à arbitrer, un cumul qui recrée
-tout à chaque palier mesure la génération plutôt que le serveur, et un
-`--reset` trop large emporterait le jeu de démonstration.
-"""
+"""Commande `seed_charge` : jeu de données de volume."""
 
 from __future__ import annotations
 
@@ -33,7 +27,6 @@ class TestSeedCharge:
         assert Reservation.objects.count() == 40
         # Chaque réservation porte sa prestation, et chaque prestation ses
         # lignes : sans elles, la détection de conflit n'aurait rien à lire et
-        # la mesure serait celle d'une base vide.
         assert Prestation.objects.count() == 40
         assert LigneReservation.objects.count() >= 40
 
@@ -51,12 +44,7 @@ class TestSeedCharge:
         assert premiers <= set(Reservation.objects.values_list("numero", flat=True))
 
     def test_le_cumul_reprend_hors_debut_de_groupe(self):
-        """Reprise à un indice qui ne tombe pas sur une manifestation neuve.
-
-        20 n'est pas un multiple de 3 : la première réservation du second
-        passage doit se rattacher à une manifestation créée pour elle, et non
-        à une liste encore vide.
-        """
+        """Reprise à un indice qui ne tombe pas sur une manifestation neuve."""
 
         call_command(
             "seed_charge", "--total", "20", "--articles", "6", "--clients", "4"

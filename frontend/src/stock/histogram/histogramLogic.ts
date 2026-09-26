@@ -14,8 +14,7 @@ export type PeriodePreset = 'semaine' | 'mois';
 const MS_PAR_JOUR = 24 * 60 * 60 * 1000;
 
 // Trois classes pour les cinq niveaux du serveur : à cinq teintes, l'échelle
-// est illisible en deutéranopie (ΔE 3,6, plancher 6). Le taux exact reste
-// écrit dans l'infobulle et le tableau. `piste` = fond de jauge.
+// est illisible en deutéranopie (ΔE 3,6, plancher 6).
 export type ClasseTension = 'disponible' | 'tendu' | 'complet';
 
 export interface DefinitionClasse {

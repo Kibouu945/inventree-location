@@ -45,11 +45,10 @@ const RAMASSAGES_URL = '/plugin/inventree-location/ramassages/';
 /** Plafond de `LieuPagination` côté serveur : au-delà, on le signale. */
 const MAX_RAMASSAGES_TOURNEE = 100;
 
-/** Idem pour les livraisons : `DeliveryPagination` plafonne à 500.
- *
+/**
  * La tournée se lit d'un bloc — la carte et le calendrier consomment le même
  * jeu que le tableau — donc on demande une page large plutôt que d'ajouter une
- * navigation qui les désynchroniserait. Au-delà, on le dit. */
+ */
 const MAX_LIVRAISONS_TOURNEE = 200;
 
 const STATUT_COLORS: Record<string, string> = {

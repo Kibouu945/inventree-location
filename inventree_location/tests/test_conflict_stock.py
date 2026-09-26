@@ -515,25 +515,11 @@ def test_la_synchronisation_ne_referme_rien(gestionnaire, stock_setup):
 
 
 class TestCoutDuWidgetDeConflits:
-    """Le coût de `list_current_conflicts` ne doit pas suivre le volume.
-
-    Chaque réservation était arbitrée seule, et chacune de ses lignes relisait
-    la base : la nature de l'article, son stock, ses engagements — deux fois —
-    et les réservations concurrentes. Une trentaine de requêtes par
-    réservation, sur les milliers que compte une année : l'écran ne rendait
-    plus du tout (cf. `docs/test-de-charge.md`).
-
-    Un seul chargement sert désormais tout le parcours.
-    """
+    """Le coût de `list_current_conflicts` ne doit pas suivre le volume."""
 
     @staticmethod
     def _semer(nb_reservations, nb_articles=6):
-        """Des réservations qui se chevauchent, sur un stock qui suffit.
-
-        Le stock est large exprès : sans pénurie, aucun groupe ne se forme et
-        *chaque* réservation est arbitrée jusqu'au bout. C'est le cas coûteux,
-        et c'est celui d'une base saine.
-        """
+        """Des réservations qui se chevauchent, sur un stock qui suffit."""
 
         categorie = PartCategory.objects.create(
             name=f"Charge {PartCategory.objects.count()}"

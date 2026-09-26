@@ -1,27 +1,5 @@
 #!/usr/bin/env python3
-"""Mesure de charge des endpoints du plugin.
-
-Le volume cible est de 10 000 réservations par an (réponse du client du 20 mai,
-ticket PERF-01). Cette commande répond à deux questions distinctes, qu'on
-confond souvent :
-
-1. **Ce que ça coûte à ce volume.** Mode `--sequentiel` : un seul appelant,
-   chaque endpoint joué plusieurs fois, aucune concurrence. C'est la mesure du
-   *coût algorithmique*. Si elle se dégrade quand la base grossit, c'est le
-   code qu'il faut corriger, et aucun serveur plus gros n'y changera rien.
-
-2. **Combien d'utilisateurs simultanés ça tient.** Mode par défaut : N
-   appelants pendant D secondes. C'est la mesure de *capacité*, et elle ne
-   veut rien dire tant que la première n'est pas saine.
-
-On mesure des percentiles, pas des moyennes : une moyenne de 200 ms peut
-cacher un utilisateur sur vingt qui attend huit secondes, et c'est celui-là
-qui appelle le support.
-
-    python tests/charge/bench.py --sequentiel
-    python tests/charge/bench.py --concurrence 10 --duree 30
-    python tests/charge/bench.py --scenario ecriture --concurrence 5
-"""
+"""Mesure de charge des endpoints du plugin."""
 
 from __future__ import annotations
 
@@ -56,17 +34,9 @@ def _mois(decalage_jours: int = 0) -> tuple[str, str]:
 
 
 class Appel:
-    """Un appel mesurable : son nom, sa méthode, et comment le construire.
+    """Un appel mesurable : son nom, sa méthode, et comment le construire."""
 
-    `construire` reçoit le contexte (articles connus, tirage aléatoire) et
-    rend `(chemin, params, corps)`. Il est rappelé à chaque itération : deux
-    appels successifs d'un même endpoint ne doivent pas taper la même page ni
-    le même mois, sinon on mesure un cache et non un serveur.
-    """
-
-    #: Codes comptés comme une réponse rendue. Un 409 « pénurie » du contrôle
-    #: de stock en fait partie : c'est la réponse métier attendue quand
-    #: l'article manque, pas une défaillance du serveur.
+    #: Codes comptés comme une réponse rendue.
     def __init__(self, nom, methode, construire, poids=1, codes_ok=(200, 201)):
         self.nom = nom
         self.methode = methode
@@ -297,12 +267,7 @@ def _jouer(session, url, appel, ctx, rng, mesures, timeout):
 
 
 def _contexte(session, url, timeout):
-    """Identifiants réels à réinjecter dans les appels.
-
-    Taper `?part=1` marcherait, mais mesurerait un article qui n'existe
-    peut-être pas : le serveur répondrait 404 en deux millisecondes et on
-    conclurait à un serveur rapide.
-    """
+    """Identifiants réels à réinjecter dans les appels."""
 
     articles, prestations = [], []
 
@@ -528,7 +493,6 @@ def main():
     else:
         # Chaque worker a sa session : `requests.Session` n'est pas conçue pour
         # être partagée entre threads, et un pool partagé sérialiserait les
-        # connexions — on mesurerait le client, pas le serveur.
         pondere = [appel for appel in appels for _ in range(appel.poids)]
         fin = time.perf_counter() + arguments.duree
 
