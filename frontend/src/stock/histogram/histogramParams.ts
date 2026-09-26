@@ -1,23 +1,12 @@
-/**
- * État d'URL de l'histogramme de disponibilité.
- *
- * Même contrat que les autres écrans du plugin (cf. `ramassageParams.ts`) :
- * l'écran ne possède que ses propres clés, préfixées `hist_`, et laisse le
- * reste de la query string aux voisins (cf. `urlState.ts`).
- *
- * Sans cet état, un gestionnaire qui repérait une tension ne pouvait pas en
- * passer le lien : le destinataire rouvrait l'écran vide, à lui de retrouver
- * l'article et la période.
- */
+// État d'URL de l'écran : mêmes règles que `ramassageParams.ts`, clés `hist_`.
 import type { PeriodePreset } from './histogramLogic';
 import { aujourdhui } from './histogramLogic';
 
 export type HistogramVue = 'histogramme' | 'tableau';
 
 export interface HistogramFiltersState {
-  /** Identifiant du Part affiché, `null` tant qu'aucun n'est choisi. */
   partId: string | null;
-  /** Premier jour de la période, au format AAAA-MM-JJ. */
+  /** AAAA-MM-JJ. */
   dateDebut: string;
   preset: PeriodePreset;
   vue: HistogramVue;
@@ -33,7 +22,6 @@ export const HISTOGRAM_URL_KEYS = [
   'hist_jours'
 ];
 
-/** État d'ouverture : aucun article, la semaine qui commence aujourd'hui. */
 export function defaultHistogramFilters(
   maintenant: Date = new Date()
 ): HistogramFiltersState {
@@ -56,8 +44,6 @@ function parseJours(value: string | null): string[] {
   for (const entree of value.split(',')) {
     const jour = entree.trim();
 
-    // Un jour ISO, une seule fois : une clé bricolée à la main ne doit pas
-    // faire cocher deux fois la même case.
     if (/^[1-7]$/.test(jour) && !retenus.includes(jour)) {
       retenus.push(jour);
     }

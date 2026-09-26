@@ -1,6 +1,7 @@
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   Alert,
+  Badge,
   Box,
   Chip,
   Group,
@@ -22,11 +23,23 @@ import { useEffect, useMemo, useState } from 'react';
 import { ownsKeys, syncOwnedParams } from '../../urlState';
 import {
   borneDePeriode,
+  CLASSES_TENSION,
+  type ClasseTension,
+  capitaliser,
+  classeDeTension,
+  estWeekEnd,
+  etiquetteColonne,
   filtrerJoursVisibles,
+  graduations,
   type HistogramDay,
-  hauteurBarrePourcent,
+  hauteurRemplissagePourcent,
+  jourLePlusTendu,
+  libelleJourLong,
+  libelleJournees,
+  ORDRE_CLASSES,
   type PeriodePreset,
-  TENSION_COLORS
+  resumeTension,
+  tauxOccupationArrondi
 } from './histogramLogic';
 import {
   defaultHistogramFilters,
@@ -39,7 +52,11 @@ import {
 
 const CATALOG_URL = '/plugin/inventree-location/catalog/';
 
-const HAUTEUR_GRAPHIQUE = 180;
+const HAUTEUR_TRACE = 200;
+const LARGEUR_BARRE = 18;
+const GOUTTIERE = 4;
+// Air au-dessus des colonnes : sans elle le défilement rogne l'étiquette du pic.
+const MARGE_HAUTE = 18;
 
 interface CatalogSearchResult {
   id: number;
@@ -73,8 +90,291 @@ function initialFilters(): HistogramFiltersState {
   return parseHistogramFilters(window.location.search);
 }
 
-function libelleJour(date: string): string {
-  return date.slice(8, 10);
+function Pastille({
+  classe,
+  taille = 10
+}: {
+  classe: ClasseTension;
+  taille?: number;
+}) {
+  return (
+    <Box
+      w={taille}
+      h={taille}
+      style={{
+        background: CLASSES_TENSION[classe].couleur,
+        borderRadius: 3,
+        flexShrink: 0
+      }}
+    />
+  );
+}
+
+function Resume({ jours }: { jours: HistogramDay[] }) {
+  const compte = resumeTension(jours);
+
+  return (
+    <Group gap='lg' wrap='wrap'>
+      {ORDRE_CLASSES.map((classe) => (
+        <Group key={classe} gap={6} wrap='nowrap'>
+          <Pastille classe={classe} />
+          <Text
+            size='sm'
+            fw={600}
+            style={{ fontVariantNumeric: 'tabular-nums' }}
+          >
+            {compte[classe]}
+          </Text>
+          <Text size='sm' c='dimmed'>
+            {libelleJournees(classe, compte[classe])}
+          </Text>
+        </Group>
+      ))}
+    </Group>
+  );
+}
+
+function Legende() {
+  return (
+    <Group gap='lg' wrap='wrap'>
+      {ORDRE_CLASSES.map((classe) => (
+        <Group key={classe} gap={6} wrap='nowrap'>
+          <Pastille classe={classe} />
+          <Text size='xs'>{CLASSES_TENSION[classe].libelle}</Text>
+          <Text size='xs' c='dimmed'>
+            {CLASSES_TENSION[classe].seuil}
+          </Text>
+        </Group>
+      ))}
+    </Group>
+  );
+}
+
+function infobulle(jour: HistogramDay): string {
+  return [
+    libelleJourLong(jour.date),
+    `${jour.reserved} engagé(s) sur ${jour.total_stock}`,
+    `${jour.available} disponible(s) — ${tauxOccupationArrondi(jour)} %`
+  ].join(' · ');
+}
+
+function Colonne({ jour, pic }: { jour: HistogramDay; pic: boolean }) {
+  const classe = classeDeTension(jour.tension_level);
+  const { couleur, piste } = CLASSES_TENSION[classe];
+  const remplissage = hauteurRemplissagePourcent(jour);
+  const { numero, semaine } = etiquetteColonne(jour.date);
+  const weekEnd = estWeekEnd(jour.date);
+
+  return (
+    <Tooltip label={infobulle(jour)} withArrow>
+      <Stack gap={4} align='center' style={{ flexShrink: 0 }}>
+        <Box
+          w={LARGEUR_BARRE}
+          h={HAUTEUR_TRACE}
+          style={{ background: piste, borderRadius: 4, position: 'relative' }}
+        >
+          {pic && (
+            <Text
+              size='10px'
+              c='dimmed'
+              style={{
+                position: 'absolute',
+                bottom: `calc(${remplissage}% + 4px)`,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                whiteSpace: 'nowrap',
+                fontVariantNumeric: 'tabular-nums'
+              }}
+            >
+              {tauxOccupationArrondi(jour)} %
+            </Text>
+          )}
+          <Box
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              height: `${remplissage}%`,
+              background: couleur,
+              borderRadius: remplissage >= 99 ? 4 : '4px 4px 0 0'
+            }}
+          />
+        </Box>
+        <Text
+          size='xs'
+          c={weekEnd ? 'dimmed' : undefined}
+          fw={weekEnd ? 400 : 500}
+          style={{ fontVariantNumeric: 'tabular-nums' }}
+        >
+          {numero}
+        </Text>
+        <Text size='10px' c='dimmed'>
+          {semaine}
+        </Text>
+      </Stack>
+    </Tooltip>
+  );
+}
+
+function Graphique({ jours }: { jours: HistogramDay[] }) {
+  const total = jours[0]?.total_stock ?? 0;
+  const ticks = graduations(total);
+  const pic = jourLePlusTendu(jours);
+
+  return (
+    <Stack gap='md'>
+      <Group align='flex-start' gap='xs' wrap='nowrap'>
+        <Box
+          h={HAUTEUR_TRACE}
+          mt={MARGE_HAUTE}
+          style={{ position: 'relative', width: 34 }}
+        >
+          {ticks.map((valeur) => (
+            <Text
+              key={valeur}
+              size='10px'
+              c='dimmed'
+              ta='right'
+              style={{
+                position: 'absolute',
+                right: 0,
+                bottom: total > 0 ? `${(valeur / total) * 100}%` : 0,
+                transform: 'translateY(50%)',
+                fontVariantNumeric: 'tabular-nums'
+              }}
+            >
+              {valeur}
+            </Text>
+          ))}
+        </Box>
+
+        <Box style={{ overflowX: 'auto', flex: 1 }}>
+          <Box
+            style={{
+              width: 'max-content',
+              position: 'relative',
+              paddingTop: MARGE_HAUTE
+            }}
+          >
+            {ticks.map((valeur) => (
+              <Box
+                key={valeur}
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  // Le conteneur descend sous la zone tracée : on repère
+                  // la grille depuis le haut.
+                  top:
+                    MARGE_HAUTE +
+                    (total > 0
+                      ? HAUTEUR_TRACE - (valeur / total) * HAUTEUR_TRACE
+                      : HAUTEUR_TRACE),
+                  height: 1,
+                  background: 'var(--mantine-color-default-border)'
+                }}
+              />
+            ))}
+            <Group gap={GOUTTIERE} align='flex-start' wrap='nowrap'>
+              {jours.map((jour) => (
+                <Colonne
+                  key={jour.date}
+                  jour={jour}
+                  pic={pic?.date === jour.date}
+                />
+              ))}
+            </Group>
+          </Box>
+        </Box>
+      </Group>
+
+      <Legende />
+    </Stack>
+  );
+}
+
+function JaugeLigne({ jour }: { jour: HistogramDay }) {
+  const classe = classeDeTension(jour.tension_level);
+  const { couleur, piste } = CLASSES_TENSION[classe];
+
+  return (
+    <Group gap='xs' wrap='nowrap'>
+      <Box
+        w={64}
+        h={6}
+        style={{ background: piste, borderRadius: 3, overflow: 'hidden' }}
+      >
+        <Box
+          h={6}
+          style={{
+            width: `${hauteurRemplissagePourcent(jour)}%`,
+            background: couleur,
+            borderRadius: 3
+          }}
+        />
+      </Box>
+      <Text size='sm' style={{ fontVariantNumeric: 'tabular-nums' }}>
+        {tauxOccupationArrondi(jour)} %
+      </Text>
+    </Group>
+  );
+}
+
+function Tableau({ jours }: { jours: HistogramDay[] }) {
+  return (
+    <Table striped highlightOnHover verticalSpacing='xs'>
+      <Table.Thead>
+        <Table.Tr>
+          <Table.Th>Jour</Table.Th>
+          <Table.Th ta='right'>Stock total</Table.Th>
+          <Table.Th ta='right'>Engagé</Table.Th>
+          <Table.Th ta='right'>Disponible</Table.Th>
+          <Table.Th>Occupation</Table.Th>
+          <Table.Th>Tension</Table.Th>
+        </Table.Tr>
+      </Table.Thead>
+      <Table.Tbody>
+        {jours.map((jour) => {
+          const classe = classeDeTension(jour.tension_level);
+          const nombre = { fontVariantNumeric: 'tabular-nums' } as const;
+
+          return (
+            <Table.Tr key={jour.date}>
+              <Table.Td>
+                <Text size='sm'>{capitaliser(libelleJourLong(jour.date))}</Text>
+              </Table.Td>
+              <Table.Td ta='right' style={nombre}>
+                {jour.total_stock}
+              </Table.Td>
+              <Table.Td ta='right' style={nombre}>
+                {jour.reserved}
+              </Table.Td>
+              <Table.Td
+                ta='right'
+                style={nombre}
+                fw={jour.available <= 0 ? 700 : undefined}
+              >
+                {jour.available}
+              </Table.Td>
+              <Table.Td>
+                <JaugeLigne jour={jour} />
+              </Table.Td>
+              <Table.Td>
+                {/* `light-dark(…)` n'est pas une couleur de thème Mantine. */}
+                <Badge
+                  variant='default'
+                  leftSection={<Pastille classe={classe} taille={8} />}
+                >
+                  {CLASSES_TENSION[classe].libelle}
+                </Badge>
+              </Table.Td>
+            </Table.Tr>
+          );
+        })}
+      </Table.Tbody>
+    </Table>
+  );
 }
 
 export function HistogramView({
@@ -135,9 +435,8 @@ export function HistogramView({
     context.queryClient
   );
 
-  // L'article restauré depuis l'URL n'est pas forcément dans les vingt
-  // premiers résultats de recherche : c'est la réponse du serveur qui le
-  // nomme, sans requête supplémentaire.
+  // L'article restauré depuis l'URL n'est pas forcément dans les résultats de
+  // recherche : c'est la réponse du serveur qui le nomme.
   const nomServeur = histogramQuery.data?.part_name;
 
   const options = useMemo(() => {
@@ -267,74 +566,18 @@ export function HistogramView({
           </Alert>
         )}
 
-      {filters.partId &&
-        joursAffiches.length > 0 &&
-        filters.vue === 'histogramme' && (
-          <Paper withBorder p='md'>
-            <Group
-              align='flex-end'
-              gap={4}
-              h={HAUTEUR_GRAPHIQUE}
-              wrap='nowrap'
-              style={{ overflowX: 'auto' }}
-            >
-              {joursAffiches.map((jour) => (
-                <Tooltip
-                  key={jour.date}
-                  label={`${jour.date} — disponible : ${jour.available}/${jour.total_stock}, réservé : ${jour.reserved}`}
-                >
-                  <Stack gap={4} align='center' style={{ minWidth: 28 }}>
-                    <Box
-                      w={20}
-                      h={Math.max(
-                        (hauteurBarrePourcent(jour) / 100) * HAUTEUR_GRAPHIQUE,
-                        2
-                      )}
-                      bg={TENSION_COLORS[jour.tension_level]}
-                    />
-                    <Text size='xs' c='dimmed'>
-                      {libelleJour(jour.date)}
-                    </Text>
-                  </Stack>
-                </Tooltip>
-              ))}
-            </Group>
-          </Paper>
-        )}
-
-      {filters.partId &&
-        joursAffiches.length > 0 &&
-        filters.vue === 'tableau' && (
-          <Table striped highlightOnHover>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Jour</Table.Th>
-                <Table.Th>Stock total</Table.Th>
-                <Table.Th>Réservé</Table.Th>
-                <Table.Th>Disponible</Table.Th>
-                <Table.Th>Tension</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {joursAffiches.map((jour) => (
-                <Table.Tr key={jour.date}>
-                  <Table.Td>{jour.date}</Table.Td>
-                  <Table.Td>{jour.total_stock}</Table.Td>
-                  <Table.Td>{jour.reserved}</Table.Td>
-                  <Table.Td>{jour.available}</Table.Td>
-                  <Table.Td>
-                    <Box
-                      w={12}
-                      h={12}
-                      bg={TENSION_COLORS[jour.tension_level]}
-                      style={{ borderRadius: '50%', display: 'inline-block' }}
-                    />
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        )}
+      {filters.partId && joursAffiches.length > 0 && (
+        <Paper withBorder p='md' radius='md'>
+          <Stack gap='md'>
+            <Resume jours={joursAffiches} />
+            {filters.vue === 'histogramme' ? (
+              <Graphique jours={joursAffiches} />
+            ) : (
+              <Tableau jours={joursAffiches} />
+            )}
+          </Stack>
+        </Paper>
+      )}
     </Stack>
   );
 }
