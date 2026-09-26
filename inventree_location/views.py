@@ -99,7 +99,12 @@ from .serializers import (
     geocode_candidates,
     sync_ligne_etat_retour,
 )
-from .stock import _as_date, compute_prestation_stock, compute_stock_availability
+from .stock import (
+    _as_date,
+    compute_part_availability_calendar,
+    compute_prestation_stock,
+    compute_stock_availability,
+)
 from .services.return_report import build_return_report
 from .services.return_report_pdf import (
     PdfEngineUnavailable,
@@ -193,6 +198,14 @@ class CatalogPagination(PageNumberPagination):
     page_size = 50
     page_size_query_param = "page_size"
     max_page_size = 100
+
+
+class DeliveryPagination(PageNumberPagination):
+    """Pagination de la tournée livreur."""
+
+    page_size = 100
+    page_size_query_param = "page_size"
+    max_page_size = 500
 
 
 class LieuListCreateView(generics.ListCreateAPIView):
@@ -566,6 +579,7 @@ class DeliveryListView(generics.ListAPIView):
 
     serializer_class = DeliverySerializer
     permission_classes = [DeliveryPermission]
+    pagination_class = DeliveryPagination
 
     #: Statuts affichés par défaut quand `statut` n'est pas fourni.
     DEFAULT_STATUTS = (StatutReservation.VALIDEE, StatutReservation.LIVREE)
@@ -1824,23 +1838,33 @@ class StockAlertListView(APIView):
         if scope_ids is not None:
             rentable_items = rentable_items.filter(part_id__in=scope_ids)
 
-        from .conflicts import get_part_total_stock
+        from .conflicts import get_parts_total_stock
         from .stock import compute_parts_availability
 
         rentable_items = list(rentable_items)
         alerts = []
         now = timezone.now()
+        part_ids = [rentable.part_id for rentable in rentable_items]
 
         # Une seule passe pour la disponibilité du jour de tous les articles.
-        availability = compute_parts_availability([
-            rentable.part_id for rentable in rentable_items
+        availability = compute_parts_availability(part_ids)
+
+        # Deux passes de plus, groupées elles aussi.
+        stock_par_part = get_parts_total_stock([
+            rentable.part for rentable in rentable_items
         ])
+        tensions = self._projected_tensions(
+            part_ids=part_ids,
+            now=now,
+            manifestation_id=manifestation_id,
+            lieu_id=lieu_id,
+        )
 
         for rentable in rentable_items:
             part = rentable.part
             # Deux grandeurs distinctes, une seule source : ce qu'on possède de
             # louable (InvenTree) et ce qu'il en reste de libre aujourd'hui.
-            stock_total = get_part_total_stock(part, rentable_item=rentable)
+            stock_total = stock_par_part.get(part.pk, 0)
             stock_available = availability.get(part.pk, stock_total)
             low, low_source = self._seuil_bas(rentable, part)
             high = rentable.seuil_alerte_haut
@@ -1869,13 +1893,7 @@ class StockAlertListView(APIView):
                     ),
                 })
 
-            projected = self._projected_tension(
-                part_id=part.pk,
-                total_stock=max(stock_total, 1),
-                now=now,
-                manifestation_id=manifestation_id,
-                lieu_id=lieu_id,
-            )
+            projected = self._tension_de(tensions, part.pk, max(stock_total, 1))
 
             if projected["occupation_rate"] >= 90:
                 part_reasons.append({
@@ -1931,12 +1949,12 @@ class StockAlertListView(APIView):
 
         return minimum, " (stock minimum InvenTree)"
 
-    def _projected_tension(
-        self, part_id, total_stock, now, manifestation_id=None, lieu_id=None
-    ):
+    def _projected_tensions(self, part_ids, now, manifestation_id=None, lieu_id=None):
+        """Quantités engagées sur trente jours, pour tous les articles à la fois."""
+
         end = now + timedelta(days=30)
         lines = LigneReservation.objects.filter(
-            part_id=part_id,
+            part_id__in=part_ids,
             reservation__statut__in=CONFLICT_STATUSES,
             reservation__date_retrait_prevue__lte=end,
             reservation__date_retour_prevue__gte=now,
@@ -1950,12 +1968,19 @@ class StockAlertListView(APIView):
         if lieu_id is not None:
             lines = lines.filter(reservation__prestation__lieu_id=lieu_id)
 
-        reserved = lines.aggregate(total=Sum("quantite_demandee"))["total"] or 0
-        occupation = (reserved / max(total_stock, 1)) * 100
+        engagements = lines.values("part_id").annotate(total=Sum("quantite_demandee"))
+
+        return {ligne["part_id"]: int(ligne["total"] or 0) for ligne in engagements}
+
+    @staticmethod
+    def _tension_de(tensions, part_id, total_stock):
+        """Le taux d'occupation d'un article, à partir des sommes groupées."""
+
+        reserved = tensions.get(part_id, 0)
 
         return {
-            "reserved_quantity": int(reserved),
-            "occupation_rate": float(occupation),
+            "reserved_quantity": reserved,
+            "occupation_rate": float((reserved / max(total_stock, 1)) * 100),
         }
 
     def _send_alert_email(self, alerts):
@@ -2257,6 +2282,44 @@ class CatalogPartDetailView(APIView):
         serializer = self.serializer_class(part)
 
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class PartAvailabilityHistogramView(APIView):
+    """Histogramme de disponibilité d'un article, jour par jour (CDC §99)."""
+
+    permission_classes = [CatalogPermission]
+
+    def get(self, request, pk, *args, **kwargs):
+        """Retourne la disponibilité au jour d'un article sur une période."""
+
+        from part.models import Part
+
+        part = Part.objects.filter(pk=pk).select_related("rentable_info").first()
+
+        if part is None:
+            return Response(
+                {"detail": "Part introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        today = timezone.localdate()
+        date_debut = parse_optional_date_param(request, "date_debut") or today
+        date_fin = parse_optional_date_param(
+            request, "date_fin"
+        ) or date_debut + timedelta(days=6)
+
+        rentable_info = getattr(part, "rentable_info", None)
+        days = compute_part_availability_calendar(part, date_debut, date_fin)
+
+        return Response(
+            {
+                "part_id": part.pk,
+                "part_name": getattr(part, "name", str(part)),
+                "is_virtual": bool(rentable_info and rentable_info.is_virtual),
+                "days": days,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class RentableFlagBulkUpdateView(APIView):

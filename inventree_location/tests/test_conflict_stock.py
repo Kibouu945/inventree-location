@@ -8,11 +8,14 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from inventree_location import roles
 from inventree_location.conflicts import (
     detect_reservation_conflicts,
+    list_current_conflicts,
     reservation_has_conflicts,
 )
 from inventree_location.tests.factories import (
@@ -21,6 +24,7 @@ from inventree_location.tests.factories import (
     mettre_en_stock,
 )
 from inventree_location.models import (
+    Lieu,
     LignePrestation,
     LigneReservation,
     Prestation,
@@ -38,7 +42,7 @@ from inventree_location.views import (
 )
 from inventree_location.views import StockAvailabilityCheckView
 
-from part.models import Part
+from part.models import Part, PartCategory
 
 User = get_user_model()
 
@@ -508,3 +512,75 @@ def test_la_synchronisation_ne_referme_rien(gestionnaire, stock_setup):
     sync_conflict_registry()
 
     assert ConflictHistory.objects.filter(state=ConflictState.OPEN).count() == 1
+
+
+class TestCoutDuWidgetDeConflits:
+    """Le coût de `list_current_conflicts` ne doit pas suivre le volume."""
+
+    @staticmethod
+    def _semer(nb_reservations, nb_articles=6):
+        """Des réservations qui se chevauchent, sur un stock qui suffit."""
+
+        categorie = PartCategory.objects.create(
+            name=f"Charge {PartCategory.objects.count()}"
+        )
+        parts = []
+
+        for rang in range(nb_articles):
+            part = Part.objects.create(name=f"Article {rang}", category=categorie)
+            RentableItem.objects.create(part=part, is_rentable=True)
+            mettre_en_stock(part, 10_000)
+            parts.append(part)
+
+        demandeur = User.objects.create_user(
+            username=f"semeur-{User.objects.count()}", password="pwd"
+        )
+        depart = timezone.now().replace(hour=8, minute=0, second=0, microsecond=0)
+        lieu = Lieu.objects.create(nom=f"Lieu {Lieu.objects.count()}", adresse="1 rue")
+        manifestation = make_manifestation(
+            nom=f"Saison {Prestation.objects.count()}",
+            date_debut=depart,
+            date_fin=depart + timedelta(days=60),
+        )
+
+        for rang in range(nb_reservations):
+            debut = depart + timedelta(days=rang % 10)
+            prestation = Prestation.objects.create(
+                manifestation=manifestation,
+                lieu=lieu,
+                nom=f"Presta {Prestation.objects.count()}",
+                date_debut=debut,
+                date_fin=debut + timedelta(days=2),
+            )
+            reservation = Reservation.objects.create(
+                prestation=prestation,
+                demandeur=demandeur,
+                statut=StatutReservation.VALIDEE,
+                date_retrait_prevue=debut,
+                date_retour_prevue=debut + timedelta(days=2),
+            )
+
+            for decalage in range(2):
+                reservation.lignes.create(
+                    part=parts[(rang + decalage) % nb_articles],
+                    quantite_demandee=1,
+                )
+
+    @staticmethod
+    def _mesurer():
+        with CaptureQueriesContext(connection) as requetes:
+            assert list_current_conflicts() == []
+
+        return len(requetes)
+
+    @pytest.mark.django_db
+    def test_le_cout_ne_depend_pas_du_nombre_de_reservations(self):
+        """Deux mesures plutôt qu'un plafond : vingt réservations, puis quatre-vingts."""
+
+        self._semer(20)
+        self._mesurer()  # la première passe amorce les caches
+        vingt = self._mesurer()
+
+        self._semer(60)
+
+        assert self._mesurer() == vingt

@@ -8,6 +8,9 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+
 from inventree_location.models import (
     Lieu,
     Prestation,
@@ -278,3 +281,77 @@ def test_seuil_du_plugin_prime_sur_celui_dinventree(manager, alert_setup):
 
     assert "seuil bas fixé à 0" in message
     assert "InvenTree" not in message
+
+
+class TestCoutDesAlertes:
+    """Le coût de l'écran ne doit pas suivre le nombre d'articles louables."""
+
+    @staticmethod
+    def _creer_articles(combien, seuil_bas=20):
+        category = PartCategory.objects.create(
+            name=f"Cat charge {PartCategory.objects.count()}"
+        )
+
+        for rang in range(combien):
+            part = Part.objects.create(name=f"Article {rang}", category=category)
+            RentableItem.objects.create(
+                part=part,
+                is_rentable=True,
+                consommable=True,
+                seuil_alerte_bas=seuil_bas,
+                seuil_alerte_haut=95,
+            )
+            mettre_en_stock(part, 100)
+
+    @staticmethod
+    def _mesurer(manager):
+        factory = APIRequestFactory()
+        request = factory.get("/plugin/inventree-location/alerts/stock/")
+        force_authenticate(request, user=manager)
+
+        with CaptureQueriesContext(connection) as requetes:
+            reponse = StockAlertListView.as_view()(request)
+            assert reponse.status_code == status.HTTP_200_OK
+
+        return len(requetes)
+
+    @pytest.mark.django_db
+    def test_le_cout_ne_depend_pas_du_nombre_d_articles(self, manager, alert_setup):
+        """Deux mesures plutôt qu'un plafond : cinq articles, puis vingt."""
+
+        self._creer_articles(5)
+        self._mesurer(manager)  # la première passe amorce les caches
+        cinq_articles = self._mesurer(manager)
+
+        self._creer_articles(15)
+
+        assert self._mesurer(manager) == cinq_articles
+
+    @pytest.mark.django_db
+    def test_le_groupement_ne_change_pas_les_alertes_rendues(
+        self, manager, alert_setup
+    ):
+        """Le regroupement est un refactor : les alertes doivent être les mêmes."""
+
+        category = PartCategory.objects.create(name="Cat sans stock")
+        depourvu = Part.objects.create(name="Jamais acheté", category=category)
+        RentableItem.objects.create(
+            part=depourvu,
+            is_rentable=True,
+            consommable=True,
+            seuil_alerte_bas=5,
+        )
+
+        factory = APIRequestFactory()
+        request = factory.get("/plugin/inventree-location/alerts/stock/")
+        force_authenticate(request, user=manager)
+
+        reponse = StockAlertListView.as_view()(request)
+        alertes = {alerte["part_id"]: alerte for alerte in reponse.data["alerts"]}
+
+        assert depourvu.pk in alertes
+        assert alertes[depourvu.pk]["stock_total"] == 0
+        assert any(
+            raison["type"] == "low_threshold"
+            for raison in alertes[depourvu.pk]["reasons"]
+        )

@@ -161,41 +161,22 @@ l'activation du plugin, les interrupteurs plugin d'InvenTree, les droits des
 rôles et les tableaux de bord. Les scénarios échouent alors en cascade sur des
 403 sans qu'aucun écran ne paraisse cassé.
 
-La remise en route se fait **dans cet ordre**. Les deux premières étapes sont
-celles qu'on oublie : sans elles, le plugin est chargé, `meta` est rempli, tout
-a l'air normal — et pourtant `showmigrations inventree_location` répond `No
-installed app with label 'inventree_location'`, parce que l'app n'entre jamais
-dans `INSTALLED_APPS` et qu'aucune de ses tables n'existe.
+`make provision` (cf. le README à la racine et `docker/provision_plugin_settings.py`)
+fait tout cela en un seul appel : il réactive le plugin, rallume les
+interrupteurs d'InvenTree, redémarre la pile, puis charge les données de démo
+et les droits.
 
 ```bash
 make up
-
-# 1. Réactiver le plugin — il revient installé mais « active: false ».
-curl -s -X PATCH -u admin:admin123 -H "Content-Type: application/json" \
-  -d '{"active": true}' \
-  http://localhost:8000/api/plugins/inventree-location/activate/
-
-# 2. Rallumer les interrupteurs d'InvenTree. C'est `ENABLE_PLUGINS_APP` qui
-#    décide si l'app d'un plugin rejoint INSTALLED_APPS — donc si ses
-#    migrations existent. Les autres servent aux URL, aux tâches et aux
-#    événements.
-docker compose exec -T inventree bash -lc \
-  'cd /home/inventree/src/backend/InvenTree && python manage.py shell' <<'EOF'
-from common.settings import set_global_setting
-for cle in ("ENABLE_PLUGINS_APP", "ENABLE_PLUGINS_URL", "ENABLE_PLUGINS_NAVIGATION",
-            "ENABLE_PLUGINS_SCHEDULE", "ENABLE_PLUGINS_EVENTS", "ENABLE_PLUGINS_INTERFACE"):
-    set_global_setting(cle, True, None)
-EOF
-
-# 3. Redémarrer : c'est au démarrage que les migrations du plugin passent.
-docker compose restart inventree
+make provision
 make manage cmd="showmigrations inventree_location"   # doit lister 31 × [X]
-
-# 4. Puis seulement, les données et les droits.
-make manage cmd="seed_demo"
-make manage cmd="provision_role_permissions"   # sinon 403 sur /api/part/ pour tous les rôles
-make manage cmd="provision_dashboards"         # sinon le tableau de bord est vide
 ```
+
+L'ordre compte, et `ENABLE_PLUGINS_APP` vient en premier : c'est lui qui décide
+si l'app d'un plugin rejoint `INSTALLED_APPS`, donc si ses migrations existent.
+Sans lui, le plugin est chargé, `meta` est rempli, tout a l'air normal — et
+pourtant `showmigrations inventree_location` répond `No installed app with
+label 'inventree_location'`, parce qu'aucune de ses tables n'existe.
 
 Enfin, **laisser la pile chauffer** avant de lancer un scénario. Joué dans la
 foulée du redémarrage, `nominal.mjs` a échoué sur ses neuf étapes — trente

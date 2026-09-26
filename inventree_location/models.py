@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db import IntegrityError, models, transaction
+from django.db.models.functions import Cast, Substr
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -558,22 +559,17 @@ def _generate_reservation_numero(year: int) -> str:
     """Calcule le prochain numéro `RES-{année}-{NNNN}` pour l'année donnée."""
 
     prefix = f"RES-{year}-"
-    last_numero = (
+    dernier_rang = (
         Reservation.objects.filter(numero__startswith=prefix)
-        .order_by("-numero")
-        .values_list("numero", flat=True)
-        .first()
+        .filter(numero__regex=rf"^{prefix}[0-9]+$")
+        .aggregate(
+            rang=models.Max(
+                Cast(Substr("numero", len(prefix) + 1), models.IntegerField())
+            )
+        )["rang"]
     )
 
-    next_seq = 1
-
-    if last_numero:
-        try:
-            next_seq = int(last_numero.rsplit("-", 1)[-1]) + 1
-        except ValueError:
-            next_seq = 1
-
-    return f"{prefix}{next_seq:04d}"
+    return f"{prefix}{(dernier_rang or 0) + 1:04d}"
 
 
 class Reservation(TimestampedModel):

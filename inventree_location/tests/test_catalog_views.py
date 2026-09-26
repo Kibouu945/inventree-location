@@ -9,6 +9,8 @@ from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from django.contrib.auth import get_user_model
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from inventree_location.models import (
@@ -28,6 +30,7 @@ from inventree_location.views import (
     CatalogPagination,
     CatalogPartDetailView,
     CatalogPartListView,
+    PartAvailabilityHistogramView,
     RentableFlagBulkUpdateView,
     RentablePartDetailView,
 )
@@ -333,6 +336,129 @@ class TestCatalogPartDetail:
         request = factory.get(self._url(parts["tente"].pk))
         response = CatalogPartDetailView.as_view()(request, pk=parts["tente"].pk)
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+class TestPartAvailabilityHistogram:
+    def _url(self, pk):
+        return f"/plugin/inventree-location/catalog/{pk}/histogram/"
+
+    @pytest.mark.django_db
+    def test_get_returns_one_entry_per_day(self, factory, user, parts):
+        mettre_en_stock(parts["tente"], 10)
+        today = timezone.localdate()
+
+        request = factory.get(
+            self._url(parts["tente"].pk),
+            {
+                "date_debut": today.isoformat(),
+                "date_fin": (today + timedelta(days=2)).isoformat(),
+            },
+        )
+        force_authenticate(request, user=user)
+
+        response = PartAvailabilityHistogramView.as_view()(
+            request, pk=parts["tente"].pk
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["part_id"] == parts["tente"].pk
+        assert len(response.data["days"]) == 3
+        assert response.data["days"][0]["available"] == 10
+
+    @pytest.mark.django_db
+    def test_defaults_to_a_week_from_today(self, factory, user, parts):
+        request = factory.get(self._url(parts["tente"].pk))
+        force_authenticate(request, user=user)
+
+        response = PartAvailabilityHistogramView.as_view()(
+            request, pk=parts["tente"].pk
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data["days"]) == 7
+
+    @pytest.mark.django_db
+    def test_get_missing_part_returns_404(self, factory, user):
+        request = factory.get(self._url(99999))
+        force_authenticate(request, user=user)
+
+        response = PartAvailabilityHistogramView.as_view()(request, pk=99999)
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_anonymous_returns_401(self, factory, parts):
+        request = factory.get(self._url(parts["tente"].pk))
+        response = PartAvailabilityHistogramView.as_view()(
+            request, pk=parts["tente"].pk
+        )
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    @pytest.mark.django_db
+    def test_article_immateriel_est_signale_plutot_que_vide(
+        self, factory, user, categorie
+    ):
+        """Un service n'a pas d'histogramme — encore faut-il le dire."""
+
+        service = Part.objects.create(name="Nettoyage", category=categorie)
+        RentableItem.objects.create(part=service, is_virtual=True)
+
+        request = factory.get(self._url(service.pk))
+        force_authenticate(request, user=user)
+
+        response = PartAvailabilityHistogramView.as_view()(request, pk=service.pk)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["is_virtual"] is True
+        assert response.data["days"] == []
+
+    @pytest.mark.django_db
+    def test_le_cout_ne_depend_pas_du_nombre_de_jours(
+        self, factory, user, categorie
+    ):
+        """Deux mesures plutôt qu'un plafond : sept jours, puis trente et un."""
+
+        part = Part.objects.create(name="Barnum", category=categorie)
+        RentableItem.objects.create(part=part)
+        mettre_en_stock(part, 10)
+
+        now = timezone.localtime().replace(hour=8, minute=0, second=0, microsecond=0)
+        manifestation = make_manifestation(
+            nom="Saison",
+            date_debut=now,
+            date_fin=now + timedelta(days=40),
+        )
+        lieu = Lieu.objects.create(nom="Parc")
+
+        for offset in range(0, 40, 5):
+            presta = Prestation.objects.create(
+                manifestation=manifestation,
+                lieu=lieu,
+                nom=f"Jour {offset}",
+                date_debut=now + timedelta(days=offset),
+                date_fin=now + timedelta(days=offset, hours=6),
+            )
+            LignePrestation.objects.create(prestation=presta, part=part, quantite=2)
+
+        def mesurer(jours):
+            request = factory.get(
+                self._url(part.pk),
+                {
+                    "date_debut": now.date().isoformat(),
+                    "date_fin": (now.date() + timedelta(days=jours - 1)).isoformat(),
+                },
+            )
+            force_authenticate(request, user=user)
+
+            with CaptureQueriesContext(connection) as requetes:
+                response = PartAvailabilityHistogramView.as_view()(request, pk=part.pk)
+                assert response.status_code == status.HTTP_200_OK
+                assert len(response.data["days"]) == jours
+
+            return len(requetes)
+
+        mesurer(7)  # la première passe amorce les caches
+        une_semaine = mesurer(7)
+
+        assert mesurer(31) == une_semaine
 
 
 class TestRentablePartDetail:
