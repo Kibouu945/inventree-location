@@ -161,10 +161,10 @@ l'activation du plugin, les interrupteurs plugin d'InvenTree, les droits des
 rôles et les tableaux de bord. Les scénarios échouent alors en cascade sur des
 403 sans qu'aucun écran ne paraisse cassé.
 
-`make provision` (voir le README à la racine, et `docker/provision_plugin_settings.py`) fait exactement ça en
-un seul appel : réactive le plugin, rallume les interrupteurs d'InvenTree (`ENABLE_PLUGINS_APP` en premier —
-c'est lui qui décide si l'app d'un plugin rejoint `INSTALLED_APPS`, donc si ses migrations existent), redémarre,
-puis charge les données de démo et les droits :
+`make provision` (cf. le README à la racine et `docker/provision_plugin_settings.py`)
+fait tout cela en un seul appel : il réactive le plugin, rallume les
+interrupteurs d'InvenTree, redémarre la pile, puis charge les données de démo
+et les droits.
 
 ```bash
 make up
@@ -172,9 +172,11 @@ make provision
 make manage cmd="showmigrations inventree_location"   # doit lister 31 × [X]
 ```
 
-Sans le réglage `ENABLE_PLUGINS_APP`, le plugin est chargé, `meta` est rempli, tout a l'air normal — et pourtant
-`showmigrations inventree_location` répond `No installed app with label 'inventree_location'`, parce que l'app
-n'entre jamais dans `INSTALLED_APPS` et qu'aucune de ses tables n'existe.
+L'ordre compte, et `ENABLE_PLUGINS_APP` vient en premier : c'est lui qui décide
+si l'app d'un plugin rejoint `INSTALLED_APPS`, donc si ses migrations existent.
+Sans lui, le plugin est chargé, `meta` est rempli, tout a l'air normal — et
+pourtant `showmigrations inventree_location` répond `No installed app with
+label 'inventree_location'`, parce qu'aucune de ses tables n'existe.
 
 Enfin, **laisser la pile chauffer** avant de lancer un scénario. Joué dans la
 foulée du redémarrage, `nominal.mjs` a échoué sur ses neuf étapes — trente

@@ -29,12 +29,12 @@ Au premier lancement, les migrations Django s'exécutent automatiquement et un u
 make up               # Build et démarre tous les services
 make provision        # Active le plugin + intégrations, données de démo, permissions, dashboards
 make provision-plugin # Juste l'activation du plugin + des intégrations (sans les données de démo)
-make down              # Arrête tous les services
-make migrate           # Exécute les migrations Django
-make test               # Lance les tests du plugin
-make logs                # Affiche les logs en temps réel
-make shell                # Ouvre un shell dans le conteneur InvenTree
-make clean                 # Arrête les services et supprime les volumes (refaire `make provision` après)
+make down             # Arrête tous les services
+make migrate          # Exécute les migrations Django
+make test             # Lance les tests du plugin
+make logs             # Affiche les logs en temps réel
+make shell            # Ouvre un shell dans le conteneur InvenTree
+make clean            # Arrête les services et supprime les volumes (refaire `make provision` après)
 ```
 
 ## Architecture

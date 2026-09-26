@@ -17,10 +17,10 @@ import {
 import { DatePickerInput } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
+import { ownsKeys, syncOwnedParams } from '../../urlState';
 import {
-  aujourdhui,
   borneDePeriode,
   filtrerJoursVisibles,
   type HistogramDay,
@@ -28,6 +28,14 @@ import {
   type PeriodePreset,
   TENSION_COLORS
 } from './histogramLogic';
+import {
+  defaultHistogramFilters,
+  HISTOGRAM_URL_KEYS,
+  type HistogramFiltersState,
+  type HistogramVue,
+  parseHistogramFilters,
+  serializeHistogramFilters
+} from './histogramParams';
 
 const CATALOG_URL = '/plugin/inventree-location/catalog/';
 
@@ -41,6 +49,7 @@ interface CatalogSearchResult {
 interface HistogramResponse {
   part_id: number;
   part_name: string;
+  is_virtual: boolean;
   days: HistogramDay[];
 }
 
@@ -54,6 +63,16 @@ const JOURS_SEMAINE = [
   { value: '7', label: 'Dim' }
 ];
 
+const ownsHistogramKey = ownsKeys(HISTOGRAM_URL_KEYS);
+
+function initialFilters(): HistogramFiltersState {
+  if (typeof window === 'undefined') {
+    return defaultHistogramFilters();
+  }
+
+  return parseHistogramFilters(window.location.search);
+}
+
 function libelleJour(date: string): string {
   return date.slice(8, 10);
 }
@@ -63,16 +82,19 @@ export function HistogramView({
 }: {
   context: InvenTreePluginContext;
 }) {
+  const [filters, setFilters] = useState<HistogramFiltersState>(initialFilters);
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [pickedPart, setPickedPart] = useState<CatalogSearchResult | null>(
-    null
-  );
-  const [preset, setPreset] = useState<PeriodePreset>('semaine');
-  const [dateDebut, setDateDebut] = useState<string>(() => aujourdhui());
-  const [vue, setVue] = useState<'histogramme' | 'tableau'>('histogramme');
-  const [joursVisibles, setJoursVisibles] = useState<string[]>([]);
+
+  const majFiltres = (patch: Partial<HistogramFiltersState>) =>
+    setFilters((precedent) => ({ ...precedent, ...patch }));
+
+  useEffect(() => {
+    syncOwnedParams(
+      ownsHistogramKey,
+      new URLSearchParams(serializeHistogramFilters(filters))
+    );
+  }, [filters]);
 
   const partSearch = useQuery<{ results: CatalogSearchResult[] }>(
     {
@@ -93,11 +115,30 @@ export function HistogramView({
 
   const results = partSearch.data?.results ?? [];
 
-  const selectedPart =
-    results.find((part) => String(part.id) === selectedId) ??
-    (pickedPart && String(pickedPart.id) === selectedId
-      ? pickedPart
-      : undefined);
+  const dateFin = useMemo(
+    () => borneDePeriode(filters.dateDebut, filters.preset),
+    [filters.dateDebut, filters.preset]
+  );
+
+  const histogramQuery = useQuery<HistogramResponse>(
+    {
+      queryKey: ['histogram', filters.partId, filters.dateDebut, dateFin],
+      enabled: !!filters.partId,
+      queryFn: async () => {
+        const response = await context.api.get(
+          `${CATALOG_URL}${filters.partId}/histogram/`,
+          { params: { date_debut: filters.dateDebut, date_fin: dateFin } }
+        );
+        return response.data as HistogramResponse;
+      }
+    },
+    context.queryClient
+  );
+
+  // L'article restauré depuis l'URL n'est pas forcément dans les vingt
+  // premiers résultats de recherche : c'est la réponse du serveur qui le
+  // nomme, sans requête supplémentaire.
+  const nomServeur = histogramQuery.data?.part_name;
 
   const options = useMemo(() => {
     const mapped = results.map((part) => ({
@@ -106,46 +147,28 @@ export function HistogramView({
     }));
 
     if (
-      selectedPart &&
-      !mapped.some((option) => option.value === String(selectedPart.id))
+      filters.partId &&
+      !mapped.some((option) => option.value === filters.partId)
     ) {
       mapped.unshift({
-        value: String(selectedPart.id),
-        label: selectedPart.name
+        value: filters.partId,
+        label: nomServeur ?? `Article ${filters.partId}`
       });
     }
 
     return mapped;
-  }, [results, selectedPart]);
-
-  const dateFin = useMemo(
-    () => borneDePeriode(dateDebut, preset),
-    [dateDebut, preset]
-  );
-
-  const histogramQuery = useQuery<HistogramResponse>(
-    {
-      queryKey: ['histogram', selectedPart?.id, dateDebut, dateFin],
-      enabled: !!selectedPart,
-      queryFn: async () => {
-        const response = await context.api.get(
-          `${CATALOG_URL}${selectedPart?.id}/histogram/`,
-          { params: { date_debut: dateDebut, date_fin: dateFin } }
-        );
-        return response.data as HistogramResponse;
-      }
-    },
-    context.queryClient
-  );
+  }, [results, filters.partId, nomServeur]);
 
   const joursAffiches = useMemo(
     () =>
       filtrerJoursVisibles(
         histogramQuery.data?.days ?? [],
-        joursVisibles.map(Number)
+        filters.joursVisibles.map(Number)
       ),
-    [histogramQuery.data, joursVisibles]
+    [histogramQuery.data, filters.joursVisibles]
   );
+
+  const estImmateriel = histogramQuery.data?.is_virtual === true;
 
   return (
     <Stack gap='md'>
@@ -161,13 +184,8 @@ export function HistogramView({
           searchable
           searchValue={search}
           onSearchChange={setSearch}
-          value={selectedId}
-          onChange={(value) => {
-            setSelectedId(value);
-            setPickedPart(
-              results.find((part) => String(part.id) === value) ?? null
-            );
-          }}
+          value={filters.partId}
+          onChange={(value) => majFiltres({ partId: value })}
           nothingFoundMessage={
             partSearch.isFetching ? 'Recherche…' : 'Aucun résultat'
           }
@@ -175,22 +193,22 @@ export function HistogramView({
         />
         <DatePickerInput
           label='Début de la période'
-          value={dateDebut}
-          onChange={(value) => value && setDateDebut(value)}
+          value={filters.dateDebut}
+          onChange={(value) => value && majFiltres({ dateDebut: value })}
           valueFormat='DD/MM/YYYY'
           w={160}
         />
         <SegmentedControl
-          value={preset}
-          onChange={(value) => setPreset(value as PeriodePreset)}
+          value={filters.preset}
+          onChange={(value) => majFiltres({ preset: value as PeriodePreset })}
           data={[
             { label: 'Semaine', value: 'semaine' },
             { label: 'Mois', value: 'mois' }
           ]}
         />
         <SegmentedControl
-          value={vue}
-          onChange={(value) => setVue(value as 'histogramme' | 'tableau')}
+          value={filters.vue}
+          onChange={(value) => majFiltres({ vue: value as HistogramVue })}
           data={[
             { label: 'Histogramme', value: 'histogramme' },
             { label: 'Tableau', value: 'tableau' }
@@ -198,7 +216,11 @@ export function HistogramView({
         />
       </Group>
 
-      <Chip.Group multiple value={joursVisibles} onChange={setJoursVisibles}>
+      <Chip.Group
+        multiple
+        value={filters.joursVisibles}
+        onChange={(value) => majFiltres({ joursVisibles: value })}
+      >
         <Group gap='xs'>
           <Text size='xs' c='dimmed'>
             Jours affichés :
@@ -211,94 +233,108 @@ export function HistogramView({
         </Group>
       </Chip.Group>
 
-      {!selectedPart && (
+      {!filters.partId && (
         <Alert color='gray' title='Aucun article sélectionné'>
           Choisissez un article pour afficher sa disponibilité.
         </Alert>
       )}
 
-      {selectedPart && histogramQuery.isLoading && (
+      {filters.partId && histogramQuery.isLoading && (
         <Group justify='center' p='xl'>
           <Loader />
         </Group>
       )}
 
-      {selectedPart && histogramQuery.isError && (
+      {filters.partId && histogramQuery.isError && (
         <Alert color='red' title='Erreur'>
           Impossible de charger la disponibilité de cet article.
         </Alert>
       )}
 
-      {selectedPart && histogramQuery.data && joursAffiches.length === 0 && (
-        <Alert color='gray' title='Aucun jour à afficher'>
-          Aucun jour de la période ne correspond au filtre choisi.
+      {estImmateriel && (
+        <Alert color='gray' title='Article immatériel'>
+          {nomServeur ?? 'Cet article'} est un service : il n’a pas de stock
+          physique, donc pas de disponibilité à représenter.
         </Alert>
       )}
 
-      {selectedPart && joursAffiches.length > 0 && vue === 'histogramme' && (
-        <Paper withBorder p='md'>
-          <Group
-            align='flex-end'
-            gap={4}
-            h={HAUTEUR_GRAPHIQUE}
-            wrap='nowrap'
-            style={{ overflowX: 'auto' }}
-          >
-            {joursAffiches.map((jour) => (
-              <Tooltip
-                key={jour.date}
-                label={`${jour.date} — disponible : ${jour.available}/${jour.total_stock}, réservé : ${jour.reserved}`}
-              >
-                <Stack gap={4} align='center' style={{ minWidth: 28 }}>
-                  <Box
-                    w={20}
-                    h={Math.max(
-                      (hauteurBarrePourcent(jour) / 100) * HAUTEUR_GRAPHIQUE,
-                      2
-                    )}
-                    bg={TENSION_COLORS[jour.tension_level]}
-                  />
-                  <Text size='xs' c='dimmed'>
-                    {libelleJour(jour.date)}
-                  </Text>
-                </Stack>
-              </Tooltip>
-            ))}
-          </Group>
-        </Paper>
-      )}
+      {filters.partId &&
+        !estImmateriel &&
+        histogramQuery.data &&
+        joursAffiches.length === 0 && (
+          <Alert color='gray' title='Aucun jour à afficher'>
+            Aucun jour de la période ne correspond au filtre choisi.
+          </Alert>
+        )}
 
-      {selectedPart && joursAffiches.length > 0 && vue === 'tableau' && (
-        <Table striped highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Jour</Table.Th>
-              <Table.Th>Stock total</Table.Th>
-              <Table.Th>Réservé</Table.Th>
-              <Table.Th>Disponible</Table.Th>
-              <Table.Th>Tension</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {joursAffiches.map((jour) => (
-              <Table.Tr key={jour.date}>
-                <Table.Td>{jour.date}</Table.Td>
-                <Table.Td>{jour.total_stock}</Table.Td>
-                <Table.Td>{jour.reserved}</Table.Td>
-                <Table.Td>{jour.available}</Table.Td>
-                <Table.Td>
-                  <Box
-                    w={12}
-                    h={12}
-                    bg={TENSION_COLORS[jour.tension_level]}
-                    style={{ borderRadius: '50%', display: 'inline-block' }}
-                  />
-                </Table.Td>
+      {filters.partId &&
+        joursAffiches.length > 0 &&
+        filters.vue === 'histogramme' && (
+          <Paper withBorder p='md'>
+            <Group
+              align='flex-end'
+              gap={4}
+              h={HAUTEUR_GRAPHIQUE}
+              wrap='nowrap'
+              style={{ overflowX: 'auto' }}
+            >
+              {joursAffiches.map((jour) => (
+                <Tooltip
+                  key={jour.date}
+                  label={`${jour.date} — disponible : ${jour.available}/${jour.total_stock}, réservé : ${jour.reserved}`}
+                >
+                  <Stack gap={4} align='center' style={{ minWidth: 28 }}>
+                    <Box
+                      w={20}
+                      h={Math.max(
+                        (hauteurBarrePourcent(jour) / 100) * HAUTEUR_GRAPHIQUE,
+                        2
+                      )}
+                      bg={TENSION_COLORS[jour.tension_level]}
+                    />
+                    <Text size='xs' c='dimmed'>
+                      {libelleJour(jour.date)}
+                    </Text>
+                  </Stack>
+                </Tooltip>
+              ))}
+            </Group>
+          </Paper>
+        )}
+
+      {filters.partId &&
+        joursAffiches.length > 0 &&
+        filters.vue === 'tableau' && (
+          <Table striped highlightOnHover>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Jour</Table.Th>
+                <Table.Th>Stock total</Table.Th>
+                <Table.Th>Réservé</Table.Th>
+                <Table.Th>Disponible</Table.Th>
+                <Table.Th>Tension</Table.Th>
               </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      )}
+            </Table.Thead>
+            <Table.Tbody>
+              {joursAffiches.map((jour) => (
+                <Table.Tr key={jour.date}>
+                  <Table.Td>{jour.date}</Table.Td>
+                  <Table.Td>{jour.total_stock}</Table.Td>
+                  <Table.Td>{jour.reserved}</Table.Td>
+                  <Table.Td>{jour.available}</Table.Td>
+                  <Table.Td>
+                    <Box
+                      w={12}
+                      h={12}
+                      bg={TENSION_COLORS[jour.tension_level]}
+                      style={{ borderRadius: '50%', display: 'inline-block' }}
+                    />
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        )}
     </Stack>
   );
 }

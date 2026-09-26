@@ -9,6 +9,8 @@ from rest_framework import status
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from django.contrib.auth import get_user_model
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from inventree_location.models import (
@@ -389,6 +391,87 @@ class TestPartAvailabilityHistogram:
             request, pk=parts["tente"].pk
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    @pytest.mark.django_db
+    def test_article_immateriel_est_signale_plutot_que_vide(
+        self, factory, user, categorie
+    ):
+        """Un service n'a pas d'histogramme — encore faut-il le dire.
+
+        `days` vide vaut aussi pour « aucun jour ne passe le filtre de
+        semaine ». Sans drapeau, l'écran servait le message du filtre à qui
+        avait choisi un article immatériel, et l'invitait à corriger un
+        réglage qui n'y était pour rien.
+        """
+
+        service = Part.objects.create(name="Nettoyage", category=categorie)
+        RentableItem.objects.create(part=service, is_virtual=True)
+
+        request = factory.get(self._url(service.pk))
+        force_authenticate(request, user=user)
+
+        response = PartAvailabilityHistogramView.as_view()(request, pk=service.pk)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["is_virtual"] is True
+        assert response.data["days"] == []
+
+    @pytest.mark.django_db
+    def test_le_cout_ne_depend_pas_du_nombre_de_jours(
+        self, factory, user, categorie
+    ):
+        """Deux mesures plutôt qu'un plafond : sept jours, puis trente et un.
+
+        La première version interrogeait les engagements *dans* la boucle des
+        journées — deux requêtes par barre affichée, chacune relisant tout
+        l'historique de l'article. L'égalité dit ce qu'on veut dire : le
+        chargement est unique, la réduction se fait en mémoire. C'est elle qui
+        échouera si quelqu'un remet une requête dans la boucle.
+        """
+
+        part = Part.objects.create(name="Barnum", category=categorie)
+        RentableItem.objects.create(part=part)
+        mettre_en_stock(part, 10)
+
+        now = timezone.localtime().replace(hour=8, minute=0, second=0, microsecond=0)
+        manifestation = make_manifestation(
+            nom="Saison",
+            date_debut=now,
+            date_fin=now + timedelta(days=40),
+        )
+        lieu = Lieu.objects.create(nom="Parc")
+
+        for offset in range(0, 40, 5):
+            presta = Prestation.objects.create(
+                manifestation=manifestation,
+                lieu=lieu,
+                nom=f"Jour {offset}",
+                date_debut=now + timedelta(days=offset),
+                date_fin=now + timedelta(days=offset, hours=6),
+            )
+            LignePrestation.objects.create(prestation=presta, part=part, quantite=2)
+
+        def mesurer(jours):
+            request = factory.get(
+                self._url(part.pk),
+                {
+                    "date_debut": now.date().isoformat(),
+                    "date_fin": (now.date() + timedelta(days=jours - 1)).isoformat(),
+                },
+            )
+            force_authenticate(request, user=user)
+
+            with CaptureQueriesContext(connection) as requetes:
+                response = PartAvailabilityHistogramView.as_view()(request, pk=part.pk)
+                assert response.status_code == status.HTTP_200_OK
+                assert len(response.data["days"]) == jours
+
+            return len(requetes)
+
+        mesurer(7)  # la première passe amorce les caches
+        une_semaine = mesurer(7)
+
+        assert mesurer(31) == une_semaine
 
 
 class TestRentablePartDetail:

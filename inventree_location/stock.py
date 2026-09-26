@@ -1,4 +1,21 @@
-"""STK-01 — Calcul du stock disponible au jour entier."""
+"""STK-01 — Calcul du stock disponible au jour entier.
+
+Le stock est unique et partagé entre toutes les manifestations et tous les
+organisateurs. La disponibilité se calcule au **jour** : on arrondit la période
+de la prestation au jour entier (conforme CDC « jour entier, quelle que soit la
+plage horaire »). Les heures ne servent qu'à la logistique livraison/ramassage.
+
+Pour un article donné :
+
+    disponible = stock total louable − quantités déjà engagées
+
+où « déjà engagées » couvre les **deux** façons dont le matériel est retenu sur
+une période : le prévisionnel porté par les lignes de prestation (RES-09) et le
+réalisé porté par les lignes des réservations bloquantes (CON-04). Voir
+`compute_engaged_quantities` pour la règle de réconciliation entre les deux.
+Les articles virtuels (services, ex. « nettoyage ») n'ont pas de stock physique
+et sont ignorés.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +24,12 @@ from typing import NamedTuple
 
 from django.utils import timezone
 
-from .conflicts import CONFLICT_STATUSES, get_parts_total_stock
+from .conflicts import (
+    CONFLICT_STATUSES,
+    get_part_total_stock,
+    get_parts_total_stock,
+    tension_level,
+)
 
 
 def _as_date(value) -> date:
@@ -252,7 +274,42 @@ def compute_engagement_details(
     exclude_prestation_id=None,
     exclude_reservation_id=None,
 ) -> dict[int, list[dict]]:
-    """Détail, par article, des prestations qui l'engagent sur la période."""
+    """Détail, par article, des prestations qui l'engagent sur la période.
+
+    Même règle de réconciliation que `compute_engaged_quantities` (dont c'est
+    la version détaillée), mais on garde de quoi nommer le responsable d'une
+    pénurie : sans cela, un conflit causé par le seul prévisionnel d'une
+    prestation ne désignait rien à l'utilisateur.
+
+    Deux tables décrivent le même besoin matériel :
+
+    - `LignePrestation` — le **prévisionnel** : ce dont la prestation a besoin
+      (RES-09) ;
+    - `LigneReservation` — le **réalisé** : ce que les réservations au statut
+      bloquant (cf. `CONFLICT_STATUSES`) retiennent effectivement.
+
+    Les sommer double-compterait la réservation qui matérialise le
+    prévisionnel de sa propre prestation ; n'en lire qu'une seule rendait
+    invisible la moitié des engagements — c'est ce qui faussait la répartition
+    d'un même article entre plusieurs réservations. On retient donc, **par
+    prestation et par article**, le plus grand des deux : le prévisionnel tient
+    lieu de réservation tant qu'aucune n'est posée, et s'efface dès que les
+    réservations le dépassent.
+
+    Exclusions :
+
+    - `exclude_prestation_id` : ignore tout ce qui appartient à cette
+      prestation (ses lignes **et** ses réservations) — une prestation ne se
+      concurrence pas elle-même.
+    - `exclude_reservation_id` : ignore cette réservation, ainsi que le
+      prévisionnel de sa prestation dont elle est justement la
+      matérialisation. Les **autres** réservations de la même prestation
+      restent comptées.
+
+    Retourne ``{part_id: [{"prestation_id", "prestation_nom", "quantite",
+    "origine", "reservation_numeros"}]}`` où ``origine`` vaut ``"prevision"``
+    ou ``"reservations"`` selon celle des deux qui l'emporte.
+    """
 
     from .models import Reservation
 
@@ -288,7 +345,11 @@ def compute_engaged_quantities(
     exclude_prestation_id=None,
     exclude_reservation_id=None,
 ) -> dict[int, int]:
-    """Quantités déjà engagées par article sur la période, au jour entier."""
+    """Quantités déjà engagées par article sur la période, au jour entier.
+
+    Vue agrégée de `compute_engagement_details`, dont la docstring porte la
+    règle de réconciliation prévisionnel / réalisé et le sens des exclusions.
+    """
 
     details = compute_engagement_details(
         part_ids,
@@ -311,7 +372,13 @@ def compute_stock_availability(
     exclude_prestation_id=None,
     exclude_reservation_id=None,
 ) -> dict:
-    """Disponibilité au jour de chaque article demandé."""
+    """Disponibilité au jour de chaque article demandé.
+
+    `requested_lines` est un itérable de dicts ``{"part_id", "quantite"}``.
+    Retourne ``{"has_shortage": bool, "lines": [...]}`` : une ligne par article
+    non-virtuel avec stock total, quantité déjà engagée, disponible, manquant et
+    drapeau de pénurie.
+    """
 
     from part.models import Part
 
@@ -385,7 +452,22 @@ def compute_parts_availability(
     exclude_prestation_id=None,
     exclude_reservation_id=None,
 ) -> dict[int, int]:
-    """Disponibilité au jour d'un ensemble de parts, hors prestation existante."""
+    """Disponibilité au jour d'un ensemble de parts, hors prestation existante.
+
+    Sert au catalogue (CAT-02) et au sélecteur de matériel d'une réservation :
+    on veut « combien de X reste-t-il de disponible pour telle période ? »
+    sans avoir à demander une quantité précise au préalable.
+
+    Sans période fournie, on utilise la journée courante **du fuseau métier**
+    (`timezone.localdate()`, cf. INVENTREE_TIMEZONE) : `date.today()` suivait
+    le fuseau du processus, si bien qu'entre minuit UTC et minuit local la
+    disponibilité « du jour » portait sur la veille ou le lendemain. Les
+    articles virtuels (pas de stock physique) sont absents du résultat —
+    l'appelant doit les traiter à part.
+
+    `exclude_reservation_id` sert à l'édition d'une réservation existante :
+    sans lui, ses propres quantités se compteraient contre elle.
+    """
 
     part_ids = [int(pid) for pid in part_ids]
 
@@ -411,7 +493,11 @@ def compute_parts_availability(
 
 
 def compute_prestation_stock(prestation) -> dict:
-    """Disponibilité au jour des articles d'une prestation enregistrée."""
+    """Disponibilité au jour des articles d'une prestation enregistrée.
+
+    S'exclut elle-même du calcul du « déjà engagé » (ses propres lignes ne
+    doivent pas être comptées comme concurrentes).
+    """
 
     lignes = [
         {"part_id": ligne.part_id, "quantite": ligne.quantite}
@@ -424,3 +510,77 @@ def compute_prestation_stock(prestation) -> dict:
         lignes,
         exclude_prestation_id=prestation.pk,
     )
+
+
+MAX_HISTOGRAM_DAYS = 92
+
+
+def compute_part_availability_calendar(part, date_debut, date_fin) -> list[dict]:
+    """Disponibilité d'un article jour par jour, pour l'histogramme (CDC §99).
+
+    Une ligne par journée de la période : stock total, quantité engagée, reste
+    disponible et niveau de tension — les mêmes grandeurs que la fiche de
+    conflit, lues au jour entier comme partout ailleurs dans ce module.
+
+    Le calcul **charge une fois** tout ce qui engage l'article sur la période,
+    puis réduit cette liste journée par journée en mémoire. Appeler
+    `compute_engagement_details` dans la boucle coûtait deux requêtes par jour
+    affiché — soixante-deux pour un mois — alors que les lignes lues sont les
+    mêmes d'un jour à l'autre. C'est précisément ce que le découpage
+    `charger_lignes_engagement` / `reduire_engagements` permet d'éviter, et la
+    réduction reste le moteur commun : la règle prévisionnel/réservé n'est pas
+    réécrite ici.
+
+    La période est bornée à `MAX_HISTOGRAM_DAYS` jours. L'écran n'affiche au
+    plus qu'un mois, mais `date_fin` vient de la query string : sans borne, un
+    lien bricolé ferait balayer plusieurs années. Des bornes inversées sont
+    remises à l'endroit plutôt que de rendre une liste vide.
+
+    Un article virtuel (service, ex. « nettoyage ») n'a pas de stock physique :
+    pas d'histogramme, on rend une liste vide. L'appelant doit le dire
+    autrement que par une période sans jour, sous peine de confondre ce cas
+    avec un filtre trop restrictif.
+    """
+
+    from .models import RentableItem
+
+    rentable_item = RentableItem.objects.filter(part=part).first()
+
+    if rentable_item is not None and rentable_item.is_virtual:
+        return []
+
+    total_stock = get_part_total_stock(part, rentable_item=rentable_item)
+
+    start_date = _as_date(date_debut)
+    end_date = _as_date(date_fin)
+
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+
+    end_date = min(end_date, start_date + timedelta(days=MAX_HISTOGRAM_DAYS - 1))
+
+    lignes = charger_lignes_engagement([part.pk], start_date, end_date)
+
+    # Un stock nul ne doit pas diviser par zéro, et `tension_level` lit un
+    # pourcentage : même base que `compute_part_availability`.
+    base = max(total_stock, 1)
+    days = []
+    current = start_date
+
+    while current <= end_date:
+        engagements = reduire_engagements(lignes, current, current).get(part.pk, [])
+        reserved = sum(entry["quantite"] for entry in engagements)
+        occupation_rate = (reserved / base) * 100
+
+        days.append({
+            "date": current.isoformat(),
+            "total_stock": total_stock,
+            "reserved": reserved,
+            "available": total_stock - reserved,
+            "occupation_rate": occupation_rate,
+            "tension_level": tension_level(occupation_rate),
+        })
+
+        current += timedelta(days=1)
+
+    return days

@@ -2540,12 +2540,27 @@ class CatalogPartDetailView(APIView):
 
 
 class PartAvailabilityHistogramView(APIView):
+    """Histogramme de disponibilité d'un article, jour par jour (CDC §99).
+
+    Sans dates, la fenêtre par défaut est la semaine qui commence aujourd'hui
+    — sept jours, le préréglage d'ouverture de l'écran. `date_debut` et
+    `date_fin` la déplacent ; la période est bornée côté calcul (cf.
+    `MAX_HISTOGRAM_DAYS`), un `date_fin` plus lointain rend donc moins de jours
+    que demandé plutôt qu'une erreur.
+
+    `is_virtual` distingue l'article immatériel, qui n'a pas d'histogramme, du
+    simple cas « aucun jour sur la période » : les deux rendent `days` vide et
+    l'écran doit les expliquer différemment.
+    """
+
     permission_classes = [CatalogPermission]
 
     def get(self, request, pk, *args, **kwargs):
+        """Retourne la disponibilité au jour d'un article sur une période."""
+
         from part.models import Part
 
-        part = Part.objects.filter(pk=pk).first()
+        part = Part.objects.filter(pk=pk).select_related("rentable_info").first()
 
         if part is None:
             return Response(
@@ -2559,12 +2574,14 @@ class PartAvailabilityHistogramView(APIView):
             request, "date_fin"
         ) or date_debut + timedelta(days=6)
 
+        rentable_info = getattr(part, "rentable_info", None)
         days = compute_part_availability_calendar(part, date_debut, date_fin)
 
         return Response(
             {
                 "part_id": part.pk,
                 "part_name": getattr(part, "name", str(part)),
+                "is_virtual": bool(rentable_info and rentable_info.is_virtual),
                 "days": days,
             },
             status=status.HTTP_200_OK,

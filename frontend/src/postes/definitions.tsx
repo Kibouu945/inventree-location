@@ -172,6 +172,8 @@ export const POSTES: Record<string, PosteDefinition> = {
   gestionnaire: {
     titre: 'Poste gestionnaire client',
     roles: [ADMIN, GESTIONNAIRE],
+    // Devis et Factures (CDC §95-98) manquent encore : leurs écrans n'existent
+    // pas, on ne pose pas d'onglet vide.
     onglets: [
       MANIFESTATIONS,
       CLIENTS,
