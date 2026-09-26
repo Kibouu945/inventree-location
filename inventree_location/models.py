@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db import IntegrityError, models, transaction
+from django.db.models.functions import Cast, Substr
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -555,25 +556,37 @@ class LignePrestation(TimestampedModel):
 
 
 def _generate_reservation_numero(year: int) -> str:
-    """Calcule le prochain numéro `RES-{année}-{NNNN}` pour l'année donnée."""
+    """Calcule le prochain numéro `RES-{année}-{NNNN}` pour l'année donnée.
+
+    Le rang est relu par un **maximum numérique**, calculé par la base sur le
+    suffixe converti en entier. Un tri de chaînes, qui serait plus simple,
+    fonctionne tant que tous les numéros ont la même largeur et cesse de
+    fonctionner exactement à la dix-millième : « RES-2026-9999 » est *supérieur*
+    à « RES-2026-10000 » pour la base, puisque « 9 » vient après « 1 ». Le
+    générateur reproposerait alors un numéro déjà pris, et la réservation ne
+    serait plus enregistrable — au volume annoncé par le client, précisément.
+
+    Le format reste sur quatre chiffres au minimum : les numéros existants ne
+    changent pas, et la largeur s'étend d'elle-même au-delà de 9 999. C'est le
+    tri qu'il fallait corriger, pas la largeur.
+
+    Le filtre sur les chiffres n'est pas décoratif : la conversion en entier est
+    stricte sous PostgreSQL, et un seul numéro mal formé dans la table
+    empêcherait toute création ultérieure.
+    """
 
     prefix = f"RES-{year}-"
-    last_numero = (
+    dernier_rang = (
         Reservation.objects.filter(numero__startswith=prefix)
-        .order_by("-numero")
-        .values_list("numero", flat=True)
-        .first()
+        .filter(numero__regex=rf"^{prefix}[0-9]+$")
+        .aggregate(
+            rang=models.Max(
+                Cast(Substr("numero", len(prefix) + 1), models.IntegerField())
+            )
+        )["rang"]
     )
 
-    next_seq = 1
-
-    if last_numero:
-        try:
-            next_seq = int(last_numero.rsplit("-", 1)[-1]) + 1
-        except ValueError:
-            next_seq = 1
-
-    return f"{prefix}{next_seq:04d}"
+    return f"{prefix}{(dernier_rang or 0) + 1:04d}"
 
 
 class Reservation(TimestampedModel):

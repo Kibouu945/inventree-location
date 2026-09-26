@@ -181,5 +181,6 @@ docs/visite/visite.html
 # Version écrite par setuptools_scm à l'installation.
 inventree_location/_version.py
 
-# Sorties de mesure des tests de charge
+# Rapports bruts des campagnes de charge : les conclusions vivent dans
+# docs/test-de-charge.md, les mesures se rejouent (tests/charge/paliers.sh).
 tests/charge/resultats*/
