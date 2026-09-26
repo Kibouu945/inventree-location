@@ -1,18 +1,4 @@
-"""Tests du stock réel et du SAV (SCRUM-112).
-
-La PR #40 arrivait sans aucun test sur `sav.py` (574 lignes). On couvre ici ce
-qui porte le métier :
-
-- `get_real_available_stock` : ce qui sort du stock disponible et ce qui y
-  revient (SAV ouvert, réparé, détruit, manquant) ;
-- `RamassageRetourView` : la saisie du retour ventile les quantités, déduit
-  l'état de la ligne, ouvre et referme les tickets, fait passer la réservation
-  en « retournée » ;
-- les gardes : quantités incohérentes, ligne d'une autre réservation, RBAC.
-
-Même pattern que `test_return_incidents.py` : `APIRequestFactory` +
-`force_authenticate`.
-"""
+"""Tests du stock réel et du SAV (SCRUM-112)."""
 
 from __future__ import annotations
 
@@ -199,11 +185,7 @@ class TestStockReel:
 
     @pytest.mark.django_db
     def test_la_ligne_ne_porte_plus_de_quantites_de_probleme(self, ligne):
-        """Invariant de l'unification : sept colonnes ont disparu du modèle.
-
-        Elles disaient ce que le registre d'incidents dit déjà, et deux écrans
-        pointant la même ligne y écrivaient deux vérités.
-        """
+        """Invariant de l'unification : sept colonnes ont disparu du modèle."""
 
         for colonne in [
             "quantite_ramassee",
@@ -279,8 +261,7 @@ class TestSaisieRetour:
         # Revenu physiquement : conforme + abîmé + détruit. Le manquant, non.
         assert ligne.quantite_retournee == 5
         # Plusieurs natures sur la ligne : la plus grave l'emporte (règle
-        # unique, cf. retours.py). La ventilation détaillée vit dans les
-        # incidents et les tickets SAV.
+        # unique, cf. retours.py).
         assert ligne.etat_retour == "casse"
         assert reservation.statut == StatutReservation.RETOURNEE
         assert reservation.date_retour_reelle is not None
@@ -368,13 +349,7 @@ class TestSaisieRetour:
     def test_un_surplus_au_ramassage_est_accepte(
         self, factory, magasinier, reservation, ligne
     ):
-        """Sept objets rendus pour six sortis : on signale, on ne refuse pas.
-
-        Du matériel circule d'un lieu à l'autre (R36). Refuser la saisie
-        empêcherait le livreur de déclarer le contenu réel de son camion, et
-        c'est un écart qui doit se voir dans les chiffres, pas disparaître dans
-        un 400.
-        """
+        """Sept objets rendus pour six sortis : on signale, on ne refuse pas."""
 
         response = _patch_retour(
             factory,
@@ -684,12 +659,7 @@ class TestAlertesDesactivees:
 
 
 class TestCorrectionDuneDestruction:
-    """Une destruction saisie par erreur doit pouvoir être reprise.
-
-    Avant, `_close_or_update_ticket` refusait de clôturer un ticket `detruit` :
-    la ligne repassait à 0 détruit mais le ticket gardait sa quantité hors du
-    stock réel. Une faute de frappe amputait le parc définitivement.
-    """
+    """Une destruction saisie par erreur doit pouvoir être reprise."""
 
     def _saisir(self, factory, magasinier, reservation, ligne, **quantites):
         payload = {"ligne": ligne.pk, **quantites}
@@ -792,13 +762,7 @@ class TestCorrectionDuneDestruction:
 
 
 class TestUnificationFacturation:
-    """Un seul registre de dégâts, un seul drapeau de facturation.
-
-    Le ramassage écrivait `LigneReservation.facturer_client` et
-    `SavTicket.facturer_client` ; les rapports lisent
-    `ReturnIncident.bill_client`. Cocher « facturer » au ramassage restait donc
-    invisible dans le rapport de pertes.
-    """
+    """Un seul registre de dégâts, un seul drapeau de facturation."""
 
     def _saisir(self, factory, magasinier, reservation, ligne, **quantites):
         return _patch_retour(
@@ -918,13 +882,7 @@ class TestUnificationFacturation:
 
 
 class TestVocabulaireUnifieEtatRetour:
-    """Un seul vocabulaire, une seule règle, quel que soit l'écran.
-
-    Avant : `etat_retour` avait trois écrivains — check-in, journal d'incidents,
-    saisie de ramassage — et trois vocabulaires (`casse` / `sav` / `detruit` /
-    `mixte`). Un même retour s'affichait différemment selon l'écran qui l'avait
-    saisi.
-    """
+    """Un seul vocabulaire, une seule règle, quel que soit l'écran."""
 
     def _saisir(self, factory, magasinier, reservation, ligne, **quantites):
         return _patch_retour(
@@ -990,8 +948,7 @@ class TestVocabulaireUnifieEtatRetour:
     def test_un_ramassage_conforme_se_lit_ok(
         self, factory, magasinier, reservation, ligne
     ):
-        """Le repli lisait les seules colonnes du check-in : un ramassage
-        entièrement conforme retombait sur « pas encore pointé »."""
+        """Le repli lisait les seules colonnes du check-in : un ramassage"""
 
         self._saisir(factory, magasinier, reservation, ligne, quantite_ramassee=6)
         ligne.refresh_from_db()
@@ -1054,14 +1011,7 @@ class TestVocabulaireUnifieEtatRetour:
 
 
 class TestQuantiteAttendueAuRetour:
-    """La règle « ce qui doit revenir », et l'angle mort qu'elle recouvre.
-
-    Les sept fixtures de retour du dépôt posent toutes `quantite_livree ==
-    quantite_demandee` : l'expression `quantite_livree or quantite_demandee`
-    n'y est donc jamais discriminante, et l'alimenter changerait le
-    comportement en production sans un seul test rouge. Ces trois cas la
-    distinguent.
-    """
+    """La règle « ce qui doit revenir », et l'angle mort qu'elle recouvre."""
 
     @pytest.fixture
     def ligne_partiellement_livree(self, db, reservation, part):
@@ -1093,11 +1043,7 @@ class TestQuantiteAttendueAuRetour:
     def test_ramasser_plus_que_livre_est_accepte(
         self, factory, magasinier, reservation, ligne_partiellement_livree
     ):
-        """Six demandées, quatre livrées, cinq récupérées : accepté.
-
-        Ce test affirmait l'inverse jusqu'à la recette du 11/09 — il figeait un
-        plafond que la règle R36 interdit depuis le début.
-        """
+        """Six demandées, quatre livrées, cinq récupérées : accepté."""
 
         response = _patch_retour(
             factory,

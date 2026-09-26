@@ -1,23 +1,4 @@
 // Coque commune aux postes de travail : navigation verticale + contenu.
-//
-// Le cahier des charges demande deux choses, réglées à deux endroits : la barre
-// horizontale d'InvenTree adaptée au rôle (côté serveur, `ROLE_VIEW_RULESETS`)
-// et la navigation du poste, ici. Le rendu reprend celui des panneaux des
-// fiches natives (`PanelGroup.tsx`), qu'on ne peut pas importer —
-// `@inventreedb/ui` n'en exporte que les types. Le surlignage de l'entrée
-// active passe par `style` et non par une classe : un plugin n'a pas de
-// feuille de style chargée par InvenTree.
-//
-// **Seul le contenu défile.** Le poste occupe exactement la boîte que lui donne
-// InvenTree, la colonne y est figée. Sans ce bornage, le contenu poussait le
-// poste au-delà de sa boîte et c'était la page qui défilait, emportant le menu.
-// Limite non contournable : la hauteur de boîte est déclarée en lignes de
-// grille et ne sait rien de la fenêtre, donc sur un écran bas la page redevient
-// défilante. `position: sticky` sur la colonne est inerte (InvenTree clippe la
-// boîte en `overflow: hidden`) et borner à la fenêtre laisse une zone vide —
-// les deux ont été essayés et écartés.
-//
-// Un seul écran est monté à la fois : ces listes interrogent l'API en boucle.
 import { ActionIcon, Group, Loader, Paper, Tabs, Tooltip } from '@mantine/core';
 import {
   IconLayoutSidebarLeftCollapse,

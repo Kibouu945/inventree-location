@@ -1,16 +1,4 @@
 // Options de catégories d'articles, pour tous les filtres qui en proposent.
-//
-// Trois écrans en avaient besoin et s'y prenaient de trois façons : la liste
-// des réservations interrogeait `/api/part/category/` (la bonne source), le
-// catalogue déduisait ses options des seules lignes de la page courante — donc
-// une liste incomplète, qui se réduisait encore en filtrant — et le sélecteur
-// d'articles d'une prestation n'en proposait aucune. Recette Tassin du
-// 07/09/2026, remarque 4 : « on aurait gagné en ergonomie et efficacité à
-// reprendre le type de recherche fait pour le catalogue avec les libellés et
-// les catégories, les sous-catégories ».
-//
-// Le tri est fait ici plutôt que côté serveur : InvenTree renvoie les
-// catégories dans l'ordre de l'arbre, et un `Select` se parcourt à l'œil.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';

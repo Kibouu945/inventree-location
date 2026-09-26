@@ -1,7 +1,4 @@
 // Widget de dashboard : l'écran de travail du rôle.
-//
-// Seul widget attribué par le plugin. La barre horizontale d'InvenTree se règle
-// ailleurs, côté serveur (`roles.ROLE_VIEW_RULESETS`).
 import {
   checkPluginVersion,
   type InvenTreePluginContext

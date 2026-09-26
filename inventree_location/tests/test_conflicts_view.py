@@ -107,12 +107,7 @@ class TestConflictsListView:
     def test_overlap_without_shortage_is_not_a_conflict(
         self, factory, user, setup_conflicts
     ):
-        """CON-01 : le conflit se mesure aux quantités, pas au chevauchement.
-
-        Les deux réservations chevauchantes demandent 1 chacune ; avec 10 en
-        stock elles cohabitent sans se gêner.
-        """
-
+        """CON-01 : le conflit se mesure aux quantités, pas au chevauchement."""
 
         part_id = setup_conflicts["first"].lignes.first().part_id
         fixer_stock(Part.objects.get(pk=part_id), 10)
@@ -130,7 +125,6 @@ class TestConflictsListView:
         self, factory, user, setup_conflicts
     ):
         """Le groupe dit quel article manque et de combien."""
-
 
         part_id = setup_conflicts["first"].lignes.first().part_id
         fixer_stock(Part.objects.get(pk=part_id), 1)

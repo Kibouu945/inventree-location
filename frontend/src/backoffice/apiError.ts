@@ -1,10 +1,4 @@
-/**
- * Mise en forme des erreurs DRF pour les écrans back-office.
- *
- * Les vues renvoient soit `{"detail": "…"}`, soit `{"champ": ["…", "…"]}`.
- * Afficher le `JSON.stringify` brut donnait des messages du genre
- * `{"password":["Ce mot de passe est trop courant."]}` à l'utilisateur.
- */
+/** Mise en forme des erreurs DRF pour les écrans back-office. */
 
 type ApiErrorLike = {
   response?: { data?: Record<string, unknown> | string };

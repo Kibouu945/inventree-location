@@ -7,9 +7,7 @@ import {
 import { UsersBackOffice } from './backoffice/UsersBackOffice';
 import { WidgetScroll } from './WidgetScroll';
 
-/**
- * Fonction appelée par InvenTree pour rendre le back-office utilisateurs.
- */
+/** Fonction appelée par InvenTree pour rendre le back-office utilisateurs. */
 export function renderInvenTreeLocationBackOfficeUsers(
   context: InvenTreePluginContext
 ) {

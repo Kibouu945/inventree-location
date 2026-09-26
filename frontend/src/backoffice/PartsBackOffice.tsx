@@ -171,12 +171,7 @@ export function PartsBackOffice({
     resetImageState();
   }
 
-  /**
-   * Applique le changement de photo, une fois la Part enregistrée.
-   *
-   * Deux appels séparés du formulaire : à la création, l'identifiant de la
-   * Part n'existe qu'après la réponse du POST.
-   */
+  /** Applique le changement de photo, une fois la Part enregistrée. */
   async function savePartImage(partId: number) {
     if (imageFile) {
       const body = new FormData();

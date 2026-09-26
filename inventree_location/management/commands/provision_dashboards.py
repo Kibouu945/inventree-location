@@ -35,7 +35,6 @@ class Command(BaseCommand):
 
             # La langue est posée indépendamment des widgets : un compte peut
             # avoir déjà sa disposition et être resté en anglais, ce qui livre
-            # l'interface à la traduction automatique du navigateur.
             if apply_language(user):
                 langues += 1
                 touched.append("language")

@@ -1,16 +1,4 @@
-"""Compare les tables d'exécution à la vérité, sans rien écrire.
-
-C'est le garde-fou de la stratégie additive. Tant que les colonnes du bon font
-foi, une projection qui dérive ne se voit nulle part — ni à l'écran, ni dans un
-test. Cette commande recalcule et **affiche** les écarts ; `projeter_execution`
-les rattrape.
-
-    python manage.py verifier_projection
-    python manage.py verifier_projection --jour 2026-09-15
-
-Code de sortie 1 s'il existe au moins une divergence, pour qu'un enchaînement
-de commandes s'arrête.
-"""
+"""Compare les tables d'exécution à la vérité, sans rien écrire."""
 
 from datetime import date
 

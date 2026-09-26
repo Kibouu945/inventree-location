@@ -1,10 +1,5 @@
 // Écran « Alertes stock » (US-09), partagé par le widget de dashboard et par
 // l'onglet du même nom des postes.
-//
-// Extrait de `Dashboard.tsx`, qui importe `checkPluginVersion` au runtime :
-// externalisé pour les widgets, ce paquet est embarqué ailleurs et tire
-// `@lingui` sans `i18n` initialisé. Règle : un composant réutilisé par un poste
-// n'importe d'`@inventreedb/ui` que des **types**.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   Alert,

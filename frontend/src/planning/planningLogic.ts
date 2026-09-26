@@ -1,12 +1,4 @@
 // Logique du planning, sans React : colonnes, placement des barres, libellés.
-//
-// Séparée du rendu pour être testable — c'est le pendant côté front de ce que
-// `execution.py` est à `views.py`.
-//
-// **Tout se calcule en UTC**, à partir de chaînes `AAAA-MM-JJ`. Construire une
-// date depuis une chaîne sans fuseau la fait interpréter en heure locale du
-// navigateur : la France change d'heure le 25 octobre 2026, en pleine période
-// de soutenance, et une arithmétique locale y saute ou double un jour.
 
 import type {
   Barre,
@@ -20,12 +12,9 @@ import type {
 
 const MS_PAR_JOUR = 24 * 60 * 60 * 1000;
 
-/** Largeur **minimale** d'une colonne, en pixels, selon l'échelle.
- *
+/**
  * Un mois tient trente et une colonnes : elles doivent pouvoir rester
- * étroites. Une année n'en a que douze, elles portent « janv. 26 » et ne
- * descendent pas sous la largeur du libellé. En dessous de ces valeurs, la
- * grille défile horizontalement plutôt que d'écraser les en-têtes.
+ * étroites.
  */
 export const LARGEUR_MIN_COLONNE: Record<EchellePlanning, number> = {
   jour: 420,
@@ -45,15 +34,9 @@ export const HAUTEUR = {
 /** Largeur de la colonne des noms, à gauche de la grille. */
 export const LARGEUR_NOMS = 210;
 
-/** Largeur réelle d'une colonne : la grille occupe la place qu'on lui donne.
- *
+/**
  * À largeur fixe, un planning au mois laissait un tiers du panneau vide et
- * tassait trente jours dans la moitié gauche. On répartit donc la place
- * disponible entre les colonnes, sans jamais descendre sous le minimum de
- * l'échelle — c'est alors le conteneur qui défile.
- *
- * `largeurDisponible` vaut 0 avant la première mesure du conteneur : on rend
- * le minimum, et la mesure suivante élargit.
+ * tassait trente jours dans la moitié gauche.
  */
 export function largeurDeColonne(
   echelle: EchellePlanning,
@@ -157,8 +140,7 @@ export function debutDeLaFenetre(fenetre: FenetrePlanning): string {
   return `${fenetre.ancre.slice(0, 4)}-01-01`;
 }
 
-/** Les colonnes de la fenêtre, de la première à la dernière.
- *
+/**
  * Le nombre se déduit de l'échelle : sept jours pour une semaine, la longueur
  * réelle du mois pour un mois — février en a vingt-huit ou vingt-neuf, et une
  * grille fixe de trente et une colonnes afficherait trois jours fantômes.
@@ -285,13 +267,10 @@ export function libellePeriode(
   return `${jourEtMois.format(debut)} – ${jourEtMois.format(fin)} ${fin.getUTCFullYear()}`;
 }
 
-/** Place une manifestation ou une prestation dans la grille, ou `null`.
- *
+/**
  * Le calcul est le même aux quatre échelles et aux deux mailles : la première
  * colonne qui se termine après le début du sujet, la dernière qui commence
- * avant sa fin. Un sujet qui déborde est **rogné**, pas écarté, et le rognage
- * est signalé — sinon l'écran mentirait par omission le lundi d'une
- * manifestation commencée le vendredi.
+ * avant sa fin.
  */
 export function placer<T extends LignePlanning>(
   sujet: T,
@@ -332,8 +311,7 @@ export function placer<T extends LignePlanning>(
   };
 }
 
-/** Les barres de la fenêtre, triées par colonne puis par nom.
- *
+/**
  * Le tri est stable et indépendant de l'ordre d'arrivée de l'API : deux
  * chargements de la même fenêtre donnent le même planning.
  */
@@ -353,11 +331,9 @@ export function barres<T extends LignePlanning>(
     });
 }
 
-/** Les prestations de la fenêtre, rangées sous leur manifestation.
- *
+/**
  * Le serveur les rend à plat, triées par date ; l'écran les affiche sous leur
- * barre. Une prestation ne peut pas sortir des dates de sa manifestation, donc
- * toute prestation de la fenêtre a bien sa barre affichée au-dessus d'elle.
+ * barre.
  */
 export function parManifestation(
   prestations: PrestationPlanning[]
@@ -431,11 +407,7 @@ export const COULEUR_STATUT: Record<string, string> = {
   annulee: 'red'
 };
 
-/** Libellés des statuts : l'API rend le code, l'écran doit rendre du français.
- *
- * Miroir de `StatutManifestation` côté serveur. Un statut inconnu s'affiche
- * tel quel plutôt que vide — on préfère voir un code qu'une case blanche.
- */
+/** Miroir de `StatutManifestation` côté serveur. */
 export const LIBELLE_STATUT: Record<string, string> = {
   brouillon: 'Brouillon',
   planifiee: 'Planifiée',
@@ -468,8 +440,7 @@ export const PLANNING_URL_KEYS = [
   'plan_ouvertes'
 ];
 
-/** Les manifestations dépliées, dans l'URL : « 3,7 ».
- *
+/**
  * Triées et sans doublon, pour que deux dépliages faits dans un ordre
  * différent donnent la même URL — sinon l'historique du navigateur se remplit
  * de variantes de la même vue.

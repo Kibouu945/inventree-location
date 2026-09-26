@@ -1,9 +1,4 @@
-"""TR-03 : tests des 7 rôles et de leurs accès autorisés / bloqués.
-
-Un utilisateur par rôle vérifie, sur chaque endpoint sensible, que la lecture
-et l'écriture sont autorisées ou refusées conformément au mapping des
-permissions (cf. permissions.py).
-"""
+"""TR-03 : tests des 7 rôles et de leurs accès autorisés / bloqués."""
 
 from __future__ import annotations
 

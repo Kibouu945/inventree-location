@@ -215,8 +215,7 @@ class TestReturnReportPdfView:
 
     @pytest.mark.django_db
     def test_le_plugin_reste_importable_sans_weasyprint(self):
-        """Importé en tête de module, WeasyPrint rendait `views.py` — donc le
-        plugin entier et toute la suite — non importable."""
+        """Importé en tête de module, WeasyPrint rendait `views.py` — donc le"""
 
         import ast
         from pathlib import Path

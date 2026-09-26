@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from rest_framework import status
+from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from django.db import connection
@@ -150,7 +151,7 @@ class TestDeliveryListView:
         response = DeliveryListView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        ids = [row["id"] for row in response.data]
+        ids = [row["id"] for row in response.data["results"]]
         assert ids == [to_deliver.pk]
 
     @pytest.mark.django_db
@@ -184,7 +185,7 @@ class TestDeliveryListView:
         response = DeliveryListView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        ids = {row["id"] for row in response.data}
+        ids = {row["id"] for row in response.data["results"]}
         assert ids == {validee.pk, livree.pk}
 
     @pytest.mark.django_db
@@ -211,18 +212,14 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        ids = [row["id"] for row in response.data]
+        ids = [row["id"] for row in response.data["results"]]
         assert ids == [in_range.pk]
 
     @pytest.mark.django_db
     def test_date_to_couvre_la_journee_entiere(
         self, factory, gestionnaire, prestation, part
     ):
-        """Filtrer sur « le 2 juin » doit montrer la tournée de ce jour-là.
-
-        Une borne au jour est lue comme minuit : un retrait prévu à 8 h 30
-        tombait hors filtre, et l'écran tournée du jour restait vide.
-        """
+        """Filtrer sur « le 2 juin » doit montrer la tournée de ce jour-là."""
 
         du_jour = _make_reservation(
             prestation,
@@ -239,7 +236,7 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        assert [row["id"] for row in response.data] == [du_jour.pk]
+        assert [row["id"] for row in response.data["results"]] == [du_jour.pk]
 
     @pytest.mark.django_db
     def test_borne_horodatee_reste_exacte(
@@ -262,7 +259,7 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        assert response.data == []
+        assert response.data["results"] == []
 
     @pytest.mark.django_db
     def test_lieu_filter(self, factory, gestionnaire, manifestation, part, lieu):
@@ -303,15 +300,14 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        ids = [row["id"] for row in response.data]
+        ids = [row["id"] for row in response.data["results"]]
         assert ids == [wanted.pk]
 
     @pytest.mark.django_db
     def test_le_contact_referent_alimente_les_cles_organisateur(
         self, factory, gestionnaire, prestation, part
     ):
-        """Les clés `organisateur_*` sont conservées, leur source change : le
-        contact référent de la manifestation."""
+        """Les clés `organisateur_*` sont conservées, leur source change : le"""
 
         reservation = _make_reservation(
             prestation,
@@ -325,7 +321,7 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        row = next(r for r in response.data if r["id"] == reservation.pk)
+        row = next(r for r in response.data["results"] if r["id"] == reservation.pk)
         assert row["organisateur_telephone"] == "0102030405"
         assert "Nisatrice" in row["organisateur_nom"]
 
@@ -350,7 +346,7 @@ class TestDeliveryListView:
         response = DeliveryListView.as_view()(request)
 
         assert response.status_code == status.HTTP_200_OK
-        row = next(r for r in response.data if r["id"] == reservation.pk)
+        row = next(r for r in response.data["results"] if r["id"] == reservation.pk)
         assert row["organisateur_nom"] == prestation.manifestation.client.nom
         assert row["organisateur_telephone"] == ""
 
@@ -372,18 +368,14 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        row = next(r for r in response.data if r["id"] == reservation.pk)
+        row = next(r for r in response.data["results"] if r["id"] == reservation.pk)
         assert row["quantite_totale"] == 8
 
     @pytest.mark.django_db
     def test_quantite_totale_ignore_les_articles_virtuels(
         self, factory, gestionnaire, prestation, part
     ):
-        """Un service ne se charge pas dans le camion.
-
-        Le compter donnait au livreur un total différent de celui du bon de
-        ramassage, qui filtre déjà le virtuel.
-        """
+        """Un service ne se charge pas dans le camion."""
 
         reservation = Reservation.objects.create(
             prestation=prestation,
@@ -402,7 +394,7 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        row = next(r for r in response.data if r["id"] == reservation.pk)
+        row = next(r for r in response.data["results"] if r["id"] == reservation.pk)
         assert row["quantite_totale"] == 4
 
     @pytest.mark.django_db
@@ -427,7 +419,7 @@ class TestDeliveryListView:
         force_authenticate(request, user=gestionnaire)
         response = DeliveryListView.as_view()(request)
 
-        row = next(r for r in response.data if r["id"] == reservation.pk)
+        row = next(r for r in response.data["results"] if r["id"] == reservation.pk)
         assert row["lieu_detail"] is None
 
 
@@ -435,11 +427,7 @@ LIVRER_URL = "/plugin/inventree-location/deliveries/{pk}/livrer/"
 
 
 class TestMarquerLivree:
-    """Passage « validée → livrée » depuis la tournée du livreur.
-
-    Sans cet endpoint, aucun écran ne franchissait cette étape : le check-in,
-    le retour et la clôture restaient inatteignables depuis l'application.
-    """
+    """Passage « validée → livrée » depuis la tournée du livreur."""
 
     @pytest.fixture
     def reservation_validee(self, db, prestation):
@@ -509,12 +497,7 @@ class TestMarquerLivree:
 
 
 class TestQuantitesDeLaTournee:
-    """Ce que la tournée dit d'une ligne : demandée, déposée, restante.
-
-    Les deux dernières viennent des tables d'exécution, remplies depuis le lot
-    L7 : avant, l'écran n'avait que `quantite_livree`, la colonne du bon qu'aucun
-    endpoint n'écrit — elle valait 0 même sur un bon livré la veille.
-    """
+    """Ce que la tournée dit d'une ligne : demandée, déposée, restante."""
 
     def _ligne(self, factory, user, reservation):
         request = factory.get("/plugin/inventree-location/deliveries/")
@@ -523,7 +506,7 @@ class TestQuantitesDeLaTournee:
 
         assert response.status_code == status.HTTP_200_OK
 
-        row = next(r for r in response.data if r["id"] == reservation.pk)
+        row = next(r for r in response.data["results"] if r["id"] == reservation.pk)
 
         return row["lignes"][0]
 
@@ -578,13 +561,7 @@ class TestQuantitesDeLaTournee:
     def test_le_cout_de_la_liste_ne_depend_pas_du_nombre_de_bons(
         self, factory, gestionnaire, prestation, part
     ):
-        """Deux mesures plutôt qu'un plafond : quatre bons, puis douze.
-
-        Le même nombre de requêtes des deux côtés, parce que tout est joint ou
-        préchargé. Les deux régressions que cette égalité attrape : la quantité
-        déposée sans `lignes__livraisons`, qui coûte une requête par ligne, et
-        le nom du demandeur sans sa jointure, qui en coûte une par bon.
-        """
+        """Deux mesures plutôt qu'un plafond : quatre bons, puis douze."""
 
         def mesure():
             request = factory.get("/plugin/inventree-location/deliveries/")
@@ -614,3 +591,87 @@ class TestQuantitesDeLaTournee:
         creer(8)
 
         assert mesure() == quatre_bons
+
+
+class TestPaginationDeLaTournee:
+    """La tournée était la seule liste du plugin sans pagination."""
+
+    @staticmethod
+    def _appeler(factory, utilisateur, **params):
+        request = factory.get("/plugin/inventree-location/deliveries/", params)
+        force_authenticate(request, user=utilisateur)
+        reponse = DeliveryListView.as_view()(request)
+
+        assert reponse.status_code == status.HTTP_200_OK
+
+        return reponse.data
+
+    @pytest.mark.django_db
+    def test_la_reponse_est_paginee(self, factory, gestionnaire, prestation, part):
+        _make_reservation(
+            prestation,
+            part,
+            statut="validee",
+            date_retrait="2026-06-02T00:00:00Z",
+            date_retour="2026-06-03T00:00:00Z",
+        )
+
+        page = self._appeler(factory, gestionnaire)
+
+        assert set(page) >= {"count", "next", "previous", "results"}
+        assert page["count"] == 1
+        assert len(page["results"]) == 1
+
+    @pytest.mark.django_db
+    def test_la_page_borne_les_lignes_et_annonce_le_total(
+        self, factory, gestionnaire, prestation, part
+    ):
+        """C'est `count` qui permet au client de signaler la troncature."""
+
+        for _ in range(5):
+            _make_reservation(
+                prestation,
+                part,
+                statut="validee",
+                date_retrait="2026-06-02T00:00:00Z",
+                date_retour="2026-06-03T00:00:00Z",
+            )
+
+        page = self._appeler(factory, gestionnaire, page_size=2)
+
+        assert page["count"] == 5
+        assert len(page["results"]) == 2
+        assert page["next"] is not None
+
+    def test_la_taille_de_page_est_plafonnee(self, factory):
+        """Sans plafond, `?page_size=100000` rétablirait le comportement d'avant."""
+
+        paginateur = DeliveryListView.pagination_class()
+
+        demesure = Request(factory.get("/", {"page_size": 100000}))
+        raisonnable = Request(factory.get("/", {"page_size": 25}))
+        muette = Request(factory.get("/"))
+
+        assert paginateur.get_page_size(demesure) == 500
+        assert paginateur.get_page_size(raisonnable) == 25
+        assert paginateur.get_page_size(muette) == 100
+
+    @pytest.mark.django_db
+    def test_l_ordre_de_tournee_survit_a_la_pagination(
+        self, factory, gestionnaire, prestation, part
+    ):
+        """Le tri par retrait croissant est l'ordre du camion : il doit être global."""
+
+        for jour in ("05", "03", "04"):
+            _make_reservation(
+                prestation,
+                part,
+                statut="validee",
+                date_retrait=f"2026-06-{jour}T08:00:00Z",
+                date_retour=f"2026-06-{jour}T18:00:00Z",
+            )
+
+        page = self._appeler(factory, gestionnaire, page_size=2)
+        retraits = [ligne["date_retrait_prevue"] for ligne in page["results"]]
+
+        assert [horodatage[8:10] for horodatage in retraits] == ["03", "04"]

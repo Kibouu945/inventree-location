@@ -1,14 +1,4 @@
-"""Pose les réglages du plugin sur le profil InvenTree d'un utilisateur.
-
-Partie « branchée » du mécanisme décrit dans `dashboards` : accès base et
-signal Django. Le calcul de la disposition, lui, reste dans `dashboards` pour
-être testable hors de la stack.
-
-Le modèle visé est `users.models.UserProfile`, qui appartient au cœur
-d'InvenTree : il est importé tardivement, et son absence (suite pytest, où
-InvenTree n'est pas installé) désactive silencieusement la pose au lieu de
-casser le chargement de l'app.
-"""
+"""Pose les réglages du plugin sur le profil InvenTree d'un utilisateur."""
 
 from __future__ import annotations
 
@@ -27,11 +17,7 @@ _APPLIED_ACTIONS = frozenset({"post_add", "post_remove", "post_clear"})
 
 
 def _profile_for(user):
-    """Profil InvenTree de l'utilisateur, créé au besoin, ou None hors stack.
-
-    Un compte créé en shell peut ne pas avoir de profil (`User has no
-    profile`) : on le crée plutôt que de laisser remonter l'exception.
-    """
+    """Profil InvenTree de l'utilisateur, créé au besoin, ou None hors stack."""
 
     try:
         from users.models import UserProfile
@@ -44,11 +30,7 @@ def _profile_for(user):
 
 
 def apply_dashboard(user) -> bool:
-    """Met le tableau de bord de l'utilisateur en accord avec ses rôles.
-
-    Retourne True si le profil a été écrit. Idempotent : appelé deux fois de
-    suite, le second appel ne touche rien.
-    """
+    """Met le tableau de bord de l'utilisateur en accord avec ses rôles."""
 
     profile = _profile_for(user)
 
@@ -73,27 +55,11 @@ def apply_dashboard(user) -> bool:
 
 
 #: Langue de l'interface posée sur les profils sans préférence.
-#:
-#: `INVENTREE_LANGUAGE` ne suffit pas : il fixe le `LANGUAGE_CODE` de Django —
-#: donc les rendus serveur, les rapports et les e-mails — mais l'interface web
-#: d'InvenTree lit `UserProfile.language`, et ce champ est nul sur tout compte
-#: neuf. Le shell restait donc en anglais quoi qu'on mette dans
-#: l'environnement, Chrome concluait « page anglaise » et traduisait la page
-#: entière : nos libellés français réécrits (« Annuler » → « Annuleur »,
-#: « Enregistrer » → « Économiser »), les écrans du cœur en charabia
-#: (« Parties », « Actions boursières », « Aucune inscription disponible ») et
-#: jusqu'aux données saisies (« Zone émargement » affiché « Zone d'émarrage »).
-#: Recette Tassin du 07/09/2026, remarques 3, 9 et 12.
 LANGUE_PAR_DEFAUT = "fr"
 
 
 def apply_language(user) -> bool:
-    """Pose la langue de l'interface si l'utilisateur n'en a pas choisi une.
-
-    Retourne True si le profil a été écrit. Ne touche jamais à un choix
-    existant : c'est un défaut, pas une contrainte — un bénévole anglophone
-    doit pouvoir repasser son compte en anglais depuis ses préférences.
-    """
+    """Pose la langue de l'interface si l'utilisateur n'en a pas choisi une."""
 
     profile = _profile_for(user)
 
@@ -123,8 +89,7 @@ def _affected_users(instance, reverse, pk_set):
         return [instance]
 
     # `group.user_set.add(...)` : l'instance est le groupe, `pk_set` les
-    # utilisateurs. Sur un `clear()` inverse, `pk_set` est None et le lien est
-    # déjà rompu — on ne peut plus savoir qui était concerné, on passe.
+    # utilisateurs.
     if not pk_set:
         return []
 

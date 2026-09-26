@@ -1,19 +1,4 @@
-"""Assignation et progression des livraisons (US-18 / US-19).
-
-Le pool commun : une réservation validée n'appartient à personne tant qu'un
-livreur ne l'a pas acceptée. Il peut la relâcher tant qu'il ne l'a pas
-commencée, puis la faire avancer — en route, livrée, ou problème signalé.
-
-Logique isolée de `views.py` pour rester testable : `core.py` n'est pas
-importable hors InvenTree, comme `conflicts.py` ou `roles.py`.
-
-**Premier point d'écriture des tables d'exécution (lot L7).** Les colonnes du
-bon restent la vérité ; chacune des trois fonctions ci-dessous réaligne
-`Livraison` et `Ramassage` sur elles avant de rendre la main, dans sa propre
-transaction. Les tables suivent donc le terrain en direct au lieu d'attendre
-`projeter_execution`, et `verifier_projection` doit dire « aucune divergence »
-juste après chaque appel — c'est la preuve de la greffe.
-"""
+"""Assignation et progression des livraisons (US-18 / US-19)."""
 
 from __future__ import annotations
 
@@ -86,30 +71,14 @@ def _journaliser(reservation, *, depuis, vers, user, commentaire="", photo=None)
 
 
 def _refleter_l_execution(reservation) -> None:
-    """Réaligne les tables d'exécution sur les colonnes du bon.
-
-    À appeler **après** que les colonnes du bon ont pris leur valeur finale, et
-    non après le seul changement d'état de livraison : la projection lit le
-    `statut` du bon en premier (`livraison_attendue`), si bien qu'un appel
-    placé avant la transition de statut lirait encore « validée » et n'écrirait
-    rien.
-
-    Dans la transaction de l'appelant : une table d'exécution qui survivrait à
-    un changement d'état annulé serait précisément la divergence que le lot L6
-    s'est donné les moyens de détecter.
-    """
+    """Réaligne les tables d'exécution sur les colonnes du bon."""
 
     projeter_le_bon(reservation)
 
 
 @transaction.atomic
 def accepter_livraison(reservation_id: int, user) -> Reservation:
-    """Attribue une livraison du pool commun à `user`.
-
-    Le verrou de ligne règle la course entre deux livreurs qui cliquent en même
-    temps : le second lit l'assignation du premier et se voit refuser, au lieu
-    de l'écraser.
-    """
+    """Attribue une livraison du pool commun à `user`."""
 
     reservation = (
         Reservation.objects.select_for_update().filter(pk=reservation_id).first()
@@ -146,11 +115,7 @@ def accepter_livraison(reservation_id: int, user) -> Reservation:
 
 @transaction.atomic
 def relacher_livraison(reservation_id: int, user) -> Reservation:
-    """Remet une livraison dans le pool commun.
-
-    Possible tant qu'elle n'est pas commencée : une fois en route, l'abandonner
-    laisserait une tournée en cours sans responsable.
-    """
+    """Remet une livraison dans le pool commun."""
 
     reservation = (
         Reservation.objects.select_for_update().filter(pk=reservation_id).first()
@@ -189,12 +154,7 @@ def relacher_livraison(reservation_id: int, user) -> Reservation:
 def changer_etat_livraison(
     reservation_id: int, etat: str, user, *, commentaire: str = "", photo=None
 ) -> Reservation:
-    """Fait avancer une livraison assignée, en journalisant le passage.
-
-    Arriver à « livrée » vaut livraison au sens métier : la réservation suit et
-    passe au statut `livrée`, par la même voie que le bouton du gestionnaire —
-    et c'est le moment où l'heure réelle du dépôt est connue.
-    """
+    """Fait avancer une livraison assignée, en journalisant le passage."""
 
     reservation = (
         Reservation.objects.select_for_update().filter(pk=reservation_id).first()
@@ -228,9 +188,6 @@ def changer_etat_livraison(
 
     # `date_retrait_reelle` n'avait aucun écrivain : l'heure du dépôt ne vivait
     # que dans le journal, et `Livraison.date_reelle` restait vide sur un bon
-    # pourtant sorti. Elle n'est connue qu'ici. Écrite sans garde d'idempotence,
-    # parce que « livrée » est un état terminal (`TRANSITIONS_ETAT`) : on n'y
-    # passe qu'une fois, et un second appel est refusé plus haut.
     if etat == EtatLivraison.LIVREE:
         reservation.date_retrait_reelle = timezone.now()
         colonnes.append("date_retrait_reelle")
@@ -257,9 +214,7 @@ def changer_etat_livraison(
     reservation.refresh_from_db()
 
     # Pas redondant avec la greffe du service, qui vient de projeter si le
-    # statut a bougé : un dépôt sur un bon déjà marqué livré par le gestionnaire
-    # ne change aucun statut, mais écrit `date_retrait_reelle` — et c'est cette
-    # heure-là que le passage doit porter.
+    # statut a bougé : un dépôt sur un bon déjà marqué livré par le
     _refleter_l_execution(reservation)
 
     return reservation

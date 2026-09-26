@@ -1,8 +1,4 @@
-"""Archivage des réservations terminées (SCRUM-101).
-
-Une réservation close depuis plus de deux ans sort de la liste par défaut
-sans être supprimée : elle reste consultable via `?include_archived=true`.
-"""
+"""Archivage des réservations terminées (SCRUM-101)."""
 
 from datetime import timedelta
 
@@ -33,11 +29,7 @@ def get_archivable_queryset(now=None):
 
 
 def archive_old_reservations(now=None):
-    """Marque les réservations archivables et retourne leur nombre.
-
-    `updated_at` est posé explicitement : un `queryset.update()` court-circuite
-    `auto_now`, et l'archivage serait passé sans laisser de trace de date.
-    """
+    """Marque les réservations archivables et retourne leur nombre."""
 
     queryset = get_archivable_queryset(now=now)
 

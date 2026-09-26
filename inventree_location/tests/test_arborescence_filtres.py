@@ -1,6 +1,4 @@
-"""Filtres alimentant l'arborescence de la maquette « Manifestation » :
-``periode`` sur les manifestations, ``prestation`` sur les réservations.
-"""
+"""Filtres alimentant l'arborescence de la maquette « Manifestation » :"""
 
 from __future__ import annotations
 
@@ -41,8 +39,7 @@ def gestionnaire(db):
 
 @pytest.fixture
 def appel(gestionnaire):
-    """Appelle une vue directement : pas d'URLConf sous pytest, `core.py` n'y
-    est pas importable."""
+    """Appelle une vue directement : pas d'URLConf sous pytest, `core.py` n'y"""
 
     factory = APIRequestFactory()
 

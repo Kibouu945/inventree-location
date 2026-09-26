@@ -31,9 +31,8 @@ class TestSeedDemo:
         assert Manifestation.objects.count() == 5
         assert Prestation.objects.count() == 10
         assert Reservation.objects.count() == 10
-        # Les deux zones de la manifestation terminée portent chacune un
-        # cassé et un manquant : de quoi alimenter le SAV et le rapport de
-        # pertes.
+        # Les deux zones de la manifestation terminée portent chacune un cassé
+        # et un manquant : de quoi alimenter le SAV et le rapport de pertes.
         assert ReturnIncident.objects.count() == 4
 
     def test_les_comptes_sont_utilisables(self):

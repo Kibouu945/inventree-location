@@ -1,11 +1,4 @@
-"""API SCRUM-112 — stock réel, retours ramassage et workflow SAV.
-
-**Troisième point d'écriture des tables d'exécution (lot L7).** `RamassageRetourView`
-fait passer le bon en « retournée » **à la main**, sans passer par
-`transition_reservation_status` : la greffe posée sur le service ne la couvre
-donc pas, et c'est pourquoi la saisie de ramassage est un point d'écriture à
-part entière.
-"""
+"""API SCRUM-112 — stock réel, retours ramassage et workflow SAV."""
 
 from django.db import transaction
 from django.db.models import Sum
@@ -59,19 +52,7 @@ def _sum_or_zero(queryset, field_name: str) -> int:
 
 
 def get_unavailable_stock_quantity(part_id: int) -> int:
-    """Calcule les quantités qui sortent du stock réellement disponible.
-
-    Règle SCRUM-112 :
-    - SAV ouvert / en réparation : indisponible temporairement.
-    - Détruit : indisponible définitivement.
-    - Manquant : indisponible tant qu'un incident le signale.
-
-    Deux sources, chacune pour ce qu'elle sait dire : les `SavTicket` portent un
-    cycle de vie (un objet réparé revient au stock), le registre d'incidents
-    porte le constat. Le manquant n'a pas de cycle de vie, il se lit donc dans
-    le registre — et le registre est alimenté par le check-in comme par le
-    ramassage.
-    """
+    """Calcule les quantités qui sortent du stock réellement disponible."""
 
     sav_quantity = _sum_or_zero(
         SavTicket.objects.filter(
@@ -93,9 +74,6 @@ def get_unavailable_stock_quantity(part_id: int) -> int:
 
     # Les manquants se lisent dans le registre d'incidents, pas dans la colonne
     # `quantite_manquante` du ramassage : celle-ci ignorait les manquants
-    # constatés au check-in, qui ne sortaient donc jamais du stock réel. Les
-    # deux écrans alimentent le registre (cf. retours.py), une seule lecture
-    # suffit désormais et couvre les deux.
     missing_quantity = _sum_or_zero(
         ReturnIncident.objects.filter(
             line__part_id=part_id,
@@ -113,13 +91,7 @@ def get_unavailable_stock_quantity(part_id: int) -> int:
 
 
 def get_real_available_stock(part_id: int) -> int:
-    """Stock réellement disponible pour les futures réservations.
-
-    Le stock théorique vient d'InvenTree (`StockItem`), pas d'un compteur du
-    plugin : `RentableItem.stock_total` n'existe plus, un compteur parallèle
-    divergeant en silence dès qu'une casse ou un inventaire est saisi côté
-    InvenTree.
-    """
+    """Stock réellement disponible pour les futures réservations."""
 
     from .conflicts import get_part_total_stock
 
@@ -146,18 +118,7 @@ def _close_or_update_ticket(
     facturer_client: bool,
     description: str,
 ):
-    """Crée, met à jour ou clôture un ticket lié à une ligne.
-
-    Ramener une quantité à 0 clôture le ticket correspondant, **y compris une
-    destruction**. Le refus précédent partait d'une idée juste — on ne
-    « dé-détruit » pas un objet — mais produisait un état incohérent : la ligne
-    affichait 0 détruit tandis que le ticket en gardait 1 hors du stock réel,
-    sans aucun écran pour rattraper l'erreur de saisie. Une faute de frappe au
-    ramassage amputait le parc définitivement.
-
-    La correction laisse une trace : `resolution` dit d'où vient la clôture, et
-    `closed_at` la date. Le ticket n'est jamais supprimé.
-    """
+    """Crée, met à jour ou clôture un ticket lié à une ligne."""
 
     ticket = SavTicket.objects.filter(
         ligne_reservation=ligne,
@@ -226,18 +187,7 @@ class RetourRamassageLigneSerializer(serializers.Serializer):
     commentaire = serializers.CharField(required=False, allow_blank=True, default="")
 
     def validate(self, attrs):
-        """Contrôle la seule quantité qui ne peut pas dépasser l'attendu.
-
-        **Aucun plafond sur ce qui revient** (R36) : douze objets retrouvés
-        pour dix sortis est un cas légitime — du matériel circule d'un lieu à
-        l'autre, et refuser la saisie empêcherait le livreur de déclarer le
-        contenu de son camion. On signale à l'écran, on ne bloque pas.
-
-        Le manquant, lui, est plafonné : on ne peut pas perdre plus que ce qui
-        est sorti. C'est la règle arrêtée en recette le 11/09 — « on peut
-        récupérer plus, on ne peut pas avoir plus de manquant qu'il y a eu de
-        demandes ».
-        """
+        """Contrôle la seule quantité qui ne peut pas dépasser l'attendu."""
 
         ligne = (
             LigneReservation.objects.select_related("reservation")
@@ -442,9 +392,7 @@ class RamassageRetourView(APIView):
             facturer = line_data.get("facturer_client", False)
 
             ligne.commentaire = line_data.get("commentaire", "")
-            # Ce qui est revenu physiquement : conforme, abîmé ou détruit. Le
-            # manquant, lui, n'est pas revenu. Seule quantité conservée sur la
-            # ligne, le reste vit dans le registre d'incidents.
+            # Ce qui est revenu physiquement : conforme, abîmé ou détruit.
             ligne.quantite_retournee = ramassee + au_sav + detruite
             ligne.save()
 
@@ -509,10 +457,7 @@ class RamassageRetourView(APIView):
         reservation.save()
 
         # Les quantités que la projection va lire viennent du registre
-        # d'incidents, écrit ligne par ligne plus haut : la greffe vient donc en
-        # dernier, une fois le statut posé et tous les incidents projetés. La vue
-        # est `@transaction.atomic`, la table d'exécution suit le même sort que
-        # la saisie.
+        # d'incidents, écrit ligne par ligne plus haut : la greffe vient donc
         projeter_le_bon(reservation)
 
         return Response(

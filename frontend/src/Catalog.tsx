@@ -7,9 +7,7 @@ import {
 import { CatalogList } from './catalog/CatalogList';
 import { WidgetScroll } from './WidgetScroll';
 
-/**
- * Fonction appelée par InvenTree pour rendre l'écran catalogue.
- */
+/** Fonction appelée par InvenTree pour rendre l'écran catalogue. */
 export function renderInvenTreeLocationCatalog(
   context: InvenTreePluginContext
 ) {

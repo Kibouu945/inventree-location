@@ -1,14 +1,4 @@
 // Driver Playwright pour la stack InvenTree + plugin Location.
-//
-// Usage :
-//   import { session, shot, dumpErrors, apiToken } from './driver.mjs';
-//   const { page, browser, errors } = await session();
-//   ...
-//   dumpErrors(errors); await browser.close();
-//
-// Prérequis : `npx playwright install chromium` une fois, et la stack up
-// (cf. SKILL.md § 1 et § 2 — ne pas oublier `docker compose restart inventree`
-// après un build front, sinon le bundle servi est l'ancien).
 
 import { chromium } from 'playwright';
 
@@ -25,14 +15,7 @@ export async function apiToken() {
   return (await res.json()).token;
 }
 
-/**
- * Ouvre un navigateur, se connecte et s'arrête sur le dashboard.
- *
- * Les écouteurs d'erreurs sont posés avant la navigation : plusieurs bugs de ce
- * projet étaient des 500 silencieux (ex. `?date_debut=` vide) ou des erreurs JS
- * sans symptôme visible. Le filtre ignore `/auth/session`, qui répond 401 avant
- * login par construction.
- */
+/** Ouvre un navigateur, se connecte et s'arrête sur le dashboard. */
 export async function session({
   headless = true,
   width = 1700,
@@ -57,8 +40,7 @@ export async function session({
   await page.goto(`${BASE}/web`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2500);
   // Cibler les champs par `data-path` : depuis InvenTree 1.5, la page de login
-  // ajoute un bouton « Toggle password visibility » que `getByLabel(/password/i)`
-  // attrape aussi, et Playwright échoue en strict mode.
+  // ajoute un bouton « Toggle password visibility » que
   await page
     .locator('input[data-path="username"], input[aria-label="login-username"]')
     .first()
@@ -86,12 +68,7 @@ export async function rows(page, entete) {
   return table(page, entete).locator('tbody tr').count();
 }
 
-/**
- * Ajoute un widget à la disposition du dashboard.
- *
- * Un widget nouvellement enregistré côté plugin n'apparaît pas tout seul. Et le
- * clic doit viser l'icône à gauche du libellé : cliquer le texte n'ajoute rien.
- */
+/** Ajoute un widget à la disposition du dashboard. */
 export async function addWidget(page, titre) {
   const heading = page.getByText('InvenTree - admin').first();
   const box = await heading.boundingBox();

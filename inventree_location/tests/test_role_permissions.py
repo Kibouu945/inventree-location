@@ -1,13 +1,4 @@
-"""Droits InvenTree (RuleSet) attendus par rôle métier.
-
-Vérifie ``roles.ruleset_permissions`` — la matrice pure dont
-``permissions_provisioning.apply_role_permissions`` n'est que la pose en base
-(``users.models.RuleSet`` appartient au cœur d'InvenTree, absent de la suite).
-
-Contexte : les groupes du plugin ne portaient aucun droit InvenTree, ce qui
-masquait le bouton « nouveau fournisseur » sur les écrans natifs — la fiche
-fournisseur (`company_company`) relève du ruleset ``purchase_order``.
-"""
+"""Droits InvenTree (RuleSet) attendus par rôle métier."""
 
 from __future__ import annotations
 
@@ -15,9 +6,7 @@ import pytest
 
 from inventree_location import permissions_provisioning, roles
 
-#: Les 11 rulesets déclarés par InvenTree 1.5. La liste n'est pas utilisée pour
-#: piloter le code (qui parcourt ce que l'hôte a créé), seulement pour balayer
-#: des cas réalistes ici.
+#: Les 11 rulesets déclarés par InvenTree 1.5.
 RULESETS = (
     "admin",
     "part_category",
@@ -43,11 +32,7 @@ def test_tous_les_roles_ont_une_entree():
 @pytest.mark.parametrize("role", roles.ALL_ROLES)
 @pytest.mark.parametrize("ruleset", RULESETS)
 def test_la_lecture_suit_la_matrice_de_visibilite(role, ruleset):
-    """Lecture accordée explicitement, jamais par défaut.
-
-    Inverse de la règle précédente, et volontaire : la barre de navigation
-    conditionne chaque onglet au `can_view` du ruleset.
-    """
+    """Lecture accordée explicitement, jamais par défaut."""
 
     attendu = ruleset in roles.ROLE_VIEW_RULESETS[role]
 
@@ -66,8 +51,7 @@ def test_ecrire_implique_lire(role, ruleset):
 
 
 def test_la_barre_de_navigation_par_role():
-    """Fige la barre horizontale par rôle : Dashboard partout, Fabrication et
-    Ventes chez l'admin seul."""
+    """Fige la barre horizontale par rôle : Dashboard partout, Fabrication et"""
 
     def onglets(role):
         vus = roles.ROLE_VIEW_RULESETS[role]
@@ -117,11 +101,7 @@ def test_suppression_jamais_accordee(role, ruleset):
 
 @pytest.mark.parametrize("role", [roles.ADMIN, roles.ACHETEUR])
 def test_achats_ouverts_a_l_admin_et_a_l_acheteur(role):
-    """Le blocage remonté par le client : créer une fiche fournisseur.
-
-    `company_company` relève de `purchase_order` ; sans `can_add`, InvenTree
-    n'affiche pas le bouton de création.
-    """
+    """Le blocage remonté par le client : créer une fiche fournisseur."""
 
     droits = roles.ruleset_permissions(role, "purchase_order")
 
@@ -140,11 +120,7 @@ def test_achats_ouverts_a_l_admin_et_a_l_acheteur(role):
     ],
 )
 def test_achats_en_lecture_pour_les_autres_roles(role):
-    """Le CDC confie les achats à l'acheteur ; les autres consultent.
-
-    Le gestionnaire « vérifie les commandes fournisseurs et tarifs » (CDC V06,
-    personas) : c'est de la lecture, pas de la saisie.
-    """
+    """Le CDC confie les achats à l'acheteur ; les autres consultent."""
 
     droits = roles.ruleset_permissions(role, "purchase_order")
 
@@ -178,11 +154,7 @@ def test_catalogue_et_stock_ouverts_aux_roles_d_exploitation(role, ruleset):
 
 
 def test_administration_inventree_reste_en_lecture():
-    """Le ruleset `admin` couvre les tables d'authentification.
-
-    Le back-office du plugin gère les comptes via son API ; ouvrir ces tables
-    dans les écrans natifs n'apporte rien et élargit la surface.
-    """
+    """Le ruleset `admin` couvre les tables d'authentification."""
 
     droits = roles.ruleset_permissions(roles.ADMIN, "admin")
 
@@ -191,8 +163,7 @@ def test_administration_inventree_reste_en_lecture():
 
 
 def test_ruleset_inconnu_n_ouvre_rien():
-    """Un ruleset ajouté par une version future n'ouvre rien, pas même la
-    lecture : un module neuf n'apparaît pas dans la barre sans décision."""
+    """Un ruleset ajouté par une version future n'ouvre rien, pas même la"""
 
     droits = roles.ruleset_permissions(roles.ADMIN, "ruleset_qui_n_existe_pas")
 
@@ -214,9 +185,6 @@ def test_role_inconnu_traite_comme_un_lecteur():
 
 
 def test_pose_inactive_hors_stack_inventree():
-    """Sans InvenTree installé, la pose ne fait rien plutôt que de casser.
-
-    C'est le cas de cette suite : `users.models` n'existe pas ici.
-    """
+    """Sans InvenTree installé, la pose ne fait rien plutôt que de casser."""
 
     assert permissions_provisioning.apply_role_permissions() == []

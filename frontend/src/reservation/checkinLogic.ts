@@ -1,9 +1,4 @@
-/**
- * Logique pure du check-in retour (SCRUM-94).
- *
- * Réplique côté client la règle serveur : somme(ok + manquant + cassé)
- * doit égaler la quantité demandée pour chaque ligne.
- */
+/** Logique pure du check-in retour (SCRUM-94). */
 
 export interface CheckinLigneValues {
   id: number;

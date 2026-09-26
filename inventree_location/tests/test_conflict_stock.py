@@ -1,9 +1,4 @@
-"""Tests de la détection de conflits basée sur le stock (US-03 / SCRUM-76).
-
-Couvre le moteur `detect_reservation_conflicts` (aucun conflit, conflit
-partiel/total, article virtuel ignoré), l'endpoint de check (200 / 409) et
-le refus de validation d'une réservation en conflit non forcé.
-"""
+"""Tests de la détection de conflits basée sur le stock (US-03 / SCRUM-76)."""
 
 from datetime import timedelta
 
@@ -13,11 +8,14 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from inventree_location import roles
 from inventree_location.conflicts import (
     detect_reservation_conflicts,
+    list_current_conflicts,
     reservation_has_conflicts,
 )
 from inventree_location.tests.factories import (
@@ -26,6 +24,7 @@ from inventree_location.tests.factories import (
     mettre_en_stock,
 )
 from inventree_location.models import (
+    Lieu,
     LignePrestation,
     LigneReservation,
     Prestation,
@@ -43,7 +42,7 @@ from inventree_location.views import (
 )
 from inventree_location.views import StockAvailabilityCheckView
 
-from part.models import Part
+from part.models import Part, PartCategory
 
 User = get_user_model()
 
@@ -180,11 +179,7 @@ def test_partial_conflict_when_requesting_more_than_available(stock_setup):
 
 @pytest.mark.django_db
 def test_other_prestation_forecast_is_counted(stock_setup):
-    """Le prévisionnel d'une autre prestation engage le stock, sans réservation.
-
-    Sans cela, la détection de conflit et le catalogue annonçaient deux
-    disponibilités différentes pour le même article à la même date.
-    """
+    """Le prévisionnel d'une autre prestation engage le stock, sans réservation."""
 
     now = stock_setup["now"]
     part = stock_setup["part"]
@@ -315,13 +310,7 @@ def test_validation_refused_when_validee_and_conflict(stock_setup):
 
 @pytest.mark.django_db
 def test_forced_reservation_bypasses_the_block(stock_setup):
-    """`forced=True` valide malgré le conflit (US-03, « forcer malgré »).
-
-    SCRUM-105 voulait bloquer toute sauvegarde en conflit, y compris forcée.
-    La règle retenue reste celle de develop : le blocage ne porte que sur le
-    passage en « validée », et le forçage reste la porte de sortie de
-    l'arbitrage.
-    """
+    """`forced=True` valide malgré le conflit (US-03, « forcer malgré »)."""
 
     candidate = _make_candidate(
         stock_setup, qty=1, statut=StatutReservation.VALIDEE, forced=True
@@ -332,11 +321,7 @@ def test_forced_reservation_bypasses_the_block(stock_setup):
 
 @pytest.mark.django_db
 def test_non_validee_status_is_saved_despite_conflict(stock_setup):
-    """Une réservation non validée se sauvegarde malgré le conflit.
-
-    L'arbitrage a lieu à la validation : refuser la sauvegarde empêcherait
-    l'organisateur d'enregistrer sa demande.
-    """
+    """Une réservation non validée se sauvegarde malgré le conflit."""
 
     candidate = _make_candidate(stock_setup, qty=1, statut=StatutReservation.SOUMISE)
 
@@ -439,11 +424,7 @@ def test_stock_availability_endpoint_returns_200_when_available(gestionnaire, st
 def test_resoudre_un_conflit_de_stock_exige_que_la_penurie_ait_disparu(
     gestionnaire, stock_setup
 ):
-    """« Résoudre » ne doit jamais taire une pénurie encore réelle.
-
-    Avant, l'endpoint posait `state = resolved` sans rien vérifier : le
-    registre annonçait « traité » pendant qu'il manquait toujours du matériel.
-    """
+    """« Résoudre » ne doit jamais taire une pénurie encore réelle."""
 
     from inventree_location.models import ConflictHistory, ConflictState, ConflictType
 
@@ -489,12 +470,7 @@ def test_resoudre_un_conflit_de_stock_exige_que_la_penurie_ait_disparu(
 
 @pytest.mark.django_db
 def test_une_penurie_nee_apres_coup_entre_au_registre(gestionnaire, stock_setup):
-    """Le stock peut baisser hors de toute écriture de réservation.
-
-    Avant, seule `register_stock_conflict_history` écrivait, au moment de
-    l'enregistrement : une pénurie née d'une perte de stock s'affichait dans
-    « Conflits actuels » sans jamais entrer à l'historique.
-    """
+    """Le stock peut baisser hors de toute écriture de réservation."""
 
     from inventree_location.conflicts import sync_conflict_registry
     from inventree_location.models import ConflictHistory, ConflictState, ConflictType
@@ -536,3 +512,75 @@ def test_la_synchronisation_ne_referme_rien(gestionnaire, stock_setup):
     sync_conflict_registry()
 
     assert ConflictHistory.objects.filter(state=ConflictState.OPEN).count() == 1
+
+
+class TestCoutDuWidgetDeConflits:
+    """Le coût de `list_current_conflicts` ne doit pas suivre le volume."""
+
+    @staticmethod
+    def _semer(nb_reservations, nb_articles=6):
+        """Des réservations qui se chevauchent, sur un stock qui suffit."""
+
+        categorie = PartCategory.objects.create(
+            name=f"Charge {PartCategory.objects.count()}"
+        )
+        parts = []
+
+        for rang in range(nb_articles):
+            part = Part.objects.create(name=f"Article {rang}", category=categorie)
+            RentableItem.objects.create(part=part, is_rentable=True)
+            mettre_en_stock(part, 10_000)
+            parts.append(part)
+
+        demandeur = User.objects.create_user(
+            username=f"semeur-{User.objects.count()}", password="pwd"
+        )
+        depart = timezone.now().replace(hour=8, minute=0, second=0, microsecond=0)
+        lieu = Lieu.objects.create(nom=f"Lieu {Lieu.objects.count()}", adresse="1 rue")
+        manifestation = make_manifestation(
+            nom=f"Saison {Prestation.objects.count()}",
+            date_debut=depart,
+            date_fin=depart + timedelta(days=60),
+        )
+
+        for rang in range(nb_reservations):
+            debut = depart + timedelta(days=rang % 10)
+            prestation = Prestation.objects.create(
+                manifestation=manifestation,
+                lieu=lieu,
+                nom=f"Presta {Prestation.objects.count()}",
+                date_debut=debut,
+                date_fin=debut + timedelta(days=2),
+            )
+            reservation = Reservation.objects.create(
+                prestation=prestation,
+                demandeur=demandeur,
+                statut=StatutReservation.VALIDEE,
+                date_retrait_prevue=debut,
+                date_retour_prevue=debut + timedelta(days=2),
+            )
+
+            for decalage in range(2):
+                reservation.lignes.create(
+                    part=parts[(rang + decalage) % nb_articles],
+                    quantite_demandee=1,
+                )
+
+    @staticmethod
+    def _mesurer():
+        with CaptureQueriesContext(connection) as requetes:
+            assert list_current_conflicts() == []
+
+        return len(requetes)
+
+    @pytest.mark.django_db
+    def test_le_cout_ne_depend_pas_du_nombre_de_reservations(self):
+        """Deux mesures plutôt qu'un plafond : vingt réservations, puis quatre-vingts."""
+
+        self._semer(20)
+        self._mesurer()  # la première passe amorce les caches
+        vingt = self._mesurer()
+
+        self._semer(60)
+
+        assert self._mesurer() == vingt

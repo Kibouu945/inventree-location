@@ -1,12 +1,4 @@
-"""Tournée du jour : `GET /tournees/?date=` (lot L6).
-
-Deux mailles dans une seule réponse, et c'est tout l'objet du lot : le livreur
-organise ses arrêts **par lieu** (R30) mais charge son véhicule sur le
-**récapitulatif tous lieux confondus** (R25). Aujourd'hui le front recalcule ça
-en 382 lignes de TypeScript à partir de la liste plate des réservations.
-
-Lecture seule : la vue ne touche ni les bons, ni les tables d'exécution.
-"""
+"""Tournée du jour : `GET /tournees/?date=` (lot L6)."""
 
 from __future__ import annotations
 
@@ -106,11 +98,7 @@ class TestGroupementParLieu:
     def test_deux_prestations_d_un_meme_lieu_font_un_seul_arret(
         self, factory, gestionnaire
     ):
-        """R30 : la quantité affichée est la somme de la journée sur ce lieu.
-
-        Deux prestations distinctes, même lieu, même article : le livreur doit
-        lire « 5 tables à cet arrêt », pas deux lignes à comparer lui-même.
-        """
+        """R30 : la quantité affichée est la somme de la journée sur ce lieu."""
 
         premier = _bon_a_livrer(quantite=2)
         lieu = premier["lieu"]
@@ -153,8 +141,7 @@ class TestGroupementParLieu:
         }
 
     def test_un_bon_sans_lieu_reste_visible(self, factory, gestionnaire):
-        """Une prestation sans lieu est légitime : elle ne doit pas disparaître
-        de la tournée, sinon le matériel part sans que personne le sache."""
+        """Une prestation sans lieu est légitime : elle ne doit pas disparaître"""
 
         chaine = _bon_a_livrer(quantite=1)
         chaine["prestation"].lieu = None

@@ -1,17 +1,5 @@
 // Cadre commun aux widgets de dashboard du plugin, et la mesure de hauteur
 // qu'il utilise — réutilisée par la coque des postes.
-//
-// InvenTree enferme chaque widget dans une boîte de hauteur fixe — 560 px de
-// contenu pour un widget `height: 8` — posée en `overflow-y: hidden`. Tout ce
-// qui dépasse est purement coupé : la page ne défile pas plus loin et il
-// n'existe aucun moyen d'atteindre le bas d'une liste. Chaque écran défile donc
-// à l'intérieur de sa propre boîte.
-//
-// Un simple `height: 100%` ne suffit pas : InvenTree intercale un `Stack`
-// Mantine sans hauteur définie entre sa boîte et le contenu du plugin, et un
-// pourcentage posé sur un parent en hauteur automatique retombe sur la hauteur
-// du contenu. On mesure donc la place réellement disponible dans la boîte, et
-// on la suit au redimensionnement du widget.
 import {
   type ReactNode,
   type RefObject,

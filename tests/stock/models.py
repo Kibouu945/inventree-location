@@ -1,12 +1,4 @@
-"""Modèle `StockItem` minimal — reproduit ce que le plugin interroge.
-
-Seuls les champs sur lesquels `conflicts.get_part_total_stock` filtre sont
-repris, ainsi que `IN_STOCK_FILTER` : InvenTree expose ce `Q` sur le modèle
-pour dire « cet exemplaire est physiquement en stock », et le plugin s'appuie
-dessus plutôt que d'en redéfinir sa propre version, qui dériverait. Les
-relations jamais peuplées ici (`belongs_to`, `customer`, …) sont de simples
-entiers nullables : le plugin ne fait que vérifier qu'elles sont vides.
-"""
+"""Modèle `StockItem` minimal — reproduit ce que le plugin interroge."""
 
 from django.db import models
 from django.db.models import Q

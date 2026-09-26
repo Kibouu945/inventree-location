@@ -1,10 +1,4 @@
-"""Calendrier des réservations (DIS-01).
-
-Traduit les réservations en évènements FullCalendar. La palette vit ici, côté
-serveur : la légende de l'écran et les pastilles du calendrier viennent alors
-de la même source, et un statut ajouté au modèle ne peut pas se retrouver sans
-couleur dans un coin de code React.
-"""
+"""Calendrier des réservations (DIS-01)."""
 
 from __future__ import annotations
 
@@ -15,12 +9,6 @@ from . import roles
 from .models import Reservation, StatutReservation
 
 #: Fenêtre maximale acceptée, en jours.
-#:
-#: Le calendrier n'est pas paginé — FullCalendar veut tous les évènements qui
-#: chevauchent la période affichée, et en cacher un derrière une deuxième page
-#: reviendrait à mentir sur le planning. La borne, c'est donc la fenêtre :
-#: une vue mensuelle en demande six semaines, trois mois laissent de la marge
-#: pour une vue trimestrielle sans ouvrir la porte à un `from=2020&to=2030`.
 MAX_FENETRE_JOURS = 92
 
 #: Au-delà, on refuse plutôt que de tronquer en silence.
@@ -76,12 +64,7 @@ def _jour(valeur: str, nom: str):
 
 
 def bornes_fenetre(depuis: str | None, jusqua: str | None):
-    """Valide la fenêtre demandée et retourne ses deux jours.
-
-    Les deux bornes sont exigées : sans elles, la requête balaierait toute la
-    base. FullCalendar les envoie à chaque changement de mois, un appel qui en
-    manque est un appel écrit à la main.
-    """
+    """Valide la fenêtre demandée et retourne ses deux jours."""
 
     if not depuis or not jusqua:
         raise FenetreInvalide(
@@ -103,12 +86,7 @@ def bornes_fenetre(depuis: str | None, jusqua: str | None):
 
 
 def reservations_du_calendrier(user, *, debut=None, fin=None):
-    """Réservations à afficher entre ces deux bornes.
-
-    Une réservation sans dates de retrait / retour (brouillon) retombe sur les
-    dates de sa prestation : sinon elle n'apparaîtrait nulle part alors que
-    l'écran sert précisément à repérer ce qui est mal renseigné.
-    """
+    """Réservations à afficher entre ces deux bornes."""
 
     queryset = (
         Reservation.objects.select_related(
@@ -187,13 +165,7 @@ def _nom(user) -> str:
 
 
 def evenements_calendrier(user, *, debut=None, fin=None) -> list[dict]:
-    """Liste d'évènements FullCalendar pour la période demandée.
-
-    Le plafond est un garde-fou de dernier recours : la fenêtre bornée le rend
-    hors d'atteinte en usage normal. On refuse au lieu de couper — un planning
-    amputé sans le dire est pire qu'un planning qui réclame une période plus
-    courte.
-    """
+    """Liste d'évènements FullCalendar pour la période demandée."""
 
     queryset = reservations_du_calendrier(user, debut=debut, fin=fin)
     reservations = list(queryset[: MAX_EVENEMENTS + 1])

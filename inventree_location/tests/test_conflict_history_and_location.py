@@ -142,7 +142,6 @@ def test_location_conflict_not_detected_when_address_differs(location_setup):
     )
     # `.update()` ne touche pas l'objet en mémoire : sans relecture, la
     # prestation garde son lieu d'origine en cache et le test mesurerait
-    # l'ancienne adresse.
     prestation_b = Prestation.objects.get(pk=location_setup["prestation_b"].pk)
 
     candidate = Reservation.objects.create(

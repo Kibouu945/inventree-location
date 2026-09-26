@@ -5,15 +5,7 @@ from inventree_location import PLUGIN_VERSION
 
 class TestPluginVersion:
     def test_version_commence_par_un_numero_a_trois_chiffres(self):
-        """MAJEUR.MINEUR.CORRECTIF en tête, quel que soit ce qui suit.
-
-        La version vient désormais du tag git (`setuptools_scm`). Sur un tag
-        elle vaut exactement `1.2.0` ; entre deux tags elle porte la distance et
-        le hash — `1.2.1.dev12+g9a3f1c2` —, et sur des sources non installées
-        `0.0.0+sources`. Exiger trois composants et rien d'autre reviendrait à
-        interdire les deux derniers cas, qui sont précisément ce qui rend une
-        version de développement reconnaissable.
-        """
+        """MAJEUR.MINEUR.CORRECTIF en tête, quel que soit ce qui suit."""
 
         tete = PLUGIN_VERSION.split("+")[0].split(".")
 

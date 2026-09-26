@@ -7,9 +7,7 @@ import {
 import { PartsBackOffice } from './backoffice/PartsBackOffice';
 import { WidgetScroll } from './WidgetScroll';
 
-/**
- * Fonction appelée par InvenTree pour rendre le back-office Parts.
- */
+/** Fonction appelée par InvenTree pour rendre le back-office Parts. */
 export function renderInvenTreeLocationBackOfficeParts(
   context: InvenTreePluginContext
 ) {

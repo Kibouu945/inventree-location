@@ -1,12 +1,4 @@
 // Définition des postes : quels écrans, pour quels rôles.
-//
-// Un poste est l'écran unique d'un métier, à la place de l'empilement de
-// widgets refusé en revue du 09/09/2026. Les écrans sont **chargés
-// paresseusement** : sans ça le bundle embarquerait FullCalendar et Leaflet
-// pour un livreur qui n'ouvre ni planning ni carte.
-//
-// Cette table double `pages.POSTES` côté serveur, comme `roles.ts` double
-// `roles.py` : le serveur refuse, le client évite de proposer. À garder aligné.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   IconAlertTriangle,
@@ -14,6 +6,7 @@ import {
   IconBox,
   IconCalendarEvent,
   IconCalendarMonth,
+  IconChartBar,
   IconListSearch,
   IconPackageImport,
   IconSitemap,
@@ -49,6 +42,11 @@ const ConflictsList = lazy(() =>
 const DeliveriesList = lazy(() =>
   import('../delivery/DeliveriesList').then((m) => ({
     default: m.DeliveriesList
+  }))
+);
+const HistogramView = lazy(() =>
+  import('../stock/histogram/HistogramView').then((m) => ({
+    default: m.HistogramView
   }))
 );
 const OrganisationPanel = lazy(() =>
@@ -132,8 +130,6 @@ const RESERVATIONS = onglet(
   ReservationsList
 );
 // La maquette du CDC : manifestations étalées sur les jours, fiche au survol.
-// L'ancien calendrier mensuel des réservations est remplacé — il montrait les
-// bons, pas les manifestations, et ni volume ni avancement.
 const PLANNING = onglet('planning', 'Planning', IconCalendarMonth, Planning);
 // Le fichier clients. Même écran que le back-office de l'admin, qui masque de
 // lui-même l'onglet Utilisateurs à qui ne gère pas les comptes.
@@ -163,6 +159,12 @@ const RAMASSAGES = onglet(
   IconPackageImport,
   RamassagesList
 );
+const HISTOGRAMME = onglet(
+  'histogramme',
+  'Histogramme',
+  IconChartBar,
+  HistogramView
+);
 
 //: Ordre = journée de travail du métier. Le premier écran est celui qu'on doit
 //: voir en arrivant.
@@ -170,8 +172,8 @@ export const POSTES: Record<string, PosteDefinition> = {
   gestionnaire: {
     titre: 'Poste gestionnaire client',
     roles: [ADMIN, GESTIONNAIRE],
-    // Devis, Factures et Histogramme (CDC §95-101) manquent : leurs écrans
-    // n'existent pas, on ne pose pas d'onglet vide.
+    // Devis et Factures (CDC §95-98) manquent encore : leurs écrans n'existent
+    // pas, on ne pose pas d'onglet vide.
     onglets: [
       MANIFESTATIONS,
       CLIENTS,
@@ -180,7 +182,8 @@ export const POSTES: Record<string, PosteDefinition> = {
       RESERVATIONS,
       CATALOGUE,
       CONFLITS,
-      ALERTES
+      ALERTES,
+      HISTOGRAMME
     ]
   },
   magasinier: {
@@ -188,7 +191,7 @@ export const POSTES: Record<string, PosteDefinition> = {
     roles: [ADMIN, MAGASINIER],
     // Le catalogue reste faute d'écran stock dédié : c'est le seul qui donne
     // l'état article par article.
-    onglets: [RAMASSAGES, CATALOGUE, ALERTES, RESERVATIONS]
+    onglets: [RAMASSAGES, CATALOGUE, ALERTES, RESERVATIONS, HISTOGRAMME]
   },
   livreur: {
     titre: 'Poste livreur',
@@ -221,17 +224,13 @@ export const POSTES: Record<string, PosteDefinition> = {
       LIVRAISONS,
       RAMASSAGES,
       CONFLITS,
-      ALERTES
+      ALERTES,
+      HISTOGRAMME
     ]
   }
 };
 
-/**
- * Le poste de l'utilisateur courant, ou `null` sans rôle métier.
- *
- * **Un seul** poste : règle « un acteur interne, un rôle ». L'admin a le poste
- * complet ; un superutilisateur est traité comme un admin.
- */
+/** Le poste de l'utilisateur courant, ou `null` sans rôle métier. */
 export function posteDeLUtilisateur(
   context: InvenTreePluginContext
 ): { cle: string; definition: PosteDefinition } | null {

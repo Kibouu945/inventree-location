@@ -10,12 +10,7 @@ __all__ = ["InvenTreeAPIError", "InvenTreeClient", "get_default_client"]
 
 
 def get_default_client() -> InvenTreeClient:
-    """Instancie un `InvenTreeClient` à partir de la configuration ambiante.
-
-    Lit `INVENTREE_API_URL` et `INVENTREE_API_TOKEN` depuis les settings Django
-    en priorité, puis depuis l'environnement. Lève `RuntimeError` si l'un des
-    deux est manquant — le client a besoin des deux pour fonctionner.
-    """
+    """Instancie un `InvenTreeClient` à partir de la configuration ambiante."""
 
     base_url = _read_config("INVENTREE_API_URL")
     token = _read_config("INVENTREE_API_TOKEN")
@@ -28,15 +23,7 @@ def get_default_client() -> InvenTreeClient:
 
 
 def _read_config(name: str) -> str | None:
-    """Lit `name` depuis les settings Django, ou à défaut depuis l'environnement.
-
-    On n'attrape que les deux cas attendus :
-      - `ImportError` : Django n'est pas installé (ex. outil packaging hors runtime).
-      - `ImproperlyConfigured` : Django importé mais settings non configurés.
-
-    Toute autre exception (AttributeError, typo, etc.) remonte pour ne pas
-    masquer un bug.
-    """
+    """Lit `name` depuis les settings Django, ou à défaut depuis l'environnement."""
 
     value = None
     try:

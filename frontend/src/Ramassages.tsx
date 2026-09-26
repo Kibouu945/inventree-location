@@ -7,9 +7,7 @@ import {
 import { RamassagesList } from './ramassage/RamassagesList';
 import { WidgetScroll } from './WidgetScroll';
 
-/**
- * Fonction appelée par InvenTree pour rendre l'écran ramassages.
- */
+/** Fonction appelée par InvenTree pour rendre l'écran ramassages. */
 export function renderInvenTreeLocationRamassages(
   context: InvenTreePluginContext
 ) {

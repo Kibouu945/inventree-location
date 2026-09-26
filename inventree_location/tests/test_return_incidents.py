@@ -95,8 +95,7 @@ def ligne(db, reservation):
 
 @pytest.fixture
 def ligne_jumelle(db, ligne, magasinier):
-    """Même article, autre bon : `incident_unique_par_ligne_et_type` interdit
-    désormais deux incidents de même nature sur une seule ligne."""
+    """Même article, autre bon : `incident_unique_par_ligne_et_type` interdit"""
 
     autre_bon = Reservation.objects.create(
         prestation=ligne.reservation.prestation,
@@ -170,14 +169,7 @@ class TestReturnIncidentModel:
 
 
 class TestUniciteDuRegistre:
-    """Un seul enregistrement par ligne et par nature.
-
-    Le registre porte un **total par nature** : `projeter_incidents` lit
-    `filter(line=..., type=...).first()` puis écrit dessus, et les agrégats du
-    stock réel somment par type. Rien ne l'imposait en base, donc un POST
-    direct créait un second enregistrement que la projection ne voyait jamais
-    et que les sommes comptaient deux fois.
-    """
+    """Un seul enregistrement par ligne et par nature."""
 
     def _poster(self, factory, magasinier, ligne, qty):
         payload = {
@@ -470,12 +462,7 @@ class TestReturnIncidentCoherenceLigne:
 
     @pytest.mark.django_db
     def test_le_casse_n_est_pas_plafonne(self, factory, magasinier, ligne):
-        """Trois sorties, trois manquantes, et une cassée en plus : accepté.
-
-        Du matériel circule entre lieux : un objet rendu cassé qui ne venait
-        pas de ce bon reste un constat à enregistrer (R36). Le plafond global
-        transformait ce constat en 400, et la casse disparaissait des rapports.
-        """
+        """Trois sorties, trois manquantes, et une cassée en plus : accepté."""
 
         ReturnIncident.objects.create(
             line=ligne, type=ReturnIncidentType.MISSING, qty=3
@@ -497,8 +484,7 @@ class TestReturnIncidentCoherenceLigne:
 
     @pytest.mark.django_db
     def test_le_manquant_reste_plafonne(self, factory, magasinier, ligne):
-        """Trois sorties, quatre manquantes : refusé, on ne perd pas plus que
-        ce qui est parti."""
+        """Trois sorties, quatre manquantes : refusé, on ne perd pas plus que"""
 
         payload = {
             "line": ligne.pk,
@@ -703,9 +689,7 @@ class TestHistoriqueFiltres:
     def test_historique_lisible_par_tous_les_roles(
         self, factory, gestionnaire, ligne
     ):
-        """La lecture reste ouverte : `RoleBasedPermission` ne restreint que
-        l'écriture. Le gestionnaire consulte donc l'historique sans le nourrir.
-        """
+        """La lecture reste ouverte : `RoleBasedPermission` ne restreint que"""
 
         request = factory.get(self.HISTORY_URL)
         force_authenticate(request, user=gestionnaire)
@@ -716,12 +700,7 @@ class TestHistoriqueFiltres:
 
 
 class TestCoexistenceCheckinEtIncidents:
-    """Deux fonctionnalités écrivent `etat_retour` : elles doivent s'accorder.
-
-    Le check-in retour (SCRUM-94) pose l'état depuis ses quantités, le journal
-    d'incidents (SCRUM-93) le recalcule depuis les incidents. Supprimer le
-    dernier incident effaçait l'état posé par le check-in.
-    """
+    """Deux fonctionnalités écrivent `etat_retour` : elles doivent s'accorder."""
 
     @pytest.mark.django_db
     def test_suppression_dincident_preserve_letat_du_checkin(
@@ -776,11 +755,7 @@ class TestCoexistenceCheckinEtIncidents:
 
 
 class TestReturnLossReport:
-    """Rapport de pertes agrégé (SCRUM-96).
-
-    Complète `ReturnReportView`, qui ne couvre qu'une réservation : ici on
-    agrège tous les incidents, avec ventilation par article et par réservation.
-    """
+    """Rapport de pertes agrégé (SCRUM-96)."""
 
     @pytest.mark.django_db
     def test_rapport_agrege(self, factory, magasinier, ligne, ligne_jumelle):
@@ -865,11 +840,7 @@ class TestReturnLossReport:
 
     @pytest.mark.django_db
     def test_casse_facture_compte_dans_le_total(self, factory, magasinier, ligne):
-        """Le total « facturé » se réconcilie avec les ventilations.
-
-        « Facturé » ne dépend pas du type : un cassé refacturé doit peser dans
-        `total_billed` comme dans `by_part` / `by_reservation`.
-        """
+        """Le total « facturé » se réconcilie avec les ventilations."""
 
         ReturnIncident.objects.create(
             line=ligne,
@@ -899,11 +870,7 @@ class TestReturnLossReport:
 
     @pytest.mark.django_db
     def test_lecture_ouverte_aux_roles_plugin(self, factory, gestionnaire):
-        """C'est un rapport de gestion : la lecture suit `RoleBasedPermission`.
-
-        Le magasinier constate les pertes, le gestionnaire les regarde — seule
-        l'écriture des incidents reste réservée au magasinier et à l'admin.
-        """
+        """C'est un rapport de gestion : la lecture suit `RoleBasedPermission`."""
 
         request = factory.get(LOSS_REPORT_URL)
         force_authenticate(request, user=gestionnaire)

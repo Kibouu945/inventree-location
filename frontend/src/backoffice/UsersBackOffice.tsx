@@ -12,8 +12,7 @@ export function UsersBackOffice({
   context: InvenTreePluginContext;
 }) {
   // Deux publics pour un même écran : l'admin y gère les comptes, le
-  // gestionnaire n'y tient que son fichier clients. On masque l'onglet plutôt
-  // que de le laisser buter sur un 403.
+  // gestionnaire n'y tient que son fichier clients.
   const gereLesComptes = canManageBackOffice(context);
 
   if (!canManageClients(context)) {

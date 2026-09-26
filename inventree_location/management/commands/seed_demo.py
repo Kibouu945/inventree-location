@@ -1,13 +1,4 @@
-"""Jeu de données de démonstration.
-
-Deux usages. Rejouer une démonstration devant le client ou le jury sans une
-heure de resaisie. Et surtout **éprouver les migrations de données sur une base
-non vide** : sur une base fraîche, une reprise passe verte sans avoir rien fait.
-
-Les comptes sont créés par l'ORM avec `create_user`, pas par l'API : un
-`POST /api/user/` accepte le champ `password` et l'ignore, ce qui livre des
-comptes inutilisables.
-"""
+"""Jeu de données de démonstration."""
 
 from datetime import timedelta
 
@@ -472,11 +463,7 @@ class Command(BaseCommand):
         self.stdout.write(f"  {len(plan)} manifestation(s) et leurs prestations")
 
     def _conflit(self, pivot, clients, contacts, comptes, lieux, articles):
-        """Deux réservations sur le même article, au même moment, stock trop court.
-
-        Sans ça, l'écran des conflits reste vide et la démonstration ne montre
-        pas l'arbitrage.
-        """
+        """Deux réservations sur le même article, au même moment, stock trop court."""
 
         from inventree_location.tests.factories import fixer_stock
 

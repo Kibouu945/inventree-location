@@ -1,15 +1,4 @@
-"""Photo d'un objet depuis le back-office Parts.
-
-Le CDC V06 range la photo parmi les attributs d'un objet (« un objet porte
-[…] une URL, des photos, un poids unitaire ») et la donne pour acquise côté
-InvenTree natif. Mais l'écran de gestion des objets du plugin remplace la
-fiche native et n'offrait aucun champ photo : c'est le « je ne suis pas arrivé
-à ajouter une image sur un objet » remonté par le client le 01/09/2026.
-
-Couvre aussi la régression d'affichage : `image_url` renvoyait le **nom** du
-fichier (« part_images/x.png ») au lieu d'une URL, donc une photo déposée ne
-s'affichait jamais.
-"""
+"""Photo d'un objet depuis le back-office Parts."""
 
 from __future__ import annotations
 
@@ -148,11 +137,7 @@ def test_remplacement_de_la_photo(factory, admin, part):
 
 
 def test_retrait_de_la_photo(factory, admin, part):
-    """DELETE vide le champ *et* supprime le fichier du disque.
-
-    `delete_orphans` est à False sur le champ natif : sans suppression
-    explicite, le fichier resterait indéfiniment dans MEDIA_ROOT.
-    """
+    """DELETE vide le champ *et* supprime le fichier du disque."""
 
     deposer(factory, admin, part, png())
     part.refresh_from_db()
@@ -201,11 +186,7 @@ def test_acces_reserve_au_role_admin(factory, lecteur, part):
 
 
 def test_catalogue_expose_une_url_utilisable(factory, admin, part):
-    """Régression : `str(part.image)` donnait un chemin relatif inexploitable.
-
-    Le front le posait dans un `<img src>`, résolu contre `/web/…`, donc en
-    404 — une photo déposée restait invisible dans le catalogue.
-    """
+    """Régression : `str(part.image)` donnait un chemin relatif inexploitable."""
 
     deposer(factory, admin, part, png())
     part.refresh_from_db()

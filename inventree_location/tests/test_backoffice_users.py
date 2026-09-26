@@ -1,14 +1,4 @@
-"""Tests du back-office utilisateurs (SCRUM-108).
-
-Couvre ce que l'endpoint promet et ce qu'il doit refuser :
-- accès réservé au rôle `admin` / superutilisateur ;
-- création avec affectation de rôles, mot de passe obligatoire et haché ;
-- édition qui ne touche que les groupes métier du plugin ;
-- garde-fous : politique de mot de passe, pas d'auto-verrouillage.
-
-Même pattern que `test_ramassage_views.py` : `APIRequestFactory` +
-`force_authenticate`.
-"""
+"""Tests du back-office utilisateurs (SCRUM-108)."""
 
 from __future__ import annotations
 
@@ -206,8 +196,7 @@ class TestCreation:
 
 class TestEdition:
     def test_changement_de_role(self, factory, admin):
-        """Le nouveau rôle remplace l'ancien : un acteur interne n'en porte
-        qu'un (décision du 09/09/2026)."""
+        """Le nouveau rôle remplace l'ancien : un acteur interne n'en porte"""
 
         cible = _make_user("mutant", role=roles.LECTEUR)
 
@@ -318,14 +307,7 @@ class TestRoleList:
 
 
 class TestProfil:
-    """Le téléphone, porté par le `Profile` et non par le `User`.
-
-    Il s'imprime sur le bon de livraison : sans ce champ, seul le Django admin
-    permettait de le renseigner.
-
-    Le rattachement à un client a disparu avec `Profile.groupe` : un acteur
-    interne n'appartient à aucun client (09/09/2026).
-    """
+    """Le téléphone, porté par le `Profile` et non par le `User`."""
 
     def test_creation_avec_telephone(self, factory, admin):
         response = _create(
@@ -373,8 +355,7 @@ class TestProfil:
         assert Profile.objects.get(user=cible).telephone == "0700000000"
 
     def test_aucun_rattachement_a_un_client(self, factory, admin):
-        """La fiche utilisateur n'expose plus de client : le champ a été retiré
-        du modèle, il ne doit pas revenir par le serializer."""
+        """La fiche utilisateur n'expose plus de client : le champ a été retiré"""
 
         cible = _make_user("interne")
         Profile.objects.create(user=cible, telephone="0899887766")

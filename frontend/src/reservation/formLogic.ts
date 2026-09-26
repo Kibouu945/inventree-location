@@ -1,10 +1,4 @@
-/**
- * Logique pure du formulaire de réservation (RES-03).
- *
- * Isolée des composants React pour être testable sans rendu. Réplique côté
- * client les règles métier appliquées par `ReservationSerializer.validate`
- * côté serveur : permissives en brouillon, strictes à la soumission.
- */
+/** Logique pure du formulaire de réservation (RES-03). */
 
 import { HEURE_PAR_DEFAUT } from '../DateTimeField';
 import type {
@@ -42,25 +36,7 @@ function auMemeJourA(date: Date, heure: string): Date {
   return resultat;
 }
 
-/**
- * Valeurs reprises de la prestation pour une réservation neuve.
- *
- * Recette Tassin du 07/09/2026, remarques 14 et 15 : « il serait souhaitable de
- * reprendre les dates de la prestation et de positionner l'heure à 8h00 par
- * défaut », et « il faut ressaisir toute la liste ? on devrait pouvoir
- * récupérer la liste saisie au moment de la prestation ». Les deux
- * informations étaient déjà sur le fil : `GET /prestations/{id}/` renvoie les
- * dates *et* les lignes, et le formulaire les jetait.
- *
- * L'heure de 8h00 n'est posée que si elle laisse la période couvrir la
- * prestation — règle RES-07, vérifiée aussi côté serveur
- * (`ReservationSerializer.validate`) : le retrait ne peut pas être postérieur
- * au début, ni le retour antérieur à la fin. Sur une prestation saisie à
- * minuit, 8h00 arriverait trop tard pour le retrait ; on garde alors la date
- * de la prestation telle quelle plutôt que de proposer une valeur que la
- * validation refusera. Les prestations créées désormais portent 8h00 par défaut
- * (voir `DateTimeField`), les deux bornes tombent donc juste d'elles-mêmes.
- */
+/** Valeurs reprises de la prestation pour une réservation neuve. */
 export function prestationDefaults(
   prestation: Prestation
 ): Pick<
@@ -77,8 +53,7 @@ export function prestationDefaults(
     date_retrait_prevue: retraitA8h <= debut ? retraitA8h : debut,
     date_retour_prevue: retourA8h >= fin ? retourA8h : fin,
     // `isVirtual` est laissé à faux : c'est `enrichLignesFromCatalog` qui
-    // tranche, une fois le catalogue résolu. La règle « au moins un article
-    // virtuel » reste donc évaluée sur des drapeaux vrais.
+    // tranche, une fois le catalogue résolu.
     lignes: (prestation.lignes ?? []).map((ligne) => ({
       part: ligne.part,
       partName: ligne.part_name,
@@ -97,13 +72,7 @@ export interface ReservationFormErrors {
   lignes?: string;
 }
 
-/**
- * Valide les valeurs du formulaire pour un statut donné.
- *
- * `prestation` et `demandeur` sont toujours obligatoires (ils identifient la
- * réservation). Les autres règles (dates, lignes, article virtuel, période
- * couvrant la prestation) ne s'appliquent qu'à la soumission.
- */
+/** Valide les valeurs du formulaire pour un statut donné. */
 export function validateReservationValues(
   values: ReservationFormValues,
   prestation: Prestation | null,
@@ -210,9 +179,7 @@ export function removeLigne(
   return lignes.filter((ligne) => ligne.part !== part);
 }
 
-/** Reconstruit les valeurs de formulaire à partir d'une réservation chargée
- * (édition). Les lignes sont enrichies (nom, article virtuel) séparément,
- * une fois le catalogue résolu — voir `enrichLignesFromCatalog`. */
+/** (édition). */
 export function reservationToFormValues(
   reservation: Reservation
 ): ReservationFormValues {
@@ -274,8 +241,7 @@ const STATUTS_ANNULABLES = [
   'retournee'
 ];
 
-/** Vrai si la réservation peut encore être annulée.
- *
+/**
  * C'est le seul levier d'arbitrage sur une réservation déjà validée : la fiche
  * s'ouvre alors en lecture seule et aucune autre action n'existe.
  */
@@ -283,8 +249,7 @@ export function canCancelReservation(statut: string): boolean {
   return STATUTS_ANNULABLES.includes(statut);
 }
 
-/** Pourquoi la réservation est en lecture seule, dit avec son vrai statut.
- *
+/**
  * Le message était figé sur « validée » alors que `isReservationEditable`
  * verrouille tout ce qui n'est ni brouillon ni soumise : une réservation
  * annulée ou refusée s'annonçait donc comme validée.

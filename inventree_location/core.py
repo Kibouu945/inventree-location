@@ -94,6 +94,7 @@ class InvenTreeLocation(
             LieuListCreateView,
             ManifestationDetailView,
             ManifestationListCreateView,
+            PartAvailabilityHistogramView,
             PrestationDetailView,
             PrestationListCreateView,
             PrestationStockPreviewView,
@@ -140,6 +141,11 @@ class InvenTreeLocation(
                 "catalog/<int:pk>/rentable/",
                 RentablePartDetailView.as_view(),
                 name="catalog-part-rentable-detail",
+            ),
+            path(
+                "catalog/<int:pk>/histogram/",
+                PartAvailabilityHistogramView.as_view(),
+                name="catalog-part-histogram",
             ),
             path(
                 "reservations/",
@@ -425,7 +431,6 @@ class InvenTreeLocation(
                 ),
                 # Seul widget à ne pas déclarer sa taille, il retombait sur la
                 # boîte par défaut : un tableau de 5 colonnes y tenait dans une
-                # colonne, illisible. Même gabarit que les autres écrans.
                 "options": {
                     "width": 12,
                     "height": 8,

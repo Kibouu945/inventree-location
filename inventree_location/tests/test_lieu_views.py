@@ -1,15 +1,4 @@
-"""Tests des endpoints de gestion des lieux et du géocodage (SCRUM-62).
-
-Couvre :
-- `LieuListCreateView`   : liste, filtre (`search`), création ;
-- `LieuDetailView`       : lecture, mise à jour des coordonnées GPS, suppression ;
-- `LieuSerializer`       : validation des bornes latitude/longitude ;
-- `GeocodeAddressView`   : appel Nominatim mocké (succès / aucun résultat /
-  service indisponible) et validation du paramètre `address`.
-
-On suit le même pattern que `test_views.py` : `APIRequestFactory` +
-`force_authenticate`, sans dépendre du routeur d'InvenTree.
-"""
+"""Tests des endpoints de gestion des lieux et du géocodage (SCRUM-62)."""
 
 from __future__ import annotations
 

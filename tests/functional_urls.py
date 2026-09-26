@@ -1,13 +1,4 @@
-"""URLConf de test fonctionnel.
-
-Monte les endpoints du plugin sous le même préfixe qu'en production
-(`/plugin/inventree-location/`) afin d'exercer la chaîne complète
-routage -> authentification -> permission -> vue -> serializer -> base.
-
-Le préfixe et la liste reflètent `InventreeLocationPlugin.setup_urls`
-(cf. inventree_location/core.py). Le module `core` n'étant pas importable
-hors d'InvenTree, on reconstruit les patterns à partir des vues.
-"""
+"""URLConf de test fonctionnel."""
 
 from django.urls import include, path
 

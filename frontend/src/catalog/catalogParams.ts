@@ -1,10 +1,4 @@
-/**
- * Logique pure de l'écran catalogue (CAT-02 / CAT-03).
- *
- * Isolée des composants React pour être testable sans rendu :
- * - état des filtres <-> query string (URL state)
- * - construction des paramètres envoyés à l'API `/catalog/`
- */
+/** Logique pure de l'écran catalogue (CAT-02 / CAT-03). */
 
 export interface CatalogFiltersState {
   /** Recherche plein-texte (nom, description, IPN). */
@@ -13,16 +7,7 @@ export interface CatalogFiltersState {
   categories: number[];
   /** Drapeau louable : true = louable uniquement, false = non-louable, 'all' = tout. */
   rentable: boolean | 'all';
-  /**
-   * Période sur laquelle juger la disponibilité, au format `AAAA-MM-JJ`.
-   *
-   * Revue interne du 07/09/2026 : le catalogue n'affichait qu'un « Disponible
-   * aujourd'hui », inutile pour préparer une manifestation dans trois mois —
-   * la question posée est « de quoi je dispose du 10 au 14 septembre ? ».
-   * L'API acceptait déjà `date_debut` / `date_fin` (c'est ce que fait le
-   * sélecteur d'articles d'une réservation), le catalogue ne les envoyait
-   * simplement jamais. Vides, le serveur retombe sur la journée courante.
-   */
+  /** Période sur laquelle juger la disponibilité, au format `AAAA-MM-JJ`. */
   dateDebut: string | null;
   dateFin: string | null;
   /** Page courante (1-based). */
@@ -43,7 +28,6 @@ export const CATALOG_PAGE_SIZE = 50;
 
 /**
  * Construit les query params envoyés à l'API catalogue à partir des filtres.
- * N'inclut que les paramètres significatifs (pas de clés vides).
  */
 export function buildCatalogQuery(
   filters: CatalogFiltersState
@@ -80,10 +64,7 @@ export function buildCatalogQuery(
   return params;
 }
 
-/**
- * Clés d'URL du widget Catalogue. Le widget Réservations partage la même query
- * string sur le dashboard et possède les siennes, préfixées `resa_`.
- */
+/** Clés d'URL du widget Catalogue. */
 export const CATALOG_URL_KEYS = ['q', 'cat', 'rentable', 'du', 'au', 'page'];
 
 /** Sérialise l'état des filtres en query string pour l'URL (CAT-03). */
@@ -112,9 +93,7 @@ export function serializeFilters(filters: CatalogFiltersState): string {
   return search.toString();
 }
 
-/** Date `AAAA-MM-JJ` valide, ou null. Une valeur bricolée dans l'URL ne doit
- *  pas partir au serveur : il répondrait 400 et le widget afficherait une
- *  erreur pour un simple copier-coller malheureux. */
+/** pas partir au serveur : il répondrait 400 et le widget afficherait une */
 function parseIsoDate(value: string | null): string | null {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return null;
@@ -160,14 +139,7 @@ function enFrancais(iso: string): string {
   return `${jour}/${mois}/${annee}`;
 }
 
-/**
- * En-tête de la colonne de disponibilité, selon la période demandée.
- *
- * Le chiffre a toujours porté sur une période — c'est seulement qu'à défaut
- * de bornes, cette période est la journée courante. L'en-tête le dit
- * maintenant, sans quoi « Disponible aujourd'hui » mentirait dès qu'une
- * période est choisie.
- */
+/** En-tête de la colonne de disponibilité, selon la période demandée. */
 export function libelleColonneDisponibilite(
   dateDebut: string | null,
   dateFin: string | null

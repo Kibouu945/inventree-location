@@ -30,16 +30,7 @@ class BackOfficePermission(permissions.BasePermission):
 
 
 class ClientDeskPermission(BackOfficePermission):
-    """Fichier clients : l'admin, et le gestionnaire dont c'est le métier.
-
-    « Un gestionnaire client gère un ou plusieurs clients ; un client a au plus
-    un gestionnaire référent » (R5). Lui refuser la création d'un client
-    l'obligeait à passer par un administrateur pour enregistrer son propre
-    interlocuteur — c'est le fichier qu'il tient au téléphone.
-
-    Les comptes et les articles restent à l'admin : ce sont des objets
-    d'exploitation, pas de relation commerciale.
-    """
+    """Fichier clients : l'admin, et le gestionnaire dont c'est le métier."""
 
     def has_permission(self, request, view) -> bool:
         user = request.user
@@ -54,11 +45,7 @@ class ClientDeskPermission(BackOfficePermission):
 
 
 class BackOfficePagination(PageNumberPagination):
-    """Pagination commune aux listes back-office (utilisateurs, Parts).
-
-    Déclarée explicitement plutôt que laissée au réglage global : le front
-    consomme `count` / `results` et doit pouvoir compter dessus.
-    """
+    """Pagination commune aux listes back-office (utilisateurs, Parts)."""
 
     page_size = 20
     page_size_query_param = "page_size"
@@ -131,13 +118,7 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
         return data
 
     def validate_password(self, value):
-        """Applique les validateurs de mot de passe de l'instance InvenTree.
-
-        `min_length` ne suffit pas : le projet hérite des
-        `AUTH_PASSWORD_VALIDATORS` de Django / InvenTree (mot de passe courant,
-        trop proche du nom d'utilisateur, purement numérique…). Les refuser ici
-        évite de créer des comptes que la politique du site rejetterait ensuite.
-        """
+        """Applique les validateurs de mot de passe de l'instance InvenTree."""
 
         if not value:
             return value
@@ -162,12 +143,7 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
         return attrs
 
     def _reject_self_lockout(self, attrs):
-        """Empêche l'admin connecté de se couper lui-même l'accès.
-
-        Se désactiver ou se retirer le rôle `admin` fermerait le back-office à
-        son propre auteur — et s'il est le seul admin non superutilisateur,
-        plus personne ne peut rouvrir la porte sans passer par le shell.
-        """
+        """Empêche l'admin connecté de se couper lui-même l'accès."""
 
         request = self.context.get("request")
         current_user = getattr(request, "user", None)
@@ -200,12 +176,7 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
             Group.objects.get_or_create(name=role)
 
     def _apply_role(self, user, role_name):
-        """Pose **le** rôle métier, en conservant les groupes hors plugin.
-
-        L'unicité ne peut pas s'exprimer en base — `auth_user_groups` est un
-        M2M — elle est donc tenue ici : les autres groupes du plugin sont
-        retirés, ceux d'InvenTree ne sont pas touchés.
-        """
+        """Pose **le** rôle métier, en conservant les groupes hors plugin."""
 
         self._ensure_role_groups()
 
@@ -215,11 +186,7 @@ class BackOfficeUserSerializer(serializers.ModelSerializer):
         user.groups.set(hors_plugin + metier)
 
     def _pop_profile_fields(self, validated_data):
-        """Sort les champs portés par le `Profile`, pas par le `User`.
-
-        Seules les clés effectivement envoyées sont retenues : un PATCH partiel
-        ne doit pas réinitialiser le téléphone.
-        """
+        """Sort les champs portés par le `Profile`, pas par le `User`."""
 
         return {
             name: validated_data.pop(name)
@@ -312,11 +279,7 @@ class BackOfficeUserDetailView(generics.RetrieveUpdateAPIView):
 
 
 class BackOfficeClientSerializer(serializers.ModelSerializer):
-    """CRUD d'un client, réservé au back-office.
-
-    Distinct de `ClientSerializer`, qui reste en lecture seule pour le
-    sélecteur de manifestation.
-    """
+    """CRUD d'un client, réservé au back-office."""
 
     contacts = serializers.SerializerMethodField()
     gestionnaire_nom = serializers.SerializerMethodField()
@@ -338,12 +301,7 @@ class BackOfficeClientSerializer(serializers.ModelSerializer):
         ]
 
     def get_contacts(self, obj) -> int:
-        """Nombre de contacts.
-
-        Compté depuis `Contact`, jamais via la relation inverse
-        `Client.contacts` : le chargeur de plugins importe `models` deux fois et
-        le nom inverse n'est pas rattaché au `Client` vu d'ici.
-        """
+        """Nombre de contacts."""
 
         return Contact.objects.filter(client=obj.pk).count()
 
@@ -374,11 +332,7 @@ class BackOfficeClientListCreateView(generics.ListCreateAPIView):
 
 
 class BackOfficeClientDetailView(generics.RetrieveUpdateAPIView):
-    """Lecture / modification d'un client.
-
-    Pas de suppression : `Manifestation.client` est en `PROTECT`, et un client
-    se désactive (`actif`) — question d'historique.
-    """
+    """Lecture / modification d'un client."""
 
     permission_classes = [ClientDeskPermission]
     serializer_class = BackOfficeClientSerializer
@@ -390,11 +344,7 @@ class BackOfficeClientDetailView(generics.RetrieveUpdateAPIView):
 
 
 class BackOfficeContactSerializer(serializers.ModelSerializer):
-    """CRUD d'un contact.
-
-    `client_nom` est là pour la liste tous clients confondus : sans lui, un
-    contact ne s'affiche que par l'identifiant numérique de son client.
-    """
+    """CRUD d'un contact."""
 
     client_nom = serializers.CharField(source="client.nom", read_only=True)
 
@@ -442,10 +392,7 @@ class BackOfficeContactListCreateView(generics.ListCreateAPIView):
 
 
 class BackOfficeContactDetailView(generics.RetrieveUpdateAPIView):
-    """Lecture / modification d'un contact.
-
-    Pas de suppression : un contact qui a signé un devis se désactive.
-    """
+    """Lecture / modification d'un contact."""
 
     permission_classes = [ClientDeskPermission]
     serializer_class = BackOfficeContactSerializer
@@ -470,12 +417,7 @@ class BackOfficeRoleListView(APIView):
     }
 
     def get(self, request, *args, **kwargs):
-        """Retourne les rôles métier disponibles.
-
-        Aucune écriture ici : les groupes sont créés par les migrations
-        (`0003_create_role_groups`, `0015_create_acheteur_role_group`) et, en
-        dernier recours, à l'affectation des rôles.
-        """
+        """Retourne les rôles métier disponibles."""
 
         payload = [
             {

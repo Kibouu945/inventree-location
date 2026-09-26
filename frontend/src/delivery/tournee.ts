@@ -1,14 +1,4 @@
-/**
- * Logique de tournée livreur (LIV-04).
- *
- * Un « arrêt » est un point de passage du jour : une livraison (on dépose au
- * lieu de la prestation) ou un ramassage (on récupère après la prestation).
- * Les deux se mélangent dans une seule tournée — c'est le pain point n°1
- * remonté par le client : faire les livraisons et les ramassages avec un
- * minimum de trajet.
- *
- * Ce module ne contient que du calcul pur, testable sans navigateur ni carte.
- */
+/** Logique de tournée livreur (LIV-04). */
 import type { Ramassage } from '../ramassage/types';
 import type { Delivery } from './types';
 
@@ -47,7 +37,6 @@ const RAYON_TERRE_KM = 6371;
 
 /**
  * Nombre d'étapes intermédiaires acceptées par l'URL Google Maps Directions.
- * Au-delà, l'URL est refusée : on tronque et on le dit à l'utilisateur.
  */
 export const MAX_WAYPOINTS_MAPS = 9;
 
@@ -75,13 +64,7 @@ function parHeure(a: TourneeStop, b: TourneeStop): number {
   return a.heure.localeCompare(b.heure);
 }
 
-/**
- * Arrêts de livraison : dépose au lieu de la prestation.
- *
- * Seule une réservation encore à livrer (`validee`) est un arrêt : l'API des
- * livraisons renvoie aussi celles déjà livrées dont la période couvre le jour
- * filtré, et les faire figurer donnerait au livreur des dépôts déjà faits.
- */
+/** Arrêts de livraison : dépose au lieu de la prestation. */
 export function stopsDepuisLivraisons(deliveries: Delivery[]): TourneeStop[] {
   const stops: TourneeStop[] = [];
 
@@ -116,13 +99,7 @@ export function stopsDepuisLivraisons(deliveries: Delivery[]): TourneeStop[] {
   return stops;
 }
 
-/**
- * Arrêts de ramassage : reprise après la prestation.
- *
- * Le matériel n'est sur place qu'une fois la réservation livrée : avant, il n'y
- * a rien à reprendre ; après le retour (`retournee`), il n'y a plus rien non
- * plus.
- */
+/** Arrêts de ramassage : reprise après la prestation. */
 export function stopsDepuisRamassages(ramassages: Ramassage[]): TourneeStop[] {
   const stops: TourneeStop[] = [];
 
@@ -227,10 +204,6 @@ export function dureeEstimeeMin(stops: TourneeStop[]): number {
 
 /**
  * Réordonne les arrêts au plus proche voisin depuis le premier arrêt donné.
- *
- * Heuristique volontairement simple (pas de TSP exact, hors périmètre V1) :
- * elle raccourcit la tournée dans la grande majorité des cas réels et reste
- * prévisible pour le livreur, qui garde la main pour corriger à la volée.
  */
 export function optimiserOrdre(stops: TourneeStop[]): TourneeStop[] {
   if (stops.length < 3) {
@@ -265,13 +238,7 @@ export function serialiserOrdre(stops: TourneeStop[]): string {
   return stops.map((stop) => stop.key).join(',');
 }
 
-/**
- * Applique un ordre mémorisé à des arrêts fraîchement chargés.
- *
- * Les clés inconnues de l'ordre sont ignorées (arrêt disparu de la période) et
- * les arrêts absents de l'ordre sont ajoutés à la fin, dans leur ordre
- * d'origine — un nouvel arrêt ne doit pas faire perdre la tournée déjà rangée.
- */
+/** Applique un ordre mémorisé à des arrêts fraîchement chargés. */
 export function appliquerOrdre(
   stops: TourneeStop[],
   ordre: string[]
@@ -325,10 +292,6 @@ function coordonnees(stop: TourneeStop): string {
 
 /**
  * Lien Google Maps couvrant toute la tournée (origine → étapes → destination).
- *
- * `null` quand il n'y a rien à tracer. Au-delà de `MAX_WAYPOINTS_MAPS` étapes
- * intermédiaires, les derniers arrêts sont laissés de côté : mieux vaut un
- * itinéraire partiel qu'une URL rejetée par Google.
  */
 export function construireItineraireUrl(stops: TourneeStop[]): string | null {
   if (stops.length === 0) {

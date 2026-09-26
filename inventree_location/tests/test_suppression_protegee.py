@@ -1,14 +1,4 @@
-"""Ce qui est encore référencé ne se supprime pas — et le dit.
-
-Les clés étrangères en `PROTECT` portent une règle métier : on ne supprime pas
-une manifestation qui porte des prestations, ni un lieu qui porte des
-prestations. Le refus est normal ; c'est sa **forme** qui était fausse.
-
-Django lève alors `ProtectedError`, que DRF ne sait pas traduire : la requête
-ressortait en 500, journalisée comme une erreur serveur, et l'écran annonçait
-une panne au lieu de dire ce qui retenait. Ces tests verrouillent le 409 et le
-décompte de ce qui bloque.
-"""
+"""Ce qui est encore référencé ne se supprime pas — et le dit."""
 
 from __future__ import annotations
 

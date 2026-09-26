@@ -9,10 +9,7 @@ const NOM_CLIENT = `Festival du Lac ${M}`;
 const NOM_MANIF = `Festival du Lac — édition ${M}`;
 const NOM_PRESTA = `Scène principale ${M}`;
 
-// Les dates se calculent, elles ne se figent pas. Datées en dur au 13 → 15, la
-// manifestation du scénario est tombée dans le passé le 16 : l'arborescence
-// s'ouvre sur « Futur », l'écran affiche « Aucune manifestation sur cette
-// période », et les six étapes suivantes échouaient sur une application saine.
+// Les dates se calculent, elles ne se figent pas.
 const AUJOURD_HUI = new Date().getDate();
 // Borné au mois courant : le sélecteur de jour n'ouvre pas la page suivante
 // tout seul, un 31 + 2 ne serait donc pas cliquable.
@@ -161,10 +158,7 @@ await etape('4. Une prestation, depuis l\'arborescence', async () => {
   await page.getByRole('tab', { name: 'Manifestations' }).first().click();
   await T(3000);
   // L'arbre part du client (F3) : le filtre client a disparu — il faisait
-  // doublon avec le niveau — et les clients s'ouvrent repliés. La recherche
-  // fait le chemin : elle ne garde que les clients portant une manifestation
-  // qui corresponde, et les déplie. Le délai couvre les 300 ms de saisie
-  // différée, puis l'appel de repérage.
+  // doublon avec le niveau — et les clients s'ouvrent repliés.
   await page
     .getByPlaceholder(/Rechercher une manifestation/i)
     .fill(NOM_MANIF);
@@ -237,8 +231,7 @@ await etape('7. Livraison : marquer livrée', async () => {
   await page.getByRole('tab', { name: 'Livraisons' }).first().click();
   await T(4000);
   // L'écran s'ouvre sur la table hiérarchique (F6), où le numéro du bon
-  // n'apparaît qu'une fois l'arbre déplié. La vue « Liste » garde la ligne
-  // plate et son bouton : c'est elle que ce scénario pilote.
+  // n'apparaît qu'une fois l'arbre déplié.
   await page.getByText('Liste', { exact: true }).first().click();
   await T(3000);
   // Et le filtre de journée s'élargit : un créneau qui déborde sur demain
@@ -267,8 +260,6 @@ await etape('8. Ramassage : les quatre compteurs', async () => {
   await T(4000);
   // L'écran s'ouvre sur l'arborescence (F7), où le numéro du bon ne paraît
   // qu'une fois l'arbre déplié : la vue « Liste » garde la ligne plate et ses
-  // boutons. Sans cette bascule, l'étape cherchait une ligne absente, épuisait
-  // trente secondes d'attente, et se déclarait bonne — elle ne vérifiait rien.
   await page.locator('label').filter({ hasText: /^Liste$/ }).first().click();
   await T(3000);
 
@@ -305,9 +296,8 @@ await etape('9. Retour complet : les 4 bancs rendus', async () => {
   const d = dlg();
   const nums = d.locator('input.mantine-NumberInput-input');
   console.log('     lignes à rendre :', await nums.count());
-  // Retour complet : seul un retour complet fait passer le bon en « retournée ».
-  // À 3 sur 4, le serveur le laisse « livrée » et annonce « partiel » — c'est
-  // la règle, pas un bug : le manquant se traite au check-in.
+  // Retour complet : seul un retour complet fait passer le bon en « retournée
+  // ». À 3 sur 4, le serveur le laisse « livrée » et annonce « partiel » —
   await nums.nth(0).fill('4');
   await T(600);
   await d.getByRole('button', { name: 'Enregistrer le retour' }).click();

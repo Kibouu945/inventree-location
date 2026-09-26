@@ -24,6 +24,7 @@ from inventree_location.tests.factories import (
 from inventree_location.stock import (
     compute_engaged_quantities,
     compute_engagement_details,
+    compute_part_availability_calendar,
     compute_parts_availability,
     compute_prestation_stock,
     compute_stock_availability,
@@ -249,12 +250,7 @@ class TestComputePartsAvailability:
 
 @pytest.mark.django_db
 class TestEngagedQuantities:
-    """Répartition d'un même article entre prévisionnel et réservations.
-
-    Le prévisionnel (`LignePrestation`) et le réalisé (`LigneReservation`)
-    décrivent le même besoin : on retient le plus grand des deux par
-    prestation, sans double comptage ni engagement invisible.
-    """
+    """Répartition d'un même article entre prévisionnel et réservations."""
 
     def _period(self, base, hours=2):
         return base["now"], base["now"] + timedelta(hours=hours)
@@ -454,3 +450,75 @@ class TestEngagedQuantities:
         assert line["reserved"] == 4
         assert line["available"] == 1
         assert line["missing"] == 1
+
+
+@pytest.mark.django_db
+class TestComputePartAvailabilityCalendar:
+    def test_one_entry_per_day_in_range(self, base):
+        part = _make_part("Tente", stock=10)
+
+        days = compute_part_availability_calendar(
+            part, base["now"].date(), base["now"].date() + timedelta(days=3)
+        )
+
+        assert [day["date"] for day in days] == [
+            (base["now"].date() + timedelta(days=offset)).isoformat()
+            for offset in range(4)
+        ]
+
+    def test_each_day_reflects_its_own_engagement(self, base):
+        part = _make_part("Chaise", stock=10)
+        _prestation(base, day_offset_start=1, hours=3, part=part, qty=8, nom="Jour 1")
+
+        days = compute_part_availability_calendar(
+            part, base["now"].date(), base["now"].date() + timedelta(days=2)
+        )
+
+        by_date = {day["date"]: day for day in days}
+        jour0 = base["now"].date().isoformat()
+        jour1 = (base["now"].date() + timedelta(days=1)).isoformat()
+
+        assert by_date[jour0]["reserved"] == 0
+        assert by_date[jour0]["available"] == 10
+        assert by_date[jour1]["reserved"] == 8
+        assert by_date[jour1]["available"] == 2
+
+    def test_tension_level_follows_occupation(self, base):
+        part = _make_part("Projecteur", stock=10)
+        _prestation(base, day_offset_start=0, hours=3, part=part, qty=10, nom="Complet")
+
+        days = compute_part_availability_calendar(
+            part, base["now"].date(), base["now"].date()
+        )
+
+        assert days[0]["occupation_rate"] == 100
+        assert days[0]["tension_level"] == "red"
+
+    def test_virtual_part_has_no_calendar(self, base):
+        part = _make_part("Nettoyage", stock=0, virtual=True)
+
+        days = compute_part_availability_calendar(
+            part, base["now"].date(), base["now"].date() + timedelta(days=2)
+        )
+
+        assert days == []
+
+    def test_reversed_dates_are_normalized(self, base):
+        part = _make_part("Table", stock=5)
+        start = base["now"].date()
+        end = start + timedelta(days=2)
+
+        assert compute_part_availability_calendar(
+            part, end, start
+        ) == compute_part_availability_calendar(part, start, end)
+
+    def test_range_is_capped(self, base):
+        part = _make_part("Banc", stock=5)
+        start = base["now"].date()
+        end = start + timedelta(days=400)
+
+        days = compute_part_availability_calendar(part, start, end)
+
+        from inventree_location.stock import MAX_HISTOGRAM_DAYS
+
+        assert len(days) == MAX_HISTOGRAM_DAYS

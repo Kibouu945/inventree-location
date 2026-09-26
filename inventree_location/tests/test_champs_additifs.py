@@ -70,8 +70,7 @@ class TestDefauts:
 
 @pytest.mark.django_db
 class TestLieuObligatoireHorsBrouillon:
-    """Le lieu reste nullable en base, mais une prestation sans lieu est
-    invisible des tournées : elle ne quitte pas le brouillon."""
+    """Le lieu reste nullable en base, mais une prestation sans lieu est"""
 
     def _poster(self, payload):
         requete = APIRequestFactory().post(PRESTATIONS_URL, payload, format="json")

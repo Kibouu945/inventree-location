@@ -1,9 +1,4 @@
 // Écran de check-in retour (SCRUM-94) : pointage OK / manquant / cassé.
-//
-// Adaptation d'architecture : le plugin ne dispose pas de routeur client
-// (pages rendues par InvenTree via des dashboard items), donc la « page »
-// `/reservations/:id/checkin` de la spec est portée par une modale ouverte
-// depuis la liste des réservations, plutôt qu'une route dédiée.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   Alert,
@@ -51,7 +46,6 @@ function toFormLignes(lignes: CheckinLigneApi[]): CheckinLigneValues[] {
   return lignes.map((ligne) => {
     // Un check-in déjà pointé est rechargé tel quel (y compris un « OK = 0 »,
     // que le `||` d'origine remplaçait à tort par la quantité demandée) ;
-    // sinon, on pré-remplit la ligne comme intégralement rendue.
     const dejaPointee =
       ligne.quantite_retour_ok +
         ligne.quantite_retour_manquant +
@@ -69,9 +63,7 @@ function toFormLignes(lignes: CheckinLigneApi[]): CheckinLigneValues[] {
   });
 }
 
-/**
- * Formulaire de check-in retour ligne par ligne d'une réservation livrée.
- */
+/** Formulaire de check-in retour ligne par ligne d'une réservation livrée. */
 export function CheckinForm({
   context,
   reservationId,
@@ -86,8 +78,7 @@ export function CheckinForm({
   const [partNames, setPartNames] = useState<Record<number, string>>({});
   const [confirming, setConfirming] = useState(false);
   // Le formulaire n'est initialisé qu'une fois par réservation : un refetch
-  // (retour de focus sur l'onglet, invalidation) ne doit pas écraser la
-  // saisie en cours du magasinier.
+  // (retour de focus sur l'onglet, invalidation) ne doit pas écraser la saisie
   const seededFor = useRef<number | null>(null);
 
   const query = useQuery<CheckinResponse>(
@@ -189,8 +180,7 @@ export function CheckinForm({
     }
 
     // La clôture est définitive : premier clic = récapitulatif, second clic =
-    // envoi. Évite qu'un clic malencontreux ne clôture la réservation avec le
-    // pré-remplissage « tout OK ».
+    // envoi.
     if (!confirming) {
       setConfirming(true);
       return;

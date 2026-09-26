@@ -1,11 +1,4 @@
-"""Composition automatique du tableau de bord à partir des rôles.
-
-InvenTree ouvre un tableau de bord vide et n'applique les tailles déclarées par
-le plugin qu'à l'ajout manuel d'un widget : ces tests portent sur le calcul pur
-de la disposition (`dashboards`), la partie qui décide *quoi* poser et *où*.
-La pose elle-même (`dashboard_provisioning`) touche `users.models.UserProfile`,
-absent hors de la stack, et n'est donc pas couverte ici.
-"""
+"""Composition automatique du tableau de bord à partir des rôles."""
 
 from __future__ import annotations
 
@@ -31,15 +24,7 @@ def dom(key: str) -> str:
 
 
 def test_every_widget_of_the_rbac_mapping_has_a_size():
-    """Un widget attribué à un rôle sans gabarit ici sortirait en boîte minuscule.
-
-    Inclusion et non égalité : depuis le passage aux postes en pages,
-    `WIDGET_SIZES` conserve les gabarits des widgets métier retirés du mapping
-    des rôles. Ils ne sont plus attribués à personne, mais leurs entrées restent
-    le temps de la recette — les supprimer interdirait tout retour en arrière.
-    Ce qui doit rester vrai, c'est qu'aucun widget attribué ne soit sans
-    gabarit.
-    """
+    """Un widget attribué à un rôle sans gabarit ici sortirait en boîte minuscule."""
 
     assert set(roles.DASHBOARD_WIDGET_ROLES) <= set(dashboards.WIDGET_SIZES)
 

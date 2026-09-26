@@ -1,9 +1,4 @@
-"""Tests d'authentification sur les vues du plugin.
-
-Le plugin réutilise l'auth d'InvenTree (DRF Token). Ce test garde-fou s'assure
-que toutes les vues exposées par le plugin restent verrouillées derrière
-`IsAuthenticated`, peu importe la façon dont elles évoluent.
-"""
+"""Tests d'authentification sur les vues du plugin."""
 
 from __future__ import annotations
 

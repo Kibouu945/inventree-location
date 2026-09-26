@@ -76,16 +76,7 @@ def _avec_role(username, role):
 
 @pytest.mark.django_db
 class TestUserListRoleFilters:
-    """Filtres de rôle du sélecteur d'utilisateurs.
-
-    Revue interne du 07/09/2026 : « dans le champ gérant interne, ne pas
-    afficher le client ». Le sélecteur servait la même liste
-    à tout le monde, on pouvait donc désigner un client comme responsable
-    interne de sa propre réservation. Le CDC V06 sépare pourtant les deux
-    rôles — le client n'a plus de compte du tout, le
-    gestionnaire traite (persona 2) — et sa matrice RACI n'a même pas de
-    colonne « organisateur ».
-    """
+    """Filtres de rôle du sélecteur d'utilisateurs."""
 
     def _usernames(self, factory, user, params):
         request = factory.get(USERS_URL, params)
