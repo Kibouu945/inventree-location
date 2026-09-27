@@ -24,7 +24,7 @@ import {
 } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
-
+import { ManifestationCreateModal } from '../organisation/ManifestationCreateModal';
 import type {
   Client,
   Manifestation,
@@ -605,6 +605,9 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
   const [recherche, setRecherche] = useState('');
   const [periode, setPeriode] = useState('futur');
   const [clientsOuverts, setClientsOuverts] = useState<Set<number>>(new Set());
+  // Client dont on crée une manifestation, par le « + » de sa ligne (4.5.2).
+  const [clientDeLaManifestation, setClientDeLaManifestation] =
+    useState<Client | null>(null);
   const [ouvertes, setOuvertes] = useState<Set<number>>(new Set());
   const [manifestationDeLaPrestation, setManifestationDeLaPrestation] =
     useState<Manifestation | null>(null);
@@ -691,6 +694,23 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
   const clientsAffiches = clientsTrouves
     ? clients.filter((client) => clientsTrouves.has(client.id))
     : clients;
+
+  /** Une manifestation vient de naître : le client la montre aussitôt. */
+  function manifestationCreee() {
+    const porteur = clientDeLaManifestation;
+
+    setClientDeLaManifestation(null);
+
+    if (!porteur) {
+      return;
+    }
+
+    context.queryClient.invalidateQueries({
+      queryKey: ['arbo-manifestations-client']
+    });
+
+    setClientsOuverts((precedent) => new Set(precedent).add(porteur.id));
+  }
 
   /** Une prestation vient de naître : la manifestation la montre aussitôt. */
   function prestationCreee() {
@@ -826,6 +846,12 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
                       )}
                     </Group>
                   </UnstyledButton>
+
+                  <Ajouter
+                    quoi='une manifestation'
+                    autorise={canWriteOrganisation(context)}
+                    onClick={() => setClientDeLaManifestation(client)}
+                  />
                 </Group>
               </Ligne>
 
@@ -844,6 +870,14 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
           );
         })}
       </Box>
+
+      <ManifestationCreateModal
+        context={context}
+        opened={clientDeLaManifestation !== null}
+        client={clientDeLaManifestation}
+        onClose={() => setClientDeLaManifestation(null)}
+        onCreated={manifestationCreee}
+      />
 
       <PrestationCreateModal
         context={context}
