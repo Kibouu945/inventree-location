@@ -4,6 +4,7 @@ import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   ActionIcon,
   Alert,
+  Badge,
   Button,
   Group,
   Loader,
@@ -31,6 +32,7 @@ import { useCategoryOptions } from '../catalog/useCategoryOptions';
 import { DateTimeField, finSuivantLeDebut } from '../DateTimeField';
 
 import { canWriteOrganisation } from '../roles';
+import { EnTeteTriable, useLignesTriees, useTri } from '../TriColonne';
 import {
   apiErrorMessage,
   type Manifestation,
@@ -230,12 +232,26 @@ function ArticleAdder({
   );
 }
 
+type ColonnePresta =
+  | 'client'
+  | 'manifestation'
+  | 'nom'
+  | 'debut'
+  | 'lieu'
+  | 'articles';
+
 export function PrestationsTab({
-  context
+  context,
+  manifestationFiltre
 }: {
   context: InvenTreePluginContext;
+  /** Manifestation sur laquelle arriver préfiltré (point 4.2.5.1). */
+  manifestationFiltre?: { id: number; nom: string } | null;
 }) {
   const canWrite = canWriteOrganisation(context);
+  const { tri, basculer } = useTri<ColonnePresta>();
+  // Le filtre hérité de l'onglet Manifestations se retire d'un clic.
+  const [filtreLeve, setFiltreLeve] = useState(false);
 
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
@@ -280,9 +296,32 @@ export function PrestationsTab({
     context.queryClient
   );
 
-  const rows = Array.isArray(listQuery.data)
+  const brutes = Array.isArray(listQuery.data)
     ? listQuery.data
     : (listQuery.data?.results ?? []);
+
+  // Le clic sur le nombre de prestations d'une manifestation arrive ici.
+  const filtreActif = manifestationFiltre && !filtreLeve;
+  const filtrees = filtreActif
+    ? brutes.filter((p) => p.manifestation === manifestationFiltre.id)
+    : brutes;
+
+  const rows = useLignesTriees(filtrees, tri, (p, colonne) => {
+    switch (colonne) {
+      case 'client':
+        return p.client_nom;
+      case 'manifestation':
+        return p.manifestation_nom;
+      case 'nom':
+        return p.nom;
+      case 'debut':
+        return new Date(p.date_debut);
+      case 'lieu':
+        return p.lieu_detail?.nom;
+      case 'articles':
+        return p.lignes.length;
+    }
+  });
 
   const manifestationOptions = (manifestationsQuery.data?.results ?? []).map(
     (m) => ({ value: String(m.id), label: m.nom })
@@ -469,6 +508,27 @@ export function PrestationsTab({
         w={320}
       />
 
+      {filtreActif && (
+        <Group>
+          <Badge
+            size='lg'
+            variant='light'
+            rightSection={
+              <ActionIcon
+                size='xs'
+                variant='transparent'
+                aria-label='Retirer le filtre'
+                onClick={() => setFiltreLeve(true)}
+              >
+                ×
+              </ActionIcon>
+            }
+          >
+            Manifestation : {manifestationFiltre.nom}
+          </Badge>
+        </Group>
+      )}
+
       {listQuery.isError && (
         <Alert color='red' title='Erreur'>
           Impossible de charger les prestations.
@@ -485,11 +545,29 @@ export function PrestationsTab({
         <Table striped highlightOnHover>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>Nom</Table.Th>
-              <Table.Th>Manifestation</Table.Th>
-              <Table.Th>Lieu</Table.Th>
-              <Table.Th>Début</Table.Th>
-              <Table.Th>Articles</Table.Th>
+              <EnTeteTriable colonne='client' tri={tri} onTri={basculer}>
+                Client
+              </EnTeteTriable>
+              <EnTeteTriable colonne='manifestation' tri={tri} onTri={basculer}>
+                Manifestation
+              </EnTeteTriable>
+              <EnTeteTriable colonne='nom' tri={tri} onTri={basculer}>
+                Prestation
+              </EnTeteTriable>
+              <EnTeteTriable colonne='debut' tri={tri} onTri={basculer}>
+                Début
+              </EnTeteTriable>
+              <EnTeteTriable colonne='lieu' tri={tri} onTri={basculer}>
+                Lieu
+              </EnTeteTriable>
+              <EnTeteTriable
+                colonne='articles'
+                tri={tri}
+                onTri={basculer}
+                ta='right'
+              >
+                Articles
+              </EnTeteTriable>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -499,13 +577,14 @@ export function PrestationsTab({
                 style={{ cursor: canWrite ? 'pointer' : 'default' }}
                 onClick={() => canWrite && openEdit(prestation)}
               >
-                <Table.Td>{prestation.nom}</Table.Td>
+                <Table.Td>{prestation.client_nom ?? '—'}</Table.Td>
                 <Table.Td>{prestation.manifestation_nom}</Table.Td>
-                <Table.Td>{prestation.lieu_detail?.nom ?? '—'}</Table.Td>
+                <Table.Td>{prestation.nom}</Table.Td>
                 <Table.Td>
                   {new Date(prestation.date_debut).toLocaleString()}
                 </Table.Td>
-                <Table.Td>{prestation.lignes.length}</Table.Td>
+                <Table.Td>{prestation.lieu_detail?.nom ?? '—'}</Table.Td>
+                <Table.Td ta='right'>{prestation.lignes.length}</Table.Td>
               </Table.Tr>
             ))}
           </Table.Tbody>

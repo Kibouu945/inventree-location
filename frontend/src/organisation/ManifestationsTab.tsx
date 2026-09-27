@@ -2,6 +2,7 @@
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Group,
@@ -25,6 +26,7 @@ import { optionsActives } from '../backoffice/optionsActives';
 import { DateTimeField, finSuivantLeDebut } from '../DateTimeField';
 
 import { canWriteOrganisation } from '../roles';
+import { EnTeteTriable, useLignesTriees, useTri } from '../TriColonne';
 import { apiErrorMessage, type Manifestation, type Page } from './types';
 
 const MANIFESTATIONS_URL = '/plugin/inventree-location/manifestations/';
@@ -68,12 +70,24 @@ function emptyValues(): FormValues {
   };
 }
 
+type ColonneManif =
+  | 'client'
+  | 'nom'
+  | 'debut'
+  | 'fin'
+  | 'statut'
+  | 'prestations';
+
 export function ManifestationsTab({
-  context
+  context,
+  onVoirPrestations
 }: {
   context: InvenTreePluginContext;
+  /** Ouvre l'onglet Prestations prérempli sur cette manifestation. */
+  onVoirPrestations?: (manifestation: Manifestation) => void;
 }) {
   const canWrite = canWriteOrganisation(context);
+  const { tri, basculer } = useTri<ColonneManif>();
 
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
@@ -144,9 +158,26 @@ export function ManifestationsTab({
     context.queryClient
   );
 
-  const rows = Array.isArray(listQuery.data)
+  const lignes = Array.isArray(listQuery.data)
     ? listQuery.data
     : (listQuery.data?.results ?? []);
+
+  const rows = useLignesTriees(lignes, tri, (m, colonne) => {
+    switch (colonne) {
+      case 'client':
+        return m.client_nom;
+      case 'nom':
+        return m.nom;
+      case 'debut':
+        return new Date(m.date_debut);
+      case 'fin':
+        return new Date(m.date_fin);
+      case 'statut':
+        return m.statut_effectif ?? m.statut;
+      case 'prestations':
+        return m.prestations_count;
+    }
+  });
 
   const clients = clientsQuery.data?.results ?? [];
 
@@ -282,12 +313,29 @@ export function ManifestationsTab({
         <Table striped highlightOnHover>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>Nom</Table.Th>
-              <Table.Th>Client</Table.Th>
-              <Table.Th>Début</Table.Th>
-              <Table.Th>Fin</Table.Th>
-              <Table.Th>Statut</Table.Th>
-              <Table.Th>Prestations</Table.Th>
+              <EnTeteTriable colonne='client' tri={tri} onTri={basculer}>
+                Client
+              </EnTeteTriable>
+              <EnTeteTriable colonne='nom' tri={tri} onTri={basculer}>
+                Nom de la manifestation
+              </EnTeteTriable>
+              <EnTeteTriable colonne='debut' tri={tri} onTri={basculer}>
+                Début
+              </EnTeteTriable>
+              <EnTeteTriable colonne='fin' tri={tri} onTri={basculer}>
+                Fin
+              </EnTeteTriable>
+              <EnTeteTriable colonne='statut' tri={tri} onTri={basculer}>
+                Statut
+              </EnTeteTriable>
+              <EnTeteTriable
+                colonne='prestations'
+                tri={tri}
+                onTri={basculer}
+                ta='right'
+              >
+                Prestations
+              </EnTeteTriable>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -297,8 +345,8 @@ export function ManifestationsTab({
                 style={{ cursor: canWrite ? 'pointer' : 'default' }}
                 onClick={() => canWrite && openEdit(manifestation)}
               >
-                <Table.Td>{manifestation.nom}</Table.Td>
                 <Table.Td>{manifestation.client_nom || '—'}</Table.Td>
+                <Table.Td>{manifestation.nom}</Table.Td>
                 <Table.Td>
                   {new Date(manifestation.date_debut).toLocaleDateString()}
                 </Table.Td>
@@ -316,7 +364,26 @@ export function ManifestationsTab({
                     {manifestation.statut_effectif ?? manifestation.statut}
                   </Badge>
                 </Table.Td>
-                <Table.Td>{manifestation.prestations_count}</Table.Td>
+                <Table.Td ta='right'>
+                  {/*
+                    Le chiffre mène à l'onglet Prestations déjà filtré sur
+                    cette manifestation (point 4.2.5.1).
+                  */}
+                  {manifestation.prestations_count > 0 && onVoirPrestations ? (
+                    <Anchor
+                      component='button'
+                      type='button'
+                      onClick={(event: React.MouseEvent) => {
+                        event.stopPropagation();
+                        onVoirPrestations(manifestation);
+                      }}
+                    >
+                      {manifestation.prestations_count}
+                    </Anchor>
+                  ) : (
+                    manifestation.prestations_count
+                  )}
+                </Table.Td>
               </Table.Tr>
             ))}
           </Table.Tbody>

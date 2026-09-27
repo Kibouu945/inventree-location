@@ -334,7 +334,9 @@ class ReservationListCreateView(generics.ListCreateAPIView):
         """Retourne les réservations, filtrées par statut, période et recherche."""
 
         queryset = (
-            Reservation.objects.select_related("prestation", "demandeur")
+            Reservation.objects.select_related(
+                "prestation__manifestation__client", "demandeur"
+            )
             .prefetch_related("lignes")
             .all()
             .order_by("-date_demande")
@@ -2582,7 +2584,9 @@ def _prestation_queryset():
     """Queryset commun aux vues prestation, avec relations préchargées."""
 
     return (
-        Prestation.objects.select_related("manifestation", "lieu")
+        # `manifestation__client` : la colonne « Client » du tableau des
+        # fiches, sans une requête par prestation (point 4.2.5.2).
+        Prestation.objects.select_related("manifestation__client", "lieu")
         .prefetch_related("lignes_prestation__part")
         .all()
     )
