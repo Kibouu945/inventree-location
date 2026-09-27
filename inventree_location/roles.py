@@ -26,6 +26,7 @@ ROLE_WRITE_RULESETS: dict[str, frozenset[str]] = {
     ADMIN: frozenset({
         "part_category",
         "part",
+        "bom",
         "stock_location",
         "stock",
         "purchase_order",
@@ -98,17 +99,26 @@ ROLE_VIEW_RULESETS: dict[str, frozenset[str]] = {
 }
 
 
+#: Seule exception à « on désactive, on ne supprime pas » (SCRUM-111) : une
+#: ligne de nomenclature n'a pas d'état inactif, un pack mal composé se
+#: corrige en retirant l'élément.
+ROLE_DELETE_RULESETS: dict[str, frozenset[str]] = {
+    ADMIN: frozenset({"bom"}),
+}
+
+
 def ruleset_permissions(role: str, ruleset: str) -> dict[str, bool]:
     """Droits attendus pour ce rôle sur ce ruleset InvenTree."""
 
     writable = ruleset in ROLE_WRITE_RULESETS.get(role, frozenset())
     viewable = ruleset in ROLE_VIEW_RULESETS.get(role, frozenset())
+    deletable = ruleset in ROLE_DELETE_RULESETS.get(role, frozenset())
 
     return {
         "can_view": viewable or writable,
         "can_add": writable,
         "can_change": writable,
-        "can_delete": False,
+        "can_delete": deletable,
     }
 
 

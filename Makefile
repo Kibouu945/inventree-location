@@ -41,6 +41,7 @@ provision: provision-plugin
 	make manage cmd="seed_demo"
 	make manage cmd="provision_role_permissions"
 	make manage cmd="provision_dashboards"
+	make manage cmd="renommer_liste_materiaux"
 
 clean:
 	docker compose down -v
