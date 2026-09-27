@@ -547,6 +547,7 @@ export function ReservationsList({
       )}
 
       <Modal
+        closeOnClickOutside={false}
         opened={modalState.open}
         onClose={closeModal}
         size='xl'
@@ -567,6 +568,7 @@ export function ReservationsList({
       </Modal>
 
       <Modal
+        closeOnClickOutside={false}
         opened={checkinModal.open}
         onClose={closeCheckinModal}
         size='xl'
@@ -582,6 +584,7 @@ export function ReservationsList({
       </Modal>
 
       <Modal
+        closeOnClickOutside={false}
         opened={retourModal.open}
         onClose={closeRetourModal}
         size='xl'
@@ -597,6 +600,7 @@ export function ReservationsList({
       </Modal>
 
       <Modal
+        closeOnClickOutside={false}
         opened={cancelModal.open}
         onClose={() => setCancelModal({ open: false })}
         title='Annuler la réservation'

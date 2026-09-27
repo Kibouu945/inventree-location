@@ -197,6 +197,7 @@ export function PrestationCreateModal({
 
   return (
     <Modal
+      closeOnClickOutside={false}
       opened={opened}
       onClose={onClose}
       title='Nouvelle prestation'

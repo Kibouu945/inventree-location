@@ -344,6 +344,7 @@ function BonsDeLaPrestation({
       })}
 
       <Modal
+        closeOnClickOutside={false}
         opened={bonEdite !== null}
         onClose={() => setBonEdite(null)}
         size='xl'
@@ -464,6 +465,7 @@ function PrestationsDeLaManifestation({
       })}
 
       <Modal
+        closeOnClickOutside={false}
         opened={prestationDuBon !== null}
         onClose={() => setPrestationDuBon(null)}
         size='xl'

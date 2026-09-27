@@ -81,6 +81,7 @@ export function DeliveryStatusForm({
 
   return (
     <Modal
+      closeOnClickOutside={false}
       opened={delivery != null}
       onClose={close}
       title={delivery ? `Livraison ${delivery.numero}` : ''}

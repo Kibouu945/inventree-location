@@ -393,6 +393,7 @@ export function PartsBackOffice({
       </Group>
 
       <Modal
+        closeOnClickOutside={false}
         opened={modalState.open}
         onClose={closeModal}
         size='xl'

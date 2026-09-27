@@ -324,6 +324,7 @@ export function ManifestationsTab({
       )}
 
       <Modal
+        closeOnClickOutside={false}
         opened={modalOpen}
         onClose={() => setModalOpen(false)}
         size='lg'

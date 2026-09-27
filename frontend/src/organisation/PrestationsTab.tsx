@@ -513,6 +513,7 @@ export function PrestationsTab({
       )}
 
       <Modal
+        closeOnClickOutside={false}
         opened={modalOpen}
         onClose={() => setModalOpen(false)}
         size='xl'

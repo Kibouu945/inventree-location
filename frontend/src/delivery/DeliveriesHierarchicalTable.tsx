@@ -787,6 +787,7 @@ export function DeliveriesHierarchicalTable({
       )}
 
       <Modal
+        closeOnClickOutside={false}
         opened={photoModal !== null}
         onClose={() => setPhotoModal(null)}
         title={`Photo de livraison — ${photoModal?.partName ?? ''}`}

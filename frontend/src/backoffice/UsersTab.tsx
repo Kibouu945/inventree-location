@@ -325,6 +325,7 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
       </Group>
 
       <Modal
+        closeOnClickOutside={false}
         opened={modalState.open}
         onClose={closeModal}
         size='lg'

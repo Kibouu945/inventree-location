@@ -259,6 +259,7 @@ export function LieuxTab({ context }: { context: InvenTreePluginContext }) {
       )}
 
       <Modal
+        closeOnClickOutside={false}
         opened={modalOpen}
         onClose={() => {
           setModalOpen(false);
