@@ -378,17 +378,21 @@ class InvenTreeLocation(
         panels = []
 
         if context.get("target_model") == "part":
+            # Le drapeau « louable » se cherche d'abord sur la fiche de
+            # l'article : le titre et l'icône du squelette de plugin rendaient
+            # ce panneau introuvable. Recette Tassin du 27/09, point 4.7.1.
             panels.append({
                 "key": "inventree-location-panel",
-                "title": "InvenTree Location",
-                "description": "Custom panel description",
-                "icon": "ti:mood-smile:outline",
+                "title": "Location — paramètres",
+                "description": (
+                    "Drapeau louable, consommable et seuils d'alerte de stock"
+                ),
+                "icon": "ti:tags:outline",
                 "source": self.plugin_static_file(
                     "Panel.js:renderInvenTreeLocationPanel"
                 ),
                 "context": {
                     "settings": self.get_settings_dict(),
-                    "foo": "bar",
                 },
             })
 

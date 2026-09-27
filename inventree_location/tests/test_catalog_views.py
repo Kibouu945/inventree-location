@@ -61,6 +61,20 @@ def user(db):
 
 
 @pytest.fixture
+def admin(db):
+    """Déclarer un article louable revient à l'admin seul (ADM-02)."""
+
+    from django.contrib.auth.models import Group
+
+    from inventree_location import roles
+
+    group, _created = Group.objects.get_or_create(name=roles.ADMIN)
+    account = User.objects.create_user(username="admine", password="pwd12345")
+    account.groups.add(group)
+    return account
+
+
+@pytest.fixture
 def categorie(db):
     return PartCategory.objects.create(name="Tentes")
 
@@ -271,13 +285,13 @@ class TestRentableFlagBulkUpdate:
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
     @pytest.mark.django_db
-    def test_bulk_sets_is_rentable_and_creates_rows(self, factory, user, parts):
+    def test_bulk_sets_is_rentable_and_creates_rows(self, factory, admin, parts):
         payload = {
             "part_ids": [parts["tente"].pk, parts["gobelet"].pk],
             "is_rentable": False,
         }
         request = factory.patch(BULK_URL, payload, format="json")
-        force_authenticate(request, user=user)
+        force_authenticate(request, user=admin)
 
         response = RentableFlagBulkUpdateView.as_view()(request)
 
@@ -288,19 +302,19 @@ class TestRentableFlagBulkUpdate:
         assert RentableItem.objects.get(part=parts["gobelet"]).is_rentable is False
 
     @pytest.mark.django_db
-    def test_empty_part_ids_returns_400(self, factory, user):
+    def test_empty_part_ids_returns_400(self, factory, admin):
         request = factory.patch(BULK_URL, {"is_rentable": True}, format="json")
-        force_authenticate(request, user=user)
+        force_authenticate(request, user=admin)
 
         response = RentableFlagBulkUpdateView.as_view()(request)
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     @pytest.mark.django_db
-    def test_missing_flags_returns_400(self, factory, user, parts):
+    def test_missing_flags_returns_400(self, factory, admin, parts):
         request = factory.patch(
             BULK_URL, {"part_ids": [parts["tente"].pk]}, format="json"
         )
-        force_authenticate(request, user=user)
+        force_authenticate(request, user=admin)
 
         response = RentableFlagBulkUpdateView.as_view()(request)
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -495,11 +509,11 @@ class TestRentablePartDetail:
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
     @pytest.mark.django_db
-    def test_patch_creates_and_updates(self, factory, user, parts):
+    def test_patch_creates_and_updates(self, factory, admin, parts):
         request = factory.patch(
             self._url(parts["tente"].pk), {"is_rentable": False}, format="json"
         )
-        force_authenticate(request, user=user)
+        force_authenticate(request, user=admin)
 
         response = RentablePartDetailView.as_view()(request, pk=parts["tente"].pk)
 

@@ -100,7 +100,8 @@ describe('canCheckinReturns', () => {
 describe('canWriteCatalog', () => {
   it.each([
     ['admin', true],
-    ['gestionnaire', true],
+    // Le gestionnaire loue, il ne déclare pas ce qui entre au catalogue (ADM-02).
+    ['gestionnaire', false],
     ['magasinier', false],
     ['livreur', false],
     ['lecteur', false]

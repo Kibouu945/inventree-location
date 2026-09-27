@@ -12,7 +12,9 @@ export const ACHETEUR = 'acheteur';
 
 // Rôles autorisés en écriture, alignés sur permissions.py.
 export const RESERVATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE];
-export const CATALOG_WRITE_ROLES = [ADMIN, GESTIONNAIRE];
+// Déclarer un article louable revient à l'admin seul : le gestionnaire loue
+// le matériel, il ne décide pas de ce qui entre au catalogue (ADM-02).
+export const CATALOG_WRITE_ROLES = [ADMIN];
 export const ORGANISATION_WRITE_ROLES = [ADMIN, GESTIONNAIRE];
 export const RESERVATION_ARBITRAGE_ROLES = [ADMIN, GESTIONNAIRE];
 export const MARQUER_LIVREE_ROLES = [ADMIN, GESTIONNAIRE, LIVREUR];

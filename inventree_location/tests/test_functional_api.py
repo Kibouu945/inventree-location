@@ -109,14 +109,25 @@ def test_lecteur_cannot_bulk_update_catalog():
 def test_rentable_detail_roundtrip():
     part = Part.objects.create(name="Tente")
     client, _ = client_for(roles.GESTIONNAIRE, username="gest")
+    # Le gestionnaire lit le catalogue ; seul l'admin déclare un article
+    # louable (ADM-02).
+    admin, _ = client_for(roles.ADMIN, username="admine")
 
     # Défauts quand aucun RentableItem n'existe.
     get_default = client.get(f"{BASE}/catalog/{part.pk}/rentable/")
     assert get_default.status_code == status.HTTP_200_OK
     assert get_default.data["is_rentable"] is True
 
+    # Le gestionnaire ne peut pas écrire.
+    refus = client.patch(
+        f"{BASE}/catalog/{part.pk}/rentable/",
+        {"is_rentable": False},
+        format="json",
+    )
+    assert refus.status_code == status.HTTP_403_FORBIDDEN
+
     # Mise à jour.
-    patched = client.patch(
+    patched = admin.patch(
         f"{BASE}/catalog/{part.pk}/rentable/",
         {"is_rentable": False, "consommable": True},
         format="json",
