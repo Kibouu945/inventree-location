@@ -168,6 +168,11 @@ const HISTOGRAMME = onglet(
 
 //: Ordre = journée de travail du métier. Le premier écran est celui qu'on doit
 //: voir en arrivant.
+//:
+//: `MANIFESTATIONS` figure aussi aux postes qui n'écrivent pas : l'arborescence
+//: masque d'elle-même ses actions via `canWriteOrganisation` et
+//: `canWriteReservations`, et le serveur refuse l'écriture de son côté.
+//: Recette Tassin du 27/09, point 4.2.3.
 export const POSTES: Record<string, PosteDefinition> = {
   gestionnaire: {
     titre: 'Poste gestionnaire client',
@@ -191,23 +196,30 @@ export const POSTES: Record<string, PosteDefinition> = {
     roles: [ADMIN, MAGASINIER],
     // Le catalogue reste faute d'écran stock dédié : c'est le seul qui donne
     // l'état article par article.
-    onglets: [RAMASSAGES, CATALOGUE, ALERTES, RESERVATIONS, HISTOGRAMME]
+    onglets: [
+      RAMASSAGES,
+      CATALOGUE,
+      ALERTES,
+      RESERVATIONS,
+      MANIFESTATIONS,
+      HISTOGRAMME
+    ]
   },
   livreur: {
     titre: 'Poste livreur',
     roles: [ADMIN, LIVREUR],
-    onglets: [LIVRAISONS, RAMASSAGES]
+    onglets: [LIVRAISONS, RAMASSAGES, MANIFESTATIONS]
   },
   acheteur: {
     titre: 'Poste acheteur',
     roles: [ADMIN, ACHETEUR],
     // Les commandes fournisseurs passent par les écrans natifs.
-    onglets: [ALERTES, CATALOGUE]
+    onglets: [ALERTES, CATALOGUE, MANIFESTATIONS]
   },
   lecteur: {
     titre: 'Poste lecture',
     roles: [ADMIN, LECTEUR],
-    onglets: [PLANNING, RESERVATIONS, CATALOGUE, CONFLITS]
+    onglets: [MANIFESTATIONS, PLANNING, RESERVATIONS, CATALOGUE, CONFLITS]
   },
   admin: {
     titre: 'Poste administration',
