@@ -31,6 +31,7 @@ import { PartKindBadge } from '../catalog/PartKindBadge';
 import type { CatalogPage } from '../catalog/types';
 import { useCategoryOptions } from '../catalog/useCategoryOptions';
 import { DateTimeField, finSuivantLeDebut } from '../DateTimeField';
+import { FiltreVirtuel, type Virtuel } from '../FiltreVirtuel';
 
 import { canWriteOrganisation } from '../roles';
 import { EnTeteTriable, useLignesTriees, useTri } from '../TriColonne';
@@ -259,6 +260,9 @@ export function PrestationsTab({
     null
   ]);
 
+  // Point 4.5.1 : masquer les prestations qui ne portent que des services.
+  const [virtuel, setVirtuel] = useState<Virtuel>(null);
+
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
   const [modalOpen, setModalOpen] = useState(false);
@@ -269,7 +273,7 @@ export function PrestationsTab({
 
   const listQuery = useQuery<Prestation[] | Page<Prestation>>(
     {
-      queryKey: ['prestations', debouncedSearch, periode],
+      queryKey: ['prestations', debouncedSearch, periode, virtuel],
       queryFn: async () => {
         const params: Record<string, string> = {};
 
@@ -283,6 +287,10 @@ export function PrestationsTab({
 
         if (periode[1]) {
           params.to = periode[1];
+        }
+
+        if (virtuel) {
+          params.virtuel = virtuel;
         }
 
         const response = await context.api.get(PRESTATIONS_URL, { params });
@@ -536,6 +544,8 @@ export function PrestationsTab({
           clearable
           w={280}
         />
+
+        <FiltreVirtuel value={virtuel} onChange={setVirtuel} />
       </Group>
 
       {filtreActif && (

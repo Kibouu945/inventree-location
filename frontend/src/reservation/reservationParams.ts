@@ -4,6 +4,8 @@ export interface ReservationFiltersState {
   categories: number[];
   /** Filtre client du tableau des bons (point 4.2.5.3). */
   client: string | null;
+  /** Filtre « Virtuel » du point 4.5.1 : `oui`, `non`, ou rien. */
+  virtuel: string | null;
   dateRange: [string | null, string | null];
 }
 
@@ -12,6 +14,7 @@ export const DEFAULT_RESERVATION_FILTERS: ReservationFiltersState = {
   statuts: [],
   categories: [],
   client: null,
+  virtuel: null,
   dateRange: [null, null]
 };
 
@@ -36,6 +39,10 @@ export function buildReservationQuery(
     params.client = filters.client;
   }
 
+  if (filters.virtuel) {
+    params.virtuel = filters.virtuel;
+  }
+
   if (filters.dateRange[0]) {
     params.date_from = filters.dateRange[0];
   }
@@ -53,6 +60,7 @@ export const RESERVATION_URL_KEYS = [
   'resa_statut',
   'resa_cat',
   'resa_client',
+  'resa_virtuel',
   'resa_from',
   'resa_to'
 ];
@@ -76,6 +84,10 @@ export function serializeReservationFilters(
 
   if (filters.client) {
     search.set('resa_client', filters.client);
+  }
+
+  if (filters.virtuel) {
+    search.set('resa_virtuel', filters.virtuel);
   }
 
   if (filters.dateRange[0]) {
@@ -105,6 +117,11 @@ function parseIntList(value: string | null): number[] {
   }
 
   return Array.from(seen);
+}
+
+/** L'URL est éditable à la main : une valeur inconnue vaut « pas de filtre ». */
+function parseVirtuel(value: string | null): string | null {
+  return value === 'oui' || value === 'non' ? value : null;
 }
 
 function parseStringList(value: string | null): string[] {
@@ -137,6 +154,7 @@ export function parseReservationFilters(
     statuts: parseStringList(search.get('resa_statut')),
     categories: parseIntList(search.get('resa_cat')),
     client: search.get('resa_client') || null,
+    virtuel: parseVirtuel(search.get('resa_virtuel')),
     dateRange: [from || null, to || null]
   };
 }

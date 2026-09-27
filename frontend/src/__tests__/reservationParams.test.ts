@@ -14,6 +14,7 @@ describe('reservationParams', () => {
       statuts: ['soumise', 'validee'],
       categories: [3, 7],
       client: null,
+      virtuel: null,
       dateRange: ['2026-06-01', '2026-06-02']
     });
 
@@ -28,6 +29,7 @@ describe('reservationParams', () => {
       statuts: ['soumise', 'validee'],
       categories: [3, 7],
       client: null,
+      virtuel: null,
       dateRange: ['2026-06-01', '2026-06-02']
     });
   });
@@ -41,6 +43,7 @@ describe('reservationParams', () => {
         statuts: ['brouillon'],
         categories: [4],
         client: null,
+        virtuel: null,
         dateRange: ['2026-01-01', null]
       })
     ).toEqual({
@@ -68,5 +71,27 @@ describe('reservationParams', () => {
     const query = serializeReservationFilters(filtres);
     expect(query).toContain('resa_client=12');
     expect(parseReservationFilters(`?${query}`).client).toBe('12');
+  });
+  it('garde le filtre virtuel dans l’URL et la requête', () => {
+    const filtres = { ...DEFAULT_RESERVATION_FILTERS, virtuel: 'non' };
+
+    expect(buildReservationQuery(filtres)).toEqual({ virtuel: 'non' });
+
+    const query = serializeReservationFilters(filtres);
+    expect(query).toContain('resa_virtuel=non');
+    expect(parseReservationFilters(`?${query}`).virtuel).toBe('non');
+  });
+
+  it('ignore une valeur de virtuel inconnue dans l’URL', () => {
+    // L'URL se partage et se retouche à la main.
+    expect(
+      parseReservationFilters('?resa_virtuel=peut-etre').virtuel
+    ).toBeNull();
+  });
+
+  it('n’envoie pas le filtre virtuel quand il est vide', () => {
+    expect(
+      buildReservationQuery(DEFAULT_RESERVATION_FILTERS).virtuel
+    ).toBeUndefined();
   });
 });

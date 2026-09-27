@@ -22,6 +22,7 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { useCategoryOptions } from '../catalog/useCategoryOptions';
+import { FiltreVirtuel, type Virtuel } from '../FiltreVirtuel';
 
 import {
   canArbitrateReservations,
@@ -337,6 +338,10 @@ export function ReservationsList({
           searchable
           clearable
           w={240}
+        />
+        <FiltreVirtuel
+          value={filters.virtuel as Virtuel}
+          onChange={(valeur) => updateFilters({ virtuel: valeur })}
         />
         <MultiSelect
           label='Catégories'

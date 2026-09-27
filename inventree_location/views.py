@@ -31,7 +31,7 @@ from .conflicts import (
     list_current_conflicts,
     sync_conflict_registry,
 )
-from . import roles
+from . import roles, virtuel
 from .models import (
     ConflictHistory,
     ConflictState,
@@ -376,6 +376,11 @@ class ReservationListCreateView(generics.ListCreateAPIView):
             queryset = queryset.filter(
                 lignes__part__category_id__in=categories
             ).distinct()
+
+        # Filtre « Virtuel » du point 4.5.1.
+        queryset = virtuel.filtrer(
+            queryset, self.request.query_params.get("virtuel"), lignes="lignes"
+        )
 
         date_from = self.request.query_params.get("date_from")
         date_to = self.request.query_params.get("date_to")
@@ -2622,6 +2627,13 @@ class PrestationListCreateView(generics.ListCreateAPIView):
 
         if manifestation_id:
             queryset = queryset.filter(manifestation_id=manifestation_id)
+
+        # Filtre « Virtuel » du point 4.5.1.
+        queryset = virtuel.filtrer(
+            queryset,
+            self.request.query_params.get("virtuel"),
+            lignes="lignes_prestation",
+        )
 
         depuis = self.request.query_params.get("from")
         jusqua = self.request.query_params.get("to")
