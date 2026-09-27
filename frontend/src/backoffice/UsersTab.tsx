@@ -172,7 +172,9 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
         await context.api.post(USERS_URL, payload);
       }
 
-      await usersQuery.refetch();
+      await context.queryClient.invalidateQueries({
+        queryKey: ['backoffice-users']
+      });
       closeModal();
     } catch (error: unknown) {
       setFormError(
@@ -190,7 +192,9 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
       });
 
       setFormError('');
-      await usersQuery.refetch();
+      await context.queryClient.invalidateQueries({
+        queryKey: ['backoffice-users']
+      });
     } catch (error: unknown) {
       setFormError(
         apiErrorMessage(
@@ -241,6 +245,7 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
         <Table striped highlightOnHover>
           <Table.Thead>
             <Table.Tr>
+              <Table.Th>Identifiant</Table.Th>
               <Table.Th>Utilisateur</Table.Th>
               <Table.Th>Contact</Table.Th>
               <Table.Th>Rôle</Table.Th>
@@ -253,12 +258,18 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
             {rows.map((user) => (
               <Table.Tr key={user.id}>
                 <Table.Td>
-                  <Stack gap={0}>
-                    <Text fw={600}>{userDisplayName(user)}</Text>
-                    <Text size='xs' c='dimmed'>
-                      @{user.username}
-                    </Text>
-                  </Stack>
+                  {/*
+                    L'identifiant de connexion a sa colonne : c'est lui qu'on
+                    communique, et il se lisait en gris sous le nom complet.
+                    Recette Tassin du 27/09, point 4.4.
+                  */}
+                  <Text ff='monospace' size='sm'>
+                    {user.username}
+                  </Text>
+                </Table.Td>
+
+                <Table.Td>
+                  <Text fw={600}>{userDisplayName(user)}</Text>
                 </Table.Td>
 
                 <Table.Td>
