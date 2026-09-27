@@ -57,7 +57,14 @@ function formFromClient(client: BackOfficeClient): BackOfficeClientFormValues {
   };
 }
 
-export function ClientsTab({ context }: { context: InvenTreePluginContext }) {
+export function ClientsTab({
+  context,
+  onClientCree
+}: {
+  context: InvenTreePluginContext;
+  /** Signale le client tout juste créé, pour enchaîner sur son contact. */
+  onClientCree?: (client: { id: number; nom: string }) => void;
+}) {
   const { search, debouncedSearch, page, setPage, updateSearch } =
     usePagedSearch();
 
@@ -67,6 +74,12 @@ export function ClientsTab({ context }: { context: InvenTreePluginContext }) {
   );
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
+  // Client à annoncer une fois la modale vraiment refermée : ouvrir celle du
+  // contact pendant la transition de sortie laisse les deux à l'écran.
+  const [clientAAnnoncer, setClientAAnnoncer] = useState<{
+    id: number;
+    nom: string;
+  } | null>(null);
 
   const clientsQuery = useQuery<Page<BackOfficeClient>>(
     {
@@ -118,6 +131,7 @@ export function ClientsTab({ context }: { context: InvenTreePluginContext }) {
   async function saveClient() {
     setSaving(true);
     setFormError('');
+    let nouveauClient: { id: number; nom: string } | null = null;
 
     try {
       const payload = {
@@ -138,7 +152,10 @@ export function ClientsTab({ context }: { context: InvenTreePluginContext }) {
           payload
         );
       } else {
-        await context.api.post(CLIENTS_URL, payload);
+        const cree = await context.api.post(CLIENTS_URL, payload);
+        // Un client sans interlocuteur oblige à revenir plus tard : on
+        // enchaîne sur son premier contact (point 4.4.1).
+        nouveauClient = { id: cree.data.id, nom: cree.data.nom };
       }
 
       // Le sélecteur de client de l'onglet utilisateurs lit une autre clé.
@@ -147,6 +164,8 @@ export function ClientsTab({ context }: { context: InvenTreePluginContext }) {
       });
       await clientsQuery.refetch();
       closeModal();
+
+      setClientAAnnoncer(nouveauClient);
     } catch (error: unknown) {
       setFormError(
         apiErrorMessage(error, "Impossible d'enregistrer le client.")
@@ -257,6 +276,12 @@ export function ClientsTab({ context }: { context: InvenTreePluginContext }) {
         closeOnClickOutside={false}
         opened={modalState.open}
         onClose={closeModal}
+        onExitTransitionEnd={() => {
+          if (clientAAnnoncer) {
+            onClientCree?.(clientAAnnoncer);
+            setClientAAnnoncer(null);
+          }
+        }}
         size='lg'
         title={
           modalState.client
