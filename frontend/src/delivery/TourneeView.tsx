@@ -86,12 +86,37 @@ export function TourneeView({
   }
 
   if (stops.length === 0) {
+    // Deux situations très différentes, que le même message confondait :
+    // rien à livrer ce jour-là, ou des livraisons sans adresse géocodée.
+    // « Aucun arrêt géolocalisé » laissait croire à une panne de carte.
+    // Recette Tassin du 27/09, points 4.8.2 et 4.8.3.
+    const rienDuTout = deliveries.length === 0 && ramassages.length === 0;
+
     return (
-      <Text c='dimmed'>
-        Aucun arrêt géolocalisé sur cette période.
-        {sansCoordonnees > 0 &&
-          ` ${sansCoordonnees} entrée(s) sont sans coordonnées GPS : renseignez l'adresse du lieu pour les voir ici.`}
-      </Text>
+      <Alert
+        color={rienDuTout ? 'blue' : 'orange'}
+        title={
+          rienDuTout
+            ? 'Aucune livraison sur cette période'
+            : 'Aucun lieu géolocalisé'
+        }
+      >
+        {rienDuTout ? (
+          <Text size='sm'>
+            Il n’y a rien à livrer ni à ramasser sur la période choisie. Le
+            filtre <strong>Quand</strong> est sans doute sur «&nbsp;Aujourd’hui
+            »&nbsp;: passez sur <strong>À venir</strong> ou{' '}
+            <strong>Tout</strong> pour voir les tournées des prochains jours.
+          </Text>
+        ) : (
+          <Text size='sm'>
+            {sansCoordonnees} entrée(s) sont prévues sur cette période mais leur
+            lieu n’a pas de coordonnées GPS. Renseignez l’adresse du lieu pour
+            les faire apparaître sur la carte ; elles restent visibles dans les
+            vues <strong>Liste</strong> et <strong>Arborescence</strong>.
+          </Text>
+        )}
+      </Alert>
     );
   }
 
