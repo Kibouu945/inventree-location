@@ -21,6 +21,7 @@ import {
   Title,
   Tooltip
 } from '@mantine/core';
+import { DatePickerInput } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -252,6 +253,11 @@ export function PrestationsTab({
   const { tri, basculer } = useTri<ColonnePresta>();
   // Le filtre hérité de l'onglet Manifestations se retire d'un clic.
   const [filtreLeve, setFiltreLeve] = useState(false);
+  // Filtre par période, demandé sur les deux onglets (point 4.2.5).
+  const [periode, setPeriode] = useState<[string | null, string | null]>([
+    null,
+    null
+  ]);
 
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
@@ -263,11 +269,23 @@ export function PrestationsTab({
 
   const listQuery = useQuery<Prestation[] | Page<Prestation>>(
     {
-      queryKey: ['prestations', debouncedSearch],
+      queryKey: ['prestations', debouncedSearch, periode],
       queryFn: async () => {
-        const response = await context.api.get(PRESTATIONS_URL, {
-          params: debouncedSearch ? { search: debouncedSearch } : {}
-        });
+        const params: Record<string, string> = {};
+
+        if (debouncedSearch) {
+          params.search = debouncedSearch;
+        }
+
+        if (periode[0]) {
+          params.from = periode[0];
+        }
+
+        if (periode[1]) {
+          params.to = periode[1];
+        }
+
+        const response = await context.api.get(PRESTATIONS_URL, { params });
         return response.data;
       }
     },
@@ -500,13 +518,25 @@ export function PrestationsTab({
         {canWrite && <Button onClick={openCreate}>Nouvelle prestation</Button>}
       </Group>
 
-      <TextInput
-        label='Recherche'
-        placeholder='Nom de la prestation ou manifestation…'
-        value={search}
-        onChange={(event) => setSearch(event.currentTarget.value)}
-        w={320}
-      />
+      <Group align='flex-end' gap='md'>
+        <TextInput
+          label='Recherche'
+          placeholder='Nom de la prestation ou manifestation…'
+          value={search}
+          onChange={(event) => setSearch(event.currentTarget.value)}
+          w={320}
+        />
+
+        <DatePickerInput
+          type='range'
+          label='Période'
+          placeholder='Toutes les dates'
+          value={periode}
+          onChange={setPeriode}
+          clearable
+          w={280}
+        />
+      </Group>
 
       {filtreActif && (
         <Group>

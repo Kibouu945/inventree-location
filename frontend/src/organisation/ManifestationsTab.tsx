@@ -16,6 +16,7 @@ import {
   TextInput,
   Title
 } from '@mantine/core';
+import { DatePickerInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
@@ -88,6 +89,11 @@ export function ManifestationsTab({
 }) {
   const canWrite = canWriteOrganisation(context);
   const { tri, basculer } = useTri<ColonneManif>();
+  // Filtre par période, demandé sur les deux onglets (point 4.2.5).
+  const [periode, setPeriode] = useState<[string | null, string | null]>([
+    null,
+    null
+  ]);
 
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
@@ -99,7 +105,7 @@ export function ManifestationsTab({
 
   const listQuery = useQuery<Manifestation[] | Page<Manifestation>>(
     {
-      queryKey: ['manifestations', debouncedSearch, clientFiltre],
+      queryKey: ['manifestations', debouncedSearch, clientFiltre, periode],
       queryFn: async () => {
         // Deux filtres distincts : au téléphone on cherche par client, dans
         // une liste on cherche par nom. Les envoyer ensemble les cumule.
@@ -111,6 +117,14 @@ export function ManifestationsTab({
 
         if (clientFiltre) {
           params.client = clientFiltre;
+        }
+
+        if (periode[0]) {
+          params.from = periode[0];
+        }
+
+        if (periode[1]) {
+          params.to = periode[1];
         }
 
         const response = await context.api.get(MANIFESTATIONS_URL, { params });
@@ -293,6 +307,16 @@ export function ManifestationsTab({
           onChange={setClientFiltre}
           clearable
           searchable
+          w={280}
+        />
+
+        <DatePickerInput
+          type='range'
+          label='Période'
+          placeholder='Toutes les dates'
+          value={periode}
+          onChange={setPeriode}
+          clearable
           w={280}
         />
       </Group>
