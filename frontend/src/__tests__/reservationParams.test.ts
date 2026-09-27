@@ -13,6 +13,7 @@ describe('reservationParams', () => {
       search: 'camp',
       statuts: ['soumise', 'validee'],
       categories: [3, 7],
+      client: null,
       dateRange: ['2026-06-01', '2026-06-02']
     });
 
@@ -26,6 +27,7 @@ describe('reservationParams', () => {
       search: 'camp',
       statuts: ['soumise', 'validee'],
       categories: [3, 7],
+      client: null,
       dateRange: ['2026-06-01', '2026-06-02']
     });
   });
@@ -38,6 +40,7 @@ describe('reservationParams', () => {
         search: 'abc',
         statuts: ['brouillon'],
         categories: [4],
+        client: null,
         dateRange: ['2026-01-01', null]
       })
     ).toEqual({
@@ -56,5 +59,14 @@ describe('reservationParams', () => {
     expect(parsed.categories).toEqual([2]);
     expect(parsed.statuts).toEqual([]);
     expect(parsed.dateRange).toEqual([null, '2026-08-01']);
+  });
+  it('garde le filtre client dans l’URL et la requête', () => {
+    const filtres = { ...DEFAULT_RESERVATION_FILTERS, client: '12' };
+
+    expect(buildReservationQuery(filtres)).toEqual({ client: '12' });
+
+    const query = serializeReservationFilters(filtres);
+    expect(query).toContain('resa_client=12');
+    expect(parseReservationFilters(`?${query}`).client).toBe('12');
   });
 });

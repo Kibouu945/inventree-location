@@ -2,6 +2,8 @@ export interface ReservationFiltersState {
   search: string;
   statuts: string[];
   categories: number[];
+  /** Filtre client du tableau des bons (point 4.2.5.3). */
+  client: string | null;
   dateRange: [string | null, string | null];
 }
 
@@ -9,6 +11,7 @@ export const DEFAULT_RESERVATION_FILTERS: ReservationFiltersState = {
   search: '',
   statuts: [],
   categories: [],
+  client: null,
   dateRange: [null, null]
 };
 
@@ -29,6 +32,10 @@ export function buildReservationQuery(
     params.categories = filters.categories.join(',');
   }
 
+  if (filters.client) {
+    params.client = filters.client;
+  }
+
   if (filters.dateRange[0]) {
     params.date_from = filters.dateRange[0];
   }
@@ -45,6 +52,7 @@ export const RESERVATION_URL_KEYS = [
   'resa_q',
   'resa_statut',
   'resa_cat',
+  'resa_client',
   'resa_from',
   'resa_to'
 ];
@@ -64,6 +72,10 @@ export function serializeReservationFilters(
 
   if (filters.categories.length > 0) {
     search.set('resa_cat', filters.categories.join(','));
+  }
+
+  if (filters.client) {
+    search.set('resa_client', filters.client);
   }
 
   if (filters.dateRange[0]) {
@@ -124,6 +136,7 @@ export function parseReservationFilters(
     search: search.get('resa_q') ?? '',
     statuts: parseStringList(search.get('resa_statut')),
     categories: parseIntList(search.get('resa_cat')),
+    client: search.get('resa_client') || null,
     dateRange: [from || null, to || null]
   };
 }

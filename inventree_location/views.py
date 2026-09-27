@@ -357,6 +357,12 @@ class ReservationListCreateView(generics.ListCreateAPIView):
         if prestation_id:
             queryset = queryset.filter(prestation_id=prestation_id)
 
+        # Filtre client du tableau des bons (point 4.2.5.3).
+        client_id = self.request.query_params.get("client")
+
+        if client_id:
+            queryset = queryset.filter(prestation__manifestation__client_id=client_id)
+
         statuts = self.request.query_params.getlist("statut")
 
         if statuts:
