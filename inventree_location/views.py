@@ -2534,7 +2534,12 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
         search = self.request.query_params.get("search")
 
         if search:
-            queryset = queryset.filter(nom__icontains=search)
+            # Le nom du client compte autant que celui de la manifestation :
+            # un client sans manifestation restait introuvable, et on le
+            # recréait en double. Recette Tassin du 27/09, point 4.2.4.
+            queryset = queryset.filter(
+                Q(nom__icontains=search) | Q(client__nom__icontains=search)
+            )
 
         # Filtre Futur / Passé / Tout de la maquette.
         periode = self.request.query_params.get("periode")

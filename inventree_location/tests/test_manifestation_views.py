@@ -625,6 +625,55 @@ class TestFiltreParClient:
         )
 
 
+class TestRechercheParClient:
+    """La recherche porte aussi sur le nom du client (point 4.2.4)."""
+
+    @pytest.fixture
+    def noms_disjoints(self, db):
+        """Le nom du client ne figure pas dans celui de la manifestation.
+
+        Sans quoi le test passerait aussi avec l'ancien filtre, qui ne
+        regardait que le nom de la manifestation.
+        """
+
+        from inventree_location.tests.factories import make_manifestation
+
+        vertou = Client.objects.create(
+            nom="Mairie de Vertou", email="vertou@exemple.test"
+        )
+        make_manifestation(client=vertou, nom="Fête de la musique")
+
+        return vertou
+
+    def _noms(self, factory, user, **params):
+        request = factory.get(MANIF_URL, params)
+        force_authenticate(request, user=user)
+        response = ManifestationListCreateView.as_view()(request)
+
+        return {m["nom"] for m in response.data["results"]}
+
+    def test_le_nom_du_client_remonte_ses_manifestations(
+        self, factory, gestionnaire, noms_disjoints
+    ):
+        """« Vertou » doit sortir la fête, dont le nom ne le mentionne pas."""
+
+        assert self._noms(factory, gestionnaire, search="Vertou") == {
+            "Fête de la musique"
+        }
+
+    def test_le_nom_de_la_manifestation_marche_toujours(
+        self, factory, gestionnaire, noms_disjoints
+    ):
+        assert self._noms(factory, gestionnaire, search="musique") == {
+            "Fête de la musique"
+        }
+
+    def test_une_recherche_sans_correspondance_ne_sort_rien(
+        self, factory, gestionnaire, noms_disjoints
+    ):
+        assert self._noms(factory, gestionnaire, search="Marseille") == set()
+
+
 class TestDesactivation:
     """Désactiver n'est pas supprimer : l'existant survit, le neuf est refusé."""
 
