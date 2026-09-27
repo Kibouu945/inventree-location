@@ -54,12 +54,15 @@ export function TourneeView({
   deliveries,
   ramassages,
   ordre,
-  onOrdreChange
+  onOrdreChange,
+  onOpenNote
 }: {
   deliveries: Delivery[];
   ramassages: Ramassage[];
   ordre: string[];
   onOrdreChange: (ordre: string[]) => void;
+  /** Ouvre le bon de livraison de l'arrêt. Absent, le bouton ne s'affiche pas. */
+  onOpenNote?: (delivery: Delivery) => void;
 }) {
   const stopsChronologiques = useMemo(
     () => construireStops(deliveries, ramassages),
@@ -209,28 +212,54 @@ export function TourneeView({
                       </Stack>
                     </Group>
 
-                    <Stack gap={2}>
-                      <ActionIcon
-                        size='sm'
-                        variant='default'
-                        aria-label={`Monter l'arrêt ${index + 1}`}
-                        disabled={index === 0}
-                        onClick={() =>
-                          appliquer(deplacerStop(stops, index, -1))
-                        }
-                      >
-                        ↑
-                      </ActionIcon>
-                      <ActionIcon
-                        size='sm'
-                        variant='default'
-                        aria-label={`Descendre l'arrêt ${index + 1}`}
-                        disabled={index === stops.length - 1}
-                        onClick={() => appliquer(deplacerStop(stops, index, 1))}
-                      >
-                        ↓
-                      </ActionIcon>
-                    </Stack>
+                    <Group gap={4} wrap='nowrap'>
+                      {/*
+                        Le bon ne s'ouvrait que depuis la Liste et
+                        l'arborescence : le livreur en tournée devait quitter
+                        sa carte pour le retrouver. Recette Tassin, point 4.8.2.
+                      */}
+                      {onOpenNote && stop.kind === 'livraison' && (
+                        <Button
+                          size='compact-xs'
+                          variant='light'
+                          onClick={() => {
+                            const livraison = deliveries.find(
+                              (d) => d.id === stop.id
+                            );
+                            if (livraison) {
+                              onOpenNote(livraison);
+                            }
+                          }}
+                        >
+                          Bon
+                        </Button>
+                      )}
+
+                      <Stack gap={2}>
+                        <ActionIcon
+                          size='sm'
+                          variant='default'
+                          aria-label={`Monter l'arrêt ${index + 1}`}
+                          disabled={index === 0}
+                          onClick={() =>
+                            appliquer(deplacerStop(stops, index, -1))
+                          }
+                        >
+                          ↑
+                        </ActionIcon>
+                        <ActionIcon
+                          size='sm'
+                          variant='default'
+                          aria-label={`Descendre l'arrêt ${index + 1}`}
+                          disabled={index === stops.length - 1}
+                          onClick={() =>
+                            appliquer(deplacerStop(stops, index, 1))
+                          }
+                        >
+                          ↓
+                        </ActionIcon>
+                      </Stack>
+                    </Group>
                   </Group>
                 </Paper>
               ))}

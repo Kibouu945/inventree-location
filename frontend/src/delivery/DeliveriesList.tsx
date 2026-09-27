@@ -456,6 +456,7 @@ export function DeliveriesList({
           <TourneeView
             deliveries={rows}
             ramassages={ramassages}
+            onOpenNote={(delivery) => setNoteDelivery(delivery)}
             ordre={filters.ordre}
             onOrdreChange={(ordre) => updateFilters({ ordre })}
           />
