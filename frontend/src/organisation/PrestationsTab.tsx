@@ -28,7 +28,7 @@ import { buildCatalogQuery } from '../catalog/catalogParams';
 import { PartKindBadge } from '../catalog/PartKindBadge';
 import type { CatalogPage } from '../catalog/types';
 import { useCategoryOptions } from '../catalog/useCategoryOptions';
-import { DateTimeField } from '../DateTimeField';
+import { DateTimeField, finSuivantLeDebut } from '../DateTimeField';
 
 import { canWriteOrganisation } from '../roles';
 import {
@@ -551,13 +551,16 @@ export function PrestationsTab({
               label='Date de début'
               required
               value={state.date_debut}
-              onChange={(value) =>
-                setField('date_debut', value ? new Date(value) : null)
-              }
+              onChange={(value) => {
+                const debut = value ? new Date(value) : null;
+                setField('date_debut', debut);
+                setField('date_fin', finSuivantLeDebut(debut, state.date_fin));
+              }}
             />
             <DateTimeField
               label='Date de fin'
               required
+              minDate={state.date_debut ?? undefined}
               value={state.date_fin}
               onChange={(value) =>
                 setField('date_fin', value ? new Date(value) : null)

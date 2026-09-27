@@ -22,7 +22,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { optionsDeContacts } from '../backoffice/contactLogic';
 import { optionsActives } from '../backoffice/optionsActives';
-import { DateTimeField } from '../DateTimeField';
+import { DateTimeField, finSuivantLeDebut } from '../DateTimeField';
 
 import { canWriteOrganisation } from '../roles';
 import { apiErrorMessage, type Manifestation, type Page } from './types';
@@ -348,16 +348,19 @@ export function ManifestationsTab({
                 label='Date de début'
                 required
                 value={form.values.date_debut}
-                onChange={(value) =>
+                onChange={(value) => {
+                  const debut = value ? new Date(value) : null;
+                  form.setFieldValue('date_debut', debut);
                   form.setFieldValue(
-                    'date_debut',
-                    value ? new Date(value) : null
-                  )
-                }
+                    'date_fin',
+                    finSuivantLeDebut(debut, form.values.date_fin)
+                  );
+                }}
               />
               <DateTimeField
                 label='Date de fin'
                 required
+                minDate={form.values.date_debut ?? undefined}
                 value={form.values.date_fin}
                 onChange={(value) =>
                   form.setFieldValue('date_fin', value ? new Date(value) : null)

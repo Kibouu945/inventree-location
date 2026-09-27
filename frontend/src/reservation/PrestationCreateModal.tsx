@@ -6,7 +6,7 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { DateTimeField } from '../DateTimeField';
+import { DateTimeField, finSuivantLeDebut } from '../DateTimeField';
 
 import type {
   LieuSummary,
@@ -243,15 +243,20 @@ export function PrestationCreateModal({
             required
             value={state.date_debut}
             onChange={(value) =>
-              setState((s) => ({
-                ...s,
-                date_debut: value ? new Date(value) : null
-              }))
+              setState((s) => {
+                const debut = value ? new Date(value) : null;
+                return {
+                  ...s,
+                  date_debut: debut,
+                  date_fin: finSuivantLeDebut(debut, s.date_fin)
+                };
+              })
             }
           />
           <DateTimeField
             label='Date de fin'
             required
+            minDate={state.date_debut ?? undefined}
             value={state.date_fin}
             onChange={(value) =>
               setState((s) => ({

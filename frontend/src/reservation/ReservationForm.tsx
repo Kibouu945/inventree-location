@@ -19,7 +19,7 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { DateTimeField } from '../DateTimeField';
+import { DateTimeField, finSuivantLeDebut } from '../DateTimeField';
 import {
   buildReservationPayload,
   emptyReservationValues,
@@ -545,18 +545,21 @@ export function ReservationForm({
         <DateTimeField
           label='Date de retrait prévue'
           value={form.values.date_retrait_prevue}
-          onChange={(value) =>
+          onChange={(value) => {
+            const retrait = value ? new Date(value) : null;
+            form.setFieldValue('date_retrait_prevue', retrait);
             form.setFieldValue(
-              'date_retrait_prevue',
-              value ? new Date(value) : null
-            )
-          }
+              'date_retour_prevue',
+              finSuivantLeDebut(retrait, form.values.date_retour_prevue)
+            );
+          }}
           error={form.errors.date_retrait_prevue}
           disabled={effectiveReadOnly}
           clearable
         />
         <DateTimeField
           label='Date de retour prévue'
+          minDate={form.values.date_retrait_prevue ?? undefined}
           value={form.values.date_retour_prevue}
           onChange={(value) =>
             form.setFieldValue(
