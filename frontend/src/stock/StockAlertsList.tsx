@@ -33,10 +33,21 @@ interface StockAlertItem {
   }>;
 }
 
+/** Article à seuil que l'écran ne surveille pas, faute de fiche location. */
+interface ArticleHorsPerimetre {
+  part_id: number;
+  part_name: string;
+  minimum_stock: number;
+}
+
 interface StockAlertResponse {
   count: number;
   email_sent: boolean;
   alerts: StockAlertItem[];
+  hors_perimetre?: {
+    count: number;
+    articles: ArticleHorsPerimetre[];
+  };
 }
 
 /**
@@ -113,6 +124,7 @@ export function StockAlertsList({
   }
 
   const alerts = query.data.alerts;
+  const horsPerimetre = query.data.hors_perimetre ?? { count: 0, articles: [] };
 
   return (
     <Stack gap='md'>
@@ -142,6 +154,28 @@ export function StockAlertsList({
           <Text size='sm'>
             {alerts.length} objet(s) en alerte (seuil bas/haut ou tension
             projetée {'>'}90%).
+          </Text>
+        </Alert>
+      )}
+
+      {/*
+        Recette du 7 septembre : un « Aucune alerte » vert affirmait que tout
+        allait bien alors qu'un article à seuil n'était simplement pas regardé,
+        faute de fiche location. L'écran garde son périmètre — le parc louable —
+        mais ne le tait plus.
+      */}
+      {horsPerimetre.count > 0 && (
+        <Alert color='yellow' variant='light' title='Articles non surveillés'>
+          <Text size='sm'>
+            {horsPerimetre.count} article(s) portent un stock minimum mais n’ont
+            pas de fiche location : cet écran ne les surveille pas. Créez-leur
+            une fiche depuis l’écran Articles pour qu’ils y entrent.
+          </Text>
+          <Text size='xs' c='dimmed' mt={4}>
+            {horsPerimetre.articles
+              .map((a) => `${a.part_name} (minimum ${a.minimum_stock})`)
+              .join(', ')}
+            {horsPerimetre.count > horsPerimetre.articles.length ? ', …' : ''}
           </Text>
         </Alert>
       )}

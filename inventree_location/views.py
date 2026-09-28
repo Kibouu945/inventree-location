@@ -56,6 +56,7 @@ from .livraison import (
     changer_etat_livraison,
     relacher_livraison,
 )
+from .alertes import articles_hors_perimetre
 from .planification import obstacles_a_la_planification
 from .ramassage import lignes_a_ramasser
 from .permissions import (
@@ -1824,9 +1825,34 @@ class StockAlertListView(APIView):
                 "count": len(alerts),
                 "email_sent": email_sent,
                 "alerts": alerts,
+                "hors_perimetre": self._hors_perimetre(),
             },
             status=status.HTTP_200_OK,
         )
+
+    def _hors_perimetre(self):
+        """Articles à seuil qu'on ne surveille pas, faute de fiche location.
+
+        Recette du 7 septembre : sans ce compte, un « Aucune alerte » vert
+        affirmait que tout allait bien alors qu'un article n'était pas regardé.
+        """
+
+        from part.models import Part
+
+        suivis = set(RentableItem.objects.values_list("part_id", flat=True))
+
+        articles = [
+            {
+                "part_id": part.pk,
+                "part_name": part.name,
+                "minimum_stock": int(part.minimum_stock or 0),
+            }
+            for part in Part.objects.exclude(minimum_stock=None)
+            .exclude(minimum_stock=0)
+            .only("pk", "name", "minimum_stock")
+        ]
+
+        return articles_hors_perimetre(articles, suivis)
 
     def _build_alerts(self, manifestation_id=None, lieu_id=None):
         scope_ids = None
