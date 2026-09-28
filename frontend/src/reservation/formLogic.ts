@@ -323,3 +323,59 @@ export function rechercheServeur(
 
   return terme;
 }
+
+/** Conflit de stock sur un article, tel que le serveur le rend (4.7.3). */
+export interface ConflitArticle {
+  part_id: number;
+  part_name: string;
+  requested_quantity: number;
+  available_quantity: number;
+  missing_quantity: number;
+}
+
+/**
+ * Les conflits rangés par article, pour marquer les lignes du tableau : le
+ * client veut voir sur *quel* article porte le blocage, pas seulement qu'il y
+ * en a un (recette 4.7.3).
+ */
+export function conflitsParArticle(
+  conflits: ConflitArticle[] | undefined | null
+): Record<number, ConflitArticle> {
+  const parArticle: Record<number, ConflitArticle> = {};
+
+  for (const conflit of conflits ?? []) {
+    parArticle[conflit.part_id] = conflit;
+  }
+
+  return parArticle;
+}
+
+/** Ligne du calcul de disponibilité « avant enregistrement » (STK-01). */
+export interface LignePreviewStock {
+  part_id: number;
+  part_name: string;
+  requested: number;
+  available: number;
+  missing: number;
+  shortage: boolean;
+}
+
+/**
+ * Ramène les lignes en pénurie du calcul « avant enregistrement » au format
+ * des conflits : les deux chemins alimentent le même indicateur (4.7.3), un
+ * bon tout neuf n'a pas encore d'identifiant à donner au point d'entrée
+ * `conflicts`.
+ */
+export function conflitsDuPreview(
+  lignes: LignePreviewStock[] | undefined | null
+): ConflitArticle[] {
+  return (lignes ?? [])
+    .filter((ligne) => ligne.shortage)
+    .map((ligne) => ({
+      part_id: ligne.part_id,
+      part_name: ligne.part_name,
+      requested_quantity: ligne.requested,
+      available_quantity: ligne.available,
+      missing_quantity: ligne.missing
+    }));
+}
