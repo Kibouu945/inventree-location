@@ -6,7 +6,11 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { DateTimeField, finSuivantLeDebut } from '../DateTimeField';
+import {
+  DateTimeField,
+  finSuivantLeDebut,
+  reprendreLesDates
+} from '../DateTimeField';
 import { avecOptionCourante } from './formLogic';
 
 import type {
@@ -63,6 +67,12 @@ function emptyState(manifestationId: number | null): FormState {
     date_debut: null,
     date_fin: null
   };
+}
+
+/** Manifestation porteuse, réduite aux dates que la prestation reprend. */
+interface ManifestationDatee {
+  date_debut: string | null;
+  date_fin: string | null;
 }
 
 /** Prestation à modifier, réduite aux champs que le formulaire manipule. */
@@ -133,14 +143,47 @@ export function PrestationFormModal({
   );
   const [lieuSearch, setLieuSearch] = useState('');
   const [debouncedLieuSearch] = useDebouncedValue(lieuSearch, 300);
+  // 4.6.1 : les dates suivent la manifestation tant que l'utilisateur n'y a
+  // pas touché lui-même.
+  const [datesSaisies, setDatesSaisies] = useState(false);
 
   // Recharge la saisie à chaque ouverture, pour ne pas réafficher celle de la
   // prestation précédente.
   useEffect(() => {
     if (opened) {
       setState(etatInitial(prestation, manifestationId));
+      setDatesSaisies(prestation != null);
     }
   }, [opened, manifestationId, prestation?.id]);
+
+  // La manifestation choisie, relue par son id : la recherche paginée ne la
+  // ramène pas forcément, et c'est d'elle que viennent les dates.
+  const manifestationChoisie = useQuery<ManifestationDatee>(
+    {
+      queryKey: ['prestation-modal-manifestation', state.manifestation],
+      enabled: opened && prestation == null && state.manifestation != null,
+      queryFn: async () => {
+        const response = await context.api.get(
+          `${MANIFESTATIONS_URL}${state.manifestation}/`
+        );
+        return response.data as ManifestationDatee;
+      }
+    },
+    context.queryClient
+  );
+
+  const porteuse = manifestationChoisie.data;
+
+  useEffect(() => {
+    if (!porteuse) {
+      return;
+    }
+
+    setState((s) => ({
+      ...s,
+      ...reprendreLesDates(porteuse, s, datesSaisies)
+    }));
+  }, [porteuse, datesSaisies]);
 
   const manifestationsQuery = useQuery<Page<ManifestationOption>>(
     {
@@ -301,7 +344,8 @@ export function PrestationFormModal({
             label='Date de début'
             required
             value={state.date_debut}
-            onChange={(value) =>
+            onChange={(value) => {
+              setDatesSaisies(true);
               setState((s) => {
                 const debut = value ? new Date(value) : null;
                 return {
@@ -309,20 +353,21 @@ export function PrestationFormModal({
                   date_debut: debut,
                   date_fin: finSuivantLeDebut(debut, s.date_fin)
                 };
-              })
-            }
+              });
+            }}
           />
           <DateTimeField
             label='Date de fin'
             required
             minDate={state.date_debut ?? undefined}
             value={state.date_fin}
-            onChange={(value) =>
+            onChange={(value) => {
+              setDatesSaisies(true);
               setState((s) => ({
                 ...s,
                 date_fin: value ? new Date(value) : null
-              }))
-            }
+              }));
+            }}
           />
         </Group>
         <Group justify='flex-end'>

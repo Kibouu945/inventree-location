@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { finSuivantLeDebut } from '../DateTimeField';
+import { finSuivantLeDebut, reprendreLesDates } from '../DateTimeField';
 
 const j = (iso: string) => new Date(iso);
 
@@ -52,5 +52,42 @@ describe('finSuivantLeDebut', () => {
 
     expect(fin?.getMonth()).toBe(10); // novembre
     expect(fin?.getDate()).toBe(1);
+  });
+});
+
+describe('reprendreLesDates', () => {
+  const manifestation = {
+    date_debut: '2026-11-15T09:00:00Z',
+    date_fin: '2026-11-17T18:00:00Z'
+  };
+  const vide = { date_debut: null, date_fin: null };
+
+  it('reprend les dates de la manifestation sur une saisie vierge', () => {
+    const dates = reprendreLesDates(manifestation, vide, false);
+    expect(dates.date_debut?.toISOString()).toBe('2026-11-15T09:00:00.000Z');
+    expect(dates.date_fin?.toISOString()).toBe('2026-11-17T18:00:00.000Z');
+  });
+
+  it('respecte une saisie manuelle, même en changeant de manifestation', () => {
+    const saisi = {
+      date_debut: new Date('2026-12-01T10:00:00Z'),
+      date_fin: new Date('2026-12-02T10:00:00Z')
+    };
+    expect(reprendreLesDates(manifestation, saisi, true)).toBe(saisi);
+  });
+
+  it('ne touche à rien sans manifestation', () => {
+    expect(reprendreLesDates(null, vide, false)).toBe(vide);
+    expect(reprendreLesDates(undefined, vide, false)).toBe(vide);
+  });
+
+  it('garde la valeur courante si la manifestation n’a pas la date', () => {
+    const actuel = {
+      date_debut: new Date('2026-12-01T10:00:00Z'),
+      date_fin: null
+    };
+    const dates = reprendreLesDates({ date_debut: null }, actuel, false);
+    expect(dates.date_debut).toBe(actuel.date_debut);
+    expect(dates.date_fin).toBeNull();
   });
 });

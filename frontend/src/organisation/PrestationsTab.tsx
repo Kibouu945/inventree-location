@@ -30,7 +30,11 @@ import { buildCatalogQuery } from '../catalog/catalogParams';
 import { PartKindBadge } from '../catalog/PartKindBadge';
 import type { CatalogPage } from '../catalog/types';
 import { useCategoryOptions } from '../catalog/useCategoryOptions';
-import { DateTimeField, finSuivantLeDebut } from '../DateTimeField';
+import {
+  DateTimeField,
+  finSuivantLeDebut,
+  reprendreLesDates
+} from '../DateTimeField';
 import { FiltreVirtuel, type Virtuel } from '../FiltreVirtuel';
 
 import { canWriteOrganisation } from '../roles';
@@ -266,6 +270,8 @@ export function PrestationsTab({
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
   const [modalOpen, setModalOpen] = useState(false);
+  // 4.6.1 : les dates suivent la manifestation tant qu'on n'y a pas touché.
+  const [datesSaisies, setDatesSaisies] = useState(false);
   const [articlesOuverts, setArticlesOuverts] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [state, setState] = useState<FormState>(emptyState());
@@ -456,6 +462,7 @@ export function PrestationsTab({
   function openCreate() {
     setEditId(null);
     setState(emptyState());
+    setDatesSaisies(false);
     setStock(null);
     // Création : on ne demande pas le matériel d'entrée de jeu. Nommer la
     // prestation, la rattacher et la dater suffit à l'enregistrer.
@@ -465,6 +472,8 @@ export function PrestationsTab({
 
   function openEdit(prestation: Prestation) {
     setEditId(prestation.id);
+    // Modification : les dates existent, elles ne se recalculent pas.
+    setDatesSaisies(true);
     setState({
       nom: prestation.nom,
       description: prestation.description,
@@ -482,6 +491,19 @@ export function PrestationsTab({
     // Édition : masquer une liste déjà saisie la ferait passer pour perdue.
     setArticlesOuverts(prestation.lignes.length > 0);
     setModalOpen(true);
+  }
+
+  /** Rattache la prestation, et lui passe les dates de la manifestation. */
+  function choisirManifestation(value: string | null) {
+    const porteuse = (manifestationsQuery.data?.results ?? []).find(
+      (m) => String(m.id) === value
+    );
+
+    setState((current) => ({
+      ...current,
+      manifestation: value,
+      ...reprendreLesDates(porteuse, current, datesSaisies)
+    }));
   }
 
   /** Écrit un champ du formulaire depuis une valeur **déjà lue**. */
@@ -654,7 +676,7 @@ export function PrestationsTab({
               data={manifestationOptions}
               searchable
               value={state.manifestation}
-              onChange={(value) => setField('manifestation', value)}
+              onChange={(value) => choisirManifestation(value)}
             />
             <Select
               label='Lieu'
@@ -671,6 +693,7 @@ export function PrestationsTab({
               required
               value={state.date_debut}
               onChange={(value) => {
+                setDatesSaisies(true);
                 const debut = value ? new Date(value) : null;
                 setField('date_debut', debut);
                 setField('date_fin', finSuivantLeDebut(debut, state.date_fin));
@@ -681,9 +704,10 @@ export function PrestationsTab({
               required
               minDate={state.date_debut ?? undefined}
               value={state.date_fin}
-              onChange={(value) =>
-                setField('date_fin', value ? new Date(value) : null)
-              }
+              onChange={(value) => {
+                setDatesSaisies(true);
+                setField('date_fin', value ? new Date(value) : null);
+              }}
             />
           </Group>
           <Textarea

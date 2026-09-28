@@ -48,3 +48,30 @@ export function finSuivantLeDebut(
 
   return new Date(debut.getTime() + UN_JOUR);
 }
+
+/**
+ * Dates reprises de la manifestation à la création d'une prestation (4.6.1).
+ * Une saisie de l'utilisateur prime : on ne la réécrit pas s'il change ensuite
+ * de manifestation.
+ */
+export function reprendreLesDates(
+  manifestation:
+    | { date_debut?: string | null; date_fin?: string | null }
+    | null
+    | undefined,
+  actuel: { date_debut: Date | null; date_fin: Date | null },
+  saisieManuelle: boolean
+): { date_debut: Date | null; date_fin: Date | null } {
+  if (saisieManuelle || !manifestation) {
+    return actuel;
+  }
+
+  return {
+    date_debut: manifestation.date_debut
+      ? new Date(manifestation.date_debut)
+      : actuel.date_debut,
+    date_fin: manifestation.date_fin
+      ? new Date(manifestation.date_fin)
+      : actuel.date_fin
+  };
+}
