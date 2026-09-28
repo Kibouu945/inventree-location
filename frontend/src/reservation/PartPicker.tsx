@@ -1,11 +1,19 @@
 // Sélecteur de matériel (autocomplete + quantité), réutilisé pour le
 // matériel réel et pour l'article virtuel obligatoire (RES-03).
 import type { InvenTreePluginContext } from '@inventreedb/ui';
-import { Button, Group, NumberInput, Select, Text } from '@mantine/core';
+import {
+  Button,
+  Group,
+  MultiSelect,
+  NumberInput,
+  Select,
+  Text
+} from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
+import { useCategoryOptions } from '../catalog/useCategoryOptions';
 import type { LigneReservationLine } from './types';
 
 const CATALOG_URL = '/plugin/inventree-location/catalog/';
@@ -46,12 +54,18 @@ export function PartPicker({
     null
   );
   const [quantite, setQuantite] = useState<number>(1);
+  // Recette du 6/09, point 2.2 : « plus de 500 articles dans la base, quasi
+  // impossible de retrouver un article sans connaître son libellé exact ».
+  // Les mêmes catégories que le catalogue, sous-catégories comprises.
+  const [categories, setCategories] = useState<string[]>([]);
+  const categoryOptions = useCategoryOptions(context);
 
   const query = useQuery<{ results: CatalogSearchResult[] }>(
     {
       queryKey: [
         'reservation-part-search',
         debouncedSearch,
+        categories,
         virtualOnly,
         dateDebut,
         dateFin,
@@ -61,6 +75,8 @@ export function PartPicker({
         const response = await context.api.get(CATALOG_URL, {
           params: {
             search: debouncedSearch || undefined,
+            categories:
+              categories.length > 0 ? categories.join(',') : undefined,
             // Un article non louable n'a rien à faire dans une réservation :
             // `rentable: 'all'` laissait passer le « Banc de brasserie souple,
             rentable: virtualOnly ? 'all' : 'true',
@@ -143,6 +159,16 @@ export function PartPicker({
 
   return (
     <Group align='flex-end' gap='sm' wrap='wrap'>
+      <MultiSelect
+        label='Catégories'
+        placeholder={categories.length > 0 ? '' : 'Toutes'}
+        data={categoryOptions}
+        value={categories}
+        onChange={setCategories}
+        searchable
+        clearable
+        w={240}
+      />
       <Select
         label={label}
         placeholder='Rechercher un article…'
