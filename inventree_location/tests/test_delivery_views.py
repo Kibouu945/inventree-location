@@ -155,6 +155,48 @@ class TestDeliveryListView:
         assert ids == [to_deliver.pk]
 
     @pytest.mark.django_db
+    def test_filtre_virtuel_ecarte_les_bons_de_service(
+        self, factory, gestionnaire, prestation, part
+    ):
+        """Point 4.8.1 : un bon qui ne porte que des services sort de la tournée."""
+
+        from inventree_location.models import RentableItem
+        from part.models import Part, PartCategory
+
+        categorie = PartCategory.objects.create(name="Services")
+        nettoyage = Part.objects.create(name="Nettoyage", category=categorie)
+        RentableItem.objects.update_or_create(
+            part=nettoyage, defaults={"is_virtual": True}
+        )
+
+        materiel = _make_reservation(
+            prestation,
+            part,
+            statut="validee",
+            date_retrait="2026-06-02T00:00:00Z",
+            date_retour="2026-06-03T00:00:00Z",
+        )
+        service = _make_reservation(
+            prestation,
+            nettoyage,
+            statut="validee",
+            date_retrait="2026-06-02T00:00:00Z",
+            date_retour="2026-06-03T00:00:00Z",
+        )
+
+        def ids(params):
+            request = factory.get("/plugin/inventree-location/deliveries/", params)
+            force_authenticate(request, user=gestionnaire)
+            response = DeliveryListView.as_view()(request)
+            assert response.status_code == status.HTTP_200_OK
+            return {row["id"] for row in response.data["results"]}
+
+        # Sans filtre, les deux sont là : le défaut « non » est posé par l'écran.
+        assert ids({}) == {materiel.pk, service.pk}
+        assert ids({"virtuel": "non"}) == {materiel.pk}
+        assert ids({"virtuel": "oui"}) == {service.pk}
+
+    @pytest.mark.django_db
     def test_default_statut_scope_is_validee_and_livree(
         self, factory, gestionnaire, prestation, part
     ):

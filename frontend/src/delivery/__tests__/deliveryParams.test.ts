@@ -5,6 +5,7 @@ import {
   buildDeliveryQuery,
   DEFAULT_DELIVERY_FILTERS,
   parseDeliveryFilters,
+  sansArticlesVirtuels,
   serializeDeliveryFilters
 } from '../deliveryParams';
 
@@ -97,5 +98,65 @@ describe('aujourdhuiIso', () => {
     // lendemain en UTC et vidé la tournée du soir.
     expect(aujourdhuiIso(new Date(2026, 8, 8, 23, 30))).toBe('2026-09-08');
     expect(aujourdhuiIso(new Date(2026, 0, 1, 0, 5))).toBe('2026-01-01');
+  });
+});
+
+describe('filtre Virtuel des livraisons (4.8.1)', () => {
+  it('écarte les bons de service par défaut', () => {
+    expect(DEFAULT_DELIVERY_FILTERS.virtuel).toBe('non');
+    expect(buildDeliveryQuery(DEFAULT_DELIVERY_FILTERS).virtuel).toBe('non');
+  });
+
+  it('n’envoie rien quand on demande tous les bons', () => {
+    const filtres = { ...DEFAULT_DELIVERY_FILTERS, virtuel: null };
+    expect(buildDeliveryQuery(filtres).virtuel).toBeUndefined();
+  });
+
+  it('n’écrit pas le défaut dans l’URL', () => {
+    expect(serializeDeliveryFilters(DEFAULT_DELIVERY_FILTERS)).not.toContain(
+      'livr_virtuel'
+    );
+  });
+
+  it('écrit « tous » pour que le défaut ne revienne pas au rechargement', () => {
+    const query = serializeDeliveryFilters({
+      ...DEFAULT_DELIVERY_FILTERS,
+      virtuel: null
+    });
+    expect(query).toContain('livr_virtuel=tous');
+    expect(parseDeliveryFilters(query).virtuel).toBeNull();
+  });
+
+  it('relit oui et non, et retombe sur le défaut sinon', () => {
+    expect(parseDeliveryFilters('livr_virtuel=oui').virtuel).toBe('oui');
+    expect(parseDeliveryFilters('livr_virtuel=non').virtuel).toBe('non');
+    expect(parseDeliveryFilters('livr_virtuel=zzz').virtuel).toBe('non');
+    expect(parseDeliveryFilters('').virtuel).toBe('non');
+  });
+});
+
+describe('sansArticlesVirtuels', () => {
+  const bons = () => [
+    {
+      id: 1,
+      lignes: [
+        { is_virtual: false, part: 1 },
+        { is_virtual: true, part: 2 }
+      ]
+    },
+    { id: 2, lignes: [{ is_virtual: false, part: 3 }] }
+  ];
+
+  it('retire les lignes de service sous « non »', () => {
+    const filtres = sansArticlesVirtuels(bons(), 'non');
+    expect(filtres[0].lignes).toHaveLength(1);
+    expect(filtres[0].lignes[0].part).toBe(1);
+    expect(filtres[1].lignes).toHaveLength(1);
+  });
+
+  it('ne touche à rien sous « oui » ou « tous »', () => {
+    const originaux = bons();
+    expect(sansArticlesVirtuels(originaux, 'oui')).toBe(originaux);
+    expect(sansArticlesVirtuels(originaux, null)).toBe(originaux);
   });
 });

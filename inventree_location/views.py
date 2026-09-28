@@ -650,6 +650,12 @@ class DeliveryListView(generics.ListAPIView):
         if lieux:
             queryset = queryset.filter(prestation__lieu_id__in=lieux)
 
+        # Filtre « Virtuel » du point 4.8.1, même moteur que le 4.5.1 : un bon
+        # qui ne porte que des services n'a rien à faire dans une tournée.
+        queryset = virtuel.filtrer(
+            queryset, self.request.query_params.get("virtuel"), lignes="lignes"
+        )
+
         return queryset
 
 
