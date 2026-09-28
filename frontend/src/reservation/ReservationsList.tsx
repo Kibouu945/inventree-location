@@ -48,22 +48,13 @@ import {
   type ReservationFiltersState,
   serializeReservationFilters
 } from './reservationParams';
+import { couleurDuStatut } from './statuts';
 import type { Page, Reservation } from './types';
 
 const RESERVATIONS_URL = '/plugin/inventree-location/reservations/';
 
 // Taille de page demandée au serveur (`LimitOffsetPagination`, SCRUM-101).
 const PAGE_SIZE = 50;
-
-const STATUT_COLORS: Record<string, string> = {
-  brouillon: 'gray',
-  soumise: 'blue',
-  validee: 'green',
-  refusee: 'red',
-  livree: 'teal',
-  retournee: 'grape',
-  cloturee: 'dark'
-};
 
 // Statuts affichables dans le filtre (StatutReservation côté serveur).
 const STATUT_OPTIONS = [
@@ -488,7 +479,7 @@ export function ReservationsList({
                       : '—'}
                   </Table.Td>
                   <Table.Td>
-                    <Badge color={STATUT_COLORS[reservation.statut] ?? 'gray'}>
+                    <Badge color={couleurDuStatut(reservation.statut)}>
                       {reservation.statut}
                     </Badge>
                   </Table.Td>

@@ -37,6 +37,7 @@ import {
 } from '../organisation/types';
 import { PrestationFormModal } from '../reservation/PrestationFormModal';
 import { ReservationForm } from '../reservation/ReservationForm';
+import { couleurDuStatut } from '../reservation/statuts';
 import type { Reservation } from '../reservation/types';
 import { canWriteOrganisation, canWriteReservations } from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
@@ -363,6 +364,14 @@ function BonsDeLaPrestation({
                     <Text size='xs' c='dimmed'>
                       {lignes.length} article{lignes.length > 1 ? 's' : ''}
                     </Text>
+                    {/* 4.7.2 : le statut du bon, comme sur la manifestation. */}
+                    <Badge
+                      size='xs'
+                      variant='light'
+                      color={couleurDuStatut(bon.statut)}
+                    >
+                      {bon.statut}
+                    </Badge>
                   </Group>
                 </UnstyledButton>
 
