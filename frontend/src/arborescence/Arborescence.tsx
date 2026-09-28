@@ -16,21 +16,24 @@ import {
   UnstyledButton
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
+import { notifications } from '@mantine/notifications';
 import {
+  IconCalendarCheck,
   IconChevronDown,
   IconChevronRight,
   IconPencil,
   IconPlus,
   IconSearch
 } from '@tabler/icons-react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { ManifestationFormModal } from '../organisation/ManifestationFormModal';
-import type {
-  Client,
-  Manifestation,
-  Page,
-  Prestation
+import {
+  apiErrorMessage,
+  type Client,
+  type Manifestation,
+  type Page,
+  type Prestation
 } from '../organisation/types';
 import { PrestationFormModal } from '../reservation/PrestationFormModal';
 import { ReservationForm } from '../reservation/ReservationForm';
@@ -176,6 +179,67 @@ function Modifier({
         onClick={onClick}
       >
         <IconPencil size={14} />
+      </ActionIcon>
+    </Tooltip>
+  );
+}
+
+/**
+ * Passe une manifestation de « brouillon » à « planifiée » (4.5.4). Le serveur
+ * refuse et dit pourquoi si la manifestation n'est pas prête : on relaie.
+ */
+function Planifier({
+  context,
+  manifestation,
+  autorise,
+  onPlanifiee
+}: {
+  context: InvenTreePluginContext;
+  manifestation: Manifestation;
+  autorise: boolean;
+  onPlanifiee: () => void;
+}) {
+  const mutation = useMutation(
+    {
+      mutationFn: async () => {
+        const reponse = await context.api.post(
+          `${MANIFESTATIONS_URL}${manifestation.id}/planifier/`
+        );
+        return reponse.data as Manifestation;
+      },
+      onSuccess: () => {
+        notifications.show({
+          color: 'green',
+          message: `Manifestation « ${manifestation.nom} » planifiée.`
+        });
+        onPlanifiee();
+      },
+      onError: (erreur: unknown) => {
+        notifications.show({
+          color: 'red',
+          title: 'Planification impossible',
+          message: apiErrorMessage(erreur, "La manifestation n'est pas prête.")
+        });
+      }
+    },
+    context.queryClient
+  );
+
+  if (!autorise || manifestation.statut !== 'brouillon') {
+    return null;
+  }
+
+  return (
+    <Tooltip label='Passer en planifiée'>
+      <ActionIcon
+        variant='light'
+        color='teal'
+        size='sm'
+        aria-label='Passer en planifiée'
+        loading={mutation.isPending}
+        onClick={() => mutation.mutate()}
+      >
+        <IconCalendarCheck size={14} />
       </ActionIcon>
     </Tooltip>
   );
@@ -640,6 +704,16 @@ function ManifestationsDuClient({
                 </UnstyledButton>
 
                 <Group gap={6} wrap='nowrap'>
+                  <Planifier
+                    context={context}
+                    manifestation={manifestation}
+                    autorise={canWriteOrganisation(context)}
+                    onPlanifiee={() =>
+                      context.queryClient.invalidateQueries({
+                        queryKey: ['arbo-manifestations-client']
+                      })
+                    }
+                  />
                   <Modifier
                     quoi='la manifestation'
                     autorise={canWriteOrganisation(context)}

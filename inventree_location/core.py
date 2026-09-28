@@ -93,6 +93,7 @@ class InvenTreeLocation(
             LieuDetailView,
             LieuListCreateView,
             ManifestationDetailView,
+            ManifestationPlanifierView,
             ManifestationListCreateView,
             PartAvailabilityHistogramView,
             PrestationDetailView,
@@ -228,6 +229,11 @@ class InvenTreeLocation(
                 "manifestations/<int:pk>/",
                 ManifestationDetailView.as_view(),
                 name="manifestation-detail",
+            ),
+            path(
+                "manifestations/<int:pk>/planifier/",
+                ManifestationPlanifierView.as_view(),
+                name="manifestation-planifier",
             ),
             path(
                 "ramassages/",

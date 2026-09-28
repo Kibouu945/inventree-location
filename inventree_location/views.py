@@ -45,6 +45,7 @@ from .models import (
     Reservation,
     ReturnIncident,
     ReturnIncidentType,
+    StatutManifestation,
     StatutReservation,
 )
 from .calendrier import FenetreInvalide, bornes_fenetre, evenements_calendrier
@@ -55,6 +56,7 @@ from .livraison import (
     changer_etat_livraison,
     relacher_livraison,
 )
+from .planification import obstacles_a_la_planification
 from .ramassage import lignes_a_ramasser
 from .permissions import (
     CatalogPermission,
@@ -2589,6 +2591,57 @@ class ManifestationDetailView(
     permission_classes = [ManifestationPermission]
     serializer_class = ManifestationSerializer
     queryset = Manifestation.objects.select_related("client", "contact")
+
+
+class ManifestationPlanifierView(APIView):
+    """Passe une manifestation de « brouillon » à « planifiée » (4.5.4)."""
+
+    permission_classes = [ManifestationPermission]
+
+    def get(self, request, pk, *args, **kwargs):
+        """Dit si la manifestation est planifiable, et sinon pourquoi."""
+
+        manifestation = Manifestation.objects.filter(pk=pk).first()
+
+        if manifestation is None:
+            return Response(
+                {"detail": "Manifestation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        obstacles = obstacles_a_la_planification(manifestation)
+
+        return Response(
+            {"planifiable": not obstacles, "obstacles": obstacles},
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request, pk, *args, **kwargs):
+        """Planifie la manifestation, ou refuse en listant ce qui manque."""
+
+        manifestation = Manifestation.objects.filter(pk=pk).first()
+
+        if manifestation is None:
+            return Response(
+                {"detail": "Manifestation introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        obstacles = obstacles_a_la_planification(manifestation)
+
+        if obstacles:
+            return Response(
+                {"detail": " ".join(obstacles), "obstacles": obstacles},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        manifestation.statut = StatutManifestation.PLANIFIEE
+        manifestation.save(update_fields=["statut", "updated_at"])
+
+        return Response(
+            ManifestationSerializer(manifestation).data,
+            status=status.HTTP_200_OK,
+        )
 
 
 def _prestation_queryset():
