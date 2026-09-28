@@ -10,7 +10,8 @@ import {
   Paper,
   ScrollArea,
   Stack,
-  Text
+  Text,
+  Tooltip
 } from '@mantine/core';
 import { useMemo } from 'react';
 
@@ -166,6 +167,20 @@ export function TourneeView({
         d'oiseau, temps de chargement inclus.
       </Text>
 
+      {/*
+        « Ne semble pas opérationnel — je n'ai pas compris le processus mis en
+        place » (recette du 27/09, point 4.8.2). Le bouton existait, mais rien
+        ne disait à quoi servait chaque arrêt ni pourquoi un ramassage n'en
+        porte pas.
+      */}
+      <Text size='xs' c='dimmed'>
+        Chaque arrêt de <b>livraison</b> porte son bon, à ouvrir sur place et à
+        faire signer ; un arrêt de <b>ramassage</b> n'en a pas, le retour se
+        saisit depuis l'écran Ramassages. Les flèches réordonnent la tournée, «
+        Optimiser l'ordre » la recalcule, et « Itinéraire Google Maps » l'ouvre
+        dans le téléphone.
+      </Text>
+
       {sansCoordonnees > 0 && (
         <Alert color='yellow' variant='light'>
           {sansCoordonnees} entrée(s) sans coordonnées GPS ne figurent pas dans
@@ -219,20 +234,23 @@ export function TourneeView({
                         sa carte pour le retrouver. Recette Tassin, point 4.8.2.
                       */}
                       {onOpenNote && stop.kind === 'livraison' && (
-                        <Button
-                          size='compact-xs'
-                          variant='light'
-                          onClick={() => {
-                            const livraison = deliveries.find(
-                              (d) => d.id === stop.id
-                            );
-                            if (livraison) {
-                              onOpenNote(livraison);
-                            }
-                          }}
-                        >
-                          Bon
-                        </Button>
+                        <Tooltip label='Ouvrir le bon de livraison à faire signer sur place'>
+                          <Button
+                            size='compact-xs'
+                            variant='light'
+                            aria-label={`Bon de livraison ${stop.numero}`}
+                            onClick={() => {
+                              const livraison = deliveries.find(
+                                (d) => d.id === stop.id
+                              );
+                              if (livraison) {
+                                onOpenNote(livraison);
+                              }
+                            }}
+                          >
+                            Bon de livraison
+                          </Button>
+                        </Tooltip>
                       )}
 
                       <Stack gap={2}>
