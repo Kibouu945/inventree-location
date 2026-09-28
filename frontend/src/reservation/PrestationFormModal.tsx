@@ -1,9 +1,19 @@
 // Pop-up de création rapide d'une prestation depuis le formulaire de
 // réservation (RES-08), et de modification depuis l'arborescence (4.5.3).
 import type { InvenTreePluginContext } from '@inventreedb/ui';
-import { Button, Group, Modal, Select, Stack, TextInput } from '@mantine/core';
+import {
+  ActionIcon,
+  Button,
+  Group,
+  Modal,
+  Select,
+  Stack,
+  TextInput,
+  Tooltip
+} from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
+import { IconPlus } from '@tabler/icons-react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import {
@@ -11,6 +21,7 @@ import {
   finSuivantLeDebut,
   reprendreLesDates
 } from '../DateTimeField';
+import { LieuFormModal } from '../organisation/LieuFormModal';
 import { avecOptionCourante, rechercheServeur } from './formLogic';
 
 import type {
@@ -153,6 +164,8 @@ export function PrestationFormModal({
     string | null
   >(null);
   const [libelleLieu, setLibelleLieu] = useState<string | null>(null);
+  // 4.6.2 : saisir un lieu sans quitter la prestation en cours.
+  const [lieuEnSaisie, setLieuEnSaisie] = useState(false);
 
   // Recharge la saisie à chaque ouverture, pour ne pas réafficher celle de la
   // prestation précédente.
@@ -350,22 +363,36 @@ export function PrestationFormModal({
             setState((s) => ({ ...s, manifestation: value }));
           }}
         />
-        <Select
-          label='Lieu'
-          placeholder='Rechercher un lieu…'
-          required
-          data={lieuOptions}
-          searchable
-          searchValue={lieuSearch}
-          onSearchChange={setLieuSearch}
-          value={state.lieu}
-          onChange={(value) => {
-            setLibelleLieu(
-              lieuOptions.find((o) => o.value === value)?.label ?? null
-            );
-            setState((s) => ({ ...s, lieu: value }));
-          }}
-        />
+        <Group align='flex-end' gap='xs' wrap='nowrap'>
+          <Select
+            label='Lieu'
+            placeholder='Rechercher un lieu…'
+            required
+            style={{ flex: 1 }}
+            data={lieuOptions}
+            searchable
+            searchValue={lieuSearch}
+            onSearchChange={setLieuSearch}
+            value={state.lieu}
+            onChange={(value) => {
+              setLibelleLieu(
+                lieuOptions.find((o) => o.value === value)?.label ?? null
+              );
+              setState((s) => ({ ...s, lieu: value }));
+            }}
+          />
+          <Tooltip label='Créer un lieu'>
+            <ActionIcon
+              variant='light'
+              color='green'
+              size='lg'
+              aria-label='Créer un lieu'
+              onClick={() => setLieuEnSaisie(true)}
+            >
+              <IconPlus size={16} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
         <Group grow>
           <DateTimeField
             label='Date de début'
@@ -397,6 +424,19 @@ export function PrestationFormModal({
             }}
           />
         </Group>
+        <LieuFormModal
+          context={context}
+          opened={lieuEnSaisie}
+          onClose={() => setLieuEnSaisie(false)}
+          onSaved={(lieu) => {
+            // Le lieu créé se pose dans le champ : pas à le resélectionner.
+            setLieuEnSaisie(false);
+            setLibelleLieu(lieu.nom);
+            setLieuSearch(lieu.nom);
+            setState((s) => ({ ...s, lieu: String(lieu.id) }));
+          }}
+        />
+
         <Group justify='flex-end'>
           <Button variant='default' onClick={onClose}>
             Annuler
