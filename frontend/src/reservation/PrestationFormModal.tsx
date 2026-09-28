@@ -1,5 +1,5 @@
 // Pop-up de création rapide d'une prestation depuis le formulaire de
-// réservation (RES-08) : évite de quitter le formulaire pour rattacher une
+// réservation (RES-08), et de modification depuis l'arborescence (4.5.3).
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import { Button, Group, Modal, Select, Stack, TextInput } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
@@ -7,6 +7,7 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { DateTimeField, finSuivantLeDebut } from '../DateTimeField';
+import { avecOptionCourante } from './formLogic';
 
 import type {
   LieuSummary,
@@ -43,7 +44,7 @@ function firstErrorMessage(error: unknown): string {
     }
   }
 
-  return "La prestation n'a pas pu être créée.";
+  return "La prestation n'a pas pu être enregistrée.";
 }
 
 interface FormState {
@@ -64,32 +65,67 @@ function emptyState(manifestationId: number | null): FormState {
   };
 }
 
+/** Prestation à modifier, réduite aux champs que le formulaire manipule. */
+export interface PrestationAModifier {
+  id: number;
+  nom: string;
+  manifestation: number;
+  manifestation_nom?: string | null;
+  lieu: number | null;
+  lieu_detail?: { nom: string } | null;
+  date_debut: string | null;
+  date_fin: string | null;
+}
+
+/** Saisie initiale : vierge en création, l'existant en modification. */
+function etatInitial(
+  prestation: PrestationAModifier | null,
+  manifestationId: number | null
+): FormState {
+  if (!prestation) {
+    return emptyState(manifestationId);
+  }
+
+  return {
+    nom: prestation.nom,
+    manifestation: String(prestation.manifestation),
+    lieu: prestation.lieu != null ? String(prestation.lieu) : null,
+    date_debut: prestation.date_debut ? new Date(prestation.date_debut) : null,
+    date_fin: prestation.date_fin ? new Date(prestation.date_fin) : null
+  };
+}
+
 /**
  * Pop-up (modal Mantine) créant une prestation sans quitter le formulaire de
- * réservation (RES-08).
+ * réservation (RES-08), ou modifiant celle qu'on lui passe (4.5.3).
  */
-export function PrestationCreateModal({
+export function PrestationFormModal({
   context,
   opened,
   manifestationId,
+  prestation = null,
   libelleAction = 'Créer et sélectionner',
   onClose,
-  onCreated
+  onSaved
 }: {
   context: InvenTreePluginContext;
   opened: boolean;
   /** Manifestation à pré-sélectionner (celle de la prestation déjà choisie
    * dans le formulaire, s'il y en a une). */
   manifestationId: number | null;
+  /** Renseignée : on modifie cette prestation au lieu d'en créer une. */
+  prestation?: PrestationAModifier | null;
   /**
    * « et sélectionner » n'a de sens qu'appelé depuis le formulaire de
    * réservation, où la prestation créée vient se poser dans le champ.
    */
   libelleAction?: string;
   onClose: () => void;
-  onCreated: (prestation: Prestation) => void;
+  onSaved: (prestation: Prestation) => void;
 }) {
-  const [state, setState] = useState<FormState>(emptyState(manifestationId));
+  const [state, setState] = useState<FormState>(
+    etatInitial(prestation, manifestationId)
+  );
   const [manifestationSearch, setManifestationSearch] = useState('');
   const [debouncedManifestationSearch] = useDebouncedValue(
     manifestationSearch,
@@ -98,14 +134,13 @@ export function PrestationCreateModal({
   const [lieuSearch, setLieuSearch] = useState('');
   const [debouncedLieuSearch] = useDebouncedValue(lieuSearch, 300);
 
-  // Repart d'un état vierge (rattaché à la manifestation courante) à chaque
-  // ouverture, pour ne pas réafficher la saisie d'une création précédente.
+  // Recharge la saisie à chaque ouverture, pour ne pas réafficher celle de la
+  // prestation précédente.
   useEffect(() => {
     if (opened) {
-      setState(emptyState(manifestationId));
+      setState(etatInitial(prestation, manifestationId));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opened, manifestationId]);
+  }, [opened, manifestationId, prestation?.id]);
 
   const manifestationsQuery = useQuery<Page<ManifestationOption>>(
     {
@@ -144,7 +179,7 @@ export function PrestationCreateModal({
   const mutation = useMutation(
     {
       mutationFn: async () => {
-        const response = await context.api.post(PRESTATIONS_URL, {
+        const payload = {
           nom: state.nom,
           manifestation: state.manifestation
             ? Number(state.manifestation)
@@ -152,18 +187,30 @@ export function PrestationCreateModal({
           lieu: state.lieu ? Number(state.lieu) : null,
           date_debut: state.date_debut?.toISOString(),
           date_fin: state.date_fin?.toISOString()
-        });
+        };
+
+        if (prestation) {
+          const response = await context.api.patch(
+            `${PRESTATIONS_URL}${prestation.id}/`,
+            payload
+          );
+          return response.data as Prestation;
+        }
+
+        const response = await context.api.post(PRESTATIONS_URL, payload);
         return response.data as Prestation;
       },
-      onSuccess: (prestation) => {
+      onSuccess: (enregistree) => {
         notifications.show({
           color: 'green',
-          message: `Prestation « ${prestation.nom} » créée et sélectionnée.`
+          message: prestation
+            ? `Prestation « ${enregistree.nom} » mise à jour.`
+            : `Prestation « ${enregistree.nom} » créée et sélectionnée.`
         });
         context.queryClient.invalidateQueries({
           queryKey: ['reservation-prestations']
         });
-        onCreated(prestation);
+        onSaved(enregistree);
       },
       onError: (error: unknown) => {
         notifications.show({
@@ -176,16 +223,24 @@ export function PrestationCreateModal({
     context.queryClient
   );
 
-  const manifestationOptions = (manifestationsQuery.data?.results ?? []).map(
-    (manifestation) => ({
+  // La recherche paginée ne ramène pas forcément la manifestation ni le lieu
+  // déjà posés sur la prestation qu'on modifie : on les rajoute en tête.
+  const manifestationOptions = avecOptionCourante(
+    (manifestationsQuery.data?.results ?? []).map((manifestation) => ({
       value: String(manifestation.id),
       label: manifestation.nom
-    })
+    })),
+    state.manifestation,
+    prestation?.manifestation_nom
   );
-  const lieuOptions = (lieuxQuery.data?.results ?? []).map((lieu) => ({
-    value: String(lieu.id),
-    label: lieu.nom
-  }));
+  const lieuOptions = avecOptionCourante(
+    (lieuxQuery.data?.results ?? []).map((lieu) => ({
+      value: String(lieu.id),
+      label: lieu.nom
+    })),
+    state.lieu,
+    prestation?.lieu_detail?.nom
+  );
 
   const canSubmit = Boolean(
     state.nom &&
@@ -200,7 +255,11 @@ export function PrestationCreateModal({
       closeOnClickOutside={false}
       opened={opened}
       onClose={onClose}
-      title='Nouvelle prestation'
+      title={
+        prestation
+          ? `Modifier la prestation — ${prestation.nom}`
+          : 'Nouvelle prestation'
+      }
       size='lg'
     >
       <Stack gap='sm'>
@@ -275,7 +334,7 @@ export function PrestationCreateModal({
             loading={mutation.isPending}
             disabled={!canSubmit}
           >
-            {libelleAction}
+            {prestation ? 'Enregistrer' : libelleAction}
           </Button>
         </Group>
       </Stack>

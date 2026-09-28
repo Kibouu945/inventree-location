@@ -281,3 +281,26 @@ export function transitionErrorMessage(error: unknown): string {
     ? detail
     : "Le statut n'a pas pu être changé.";
 }
+
+/** Option de `Select` : {value, label} tels que Mantine les attend. */
+export interface OptionSelect {
+  value: string;
+  label: string;
+}
+
+/**
+ * Garantit que la valeur déjà choisie figure dans la liste : les options
+ * viennent d'une recherche paginée qui ne la contient pas forcément, et
+ * Mantine afficherait alors un champ vide sur un formulaire de modification.
+ */
+export function avecOptionCourante(
+  options: OptionSelect[],
+  value: string | null,
+  label: string | null | undefined
+): OptionSelect[] {
+  if (!value || !label || options.some((option) => option.value === value)) {
+    return options;
+  }
+
+  return [{ value, label }, ...options];
+}

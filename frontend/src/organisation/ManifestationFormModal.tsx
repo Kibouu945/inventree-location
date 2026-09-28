@@ -1,6 +1,5 @@
-// Création rapide d'une manifestation depuis la ligne d'un client.
-// Recette Tassin du 27/09, point 4.5.2 : « pourrait-on copier [le bouton vert
-// '+' de la manifestation] au niveau du client pour créer une manifestation ? »
+// Création (4.5.2) et modification (4.5.3) d'une manifestation depuis
+// l'arborescence, sans passer par l'onglet Manifestations.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   Button,
@@ -40,29 +39,63 @@ function emptyState(): FormState {
   };
 }
 
-export function ManifestationCreateModal({
+/** Saisie initiale : vierge en création, l'existant en modification. */
+function etatInitial(manifestation: Manifestation | null): FormState {
+  if (!manifestation) {
+    return emptyState();
+  }
+
+  return {
+    nom: manifestation.nom,
+    description: manifestation.description ?? '',
+    contact:
+      manifestation.contact != null ? String(manifestation.contact) : null,
+    date_debut: manifestation.date_debut
+      ? new Date(manifestation.date_debut)
+      : null,
+    date_fin: manifestation.date_fin ? new Date(manifestation.date_fin) : null
+  };
+}
+
+function titreDuFormulaire(
+  manifestation: Manifestation | null,
+  client: { nom: string } | null
+): string {
+  if (manifestation) {
+    return `Modifier la manifestation — ${manifestation.nom}`;
+  }
+
+  return client
+    ? `Nouvelle manifestation — ${client.nom}`
+    : 'Nouvelle manifestation';
+}
+
+export function ManifestationFormModal({
   context,
   opened,
   client,
+  manifestation = null,
   onClose,
-  onCreated
+  onSaved
 }: {
   context: InvenTreePluginContext;
   opened: boolean;
   /** Client porteur : c'est lui qui ouvre la pop-up, il n'est pas à choisir. */
   client: { id: number; nom: string } | null;
+  /** Renseignée : on modifie cette manifestation au lieu d'en créer une. */
+  manifestation?: Manifestation | null;
   onClose: () => void;
-  onCreated: (manifestation: Manifestation) => void;
+  onSaved: (manifestation: Manifestation) => void;
 }) {
-  const [state, setState] = useState<FormState>(emptyState());
+  const [state, setState] = useState<FormState>(etatInitial(manifestation));
 
-  // Repart d'une saisie vierge à chaque ouverture, sans quoi la manifestation
+  // Recharge la saisie à chaque ouverture, sans quoi la manifestation
   // précédente resterait à l'écran.
   useEffect(() => {
     if (opened) {
-      setState(emptyState());
+      setState(etatInitial(manifestation));
     }
-  }, [opened]);
+  }, [opened, manifestation?.id]);
 
   const contactsQuery = useQuery<{
     results: Array<{ id: number; nom: string; prenom: string; actif: boolean }>;
@@ -83,24 +116,38 @@ export function ManifestationCreateModal({
   const mutation = useMutation(
     {
       mutationFn: async () => {
-        const response = await context.api.post(MANIFESTATIONS_URL, {
+        const payload = {
           nom: state.nom,
           description: state.description,
-          // Une manifestation naît en brouillon, comme depuis l'onglet.
-          statut: 'brouillon',
           client: client?.id ?? null,
           contact: state.contact ? Number(state.contact) : null,
           date_debut: state.date_debut?.toISOString(),
           date_fin: state.date_fin?.toISOString()
+        };
+
+        if (manifestation) {
+          const response = await context.api.patch(
+            `${MANIFESTATIONS_URL}${manifestation.id}/`,
+            payload
+          );
+          return response.data as Manifestation;
+        }
+
+        const response = await context.api.post(MANIFESTATIONS_URL, {
+          ...payload,
+          // Une manifestation naît en brouillon, comme depuis l'onglet.
+          statut: 'brouillon'
         });
         return response.data as Manifestation;
       },
-      onSuccess: (manifestation) => {
+      onSuccess: (enregistree) => {
         notifications.show({
           color: 'green',
-          message: `Manifestation « ${manifestation.nom} » créée.`
+          message: manifestation
+            ? `Manifestation « ${enregistree.nom} » mise à jour.`
+            : `Manifestation « ${enregistree.nom} » créée.`
         });
-        onCreated(manifestation);
+        onSaved(enregistree);
       },
       onError: (error: unknown) => {
         notifications.show({
@@ -108,7 +155,7 @@ export function ManifestationCreateModal({
           title: 'Erreur',
           message: apiErrorMessage(
             error,
-            "La manifestation n'a pas pu être créée."
+            "La manifestation n'a pas pu être enregistrée."
           )
         });
       }
@@ -130,11 +177,7 @@ export function ManifestationCreateModal({
       closeOnClickOutside={false}
       opened={opened}
       onClose={onClose}
-      title={
-        client
-          ? `Nouvelle manifestation — ${client.nom}`
-          : 'Nouvelle manifestation'
-      }
+      title={titreDuFormulaire(manifestation, client)}
       size='lg'
     >
       <Stack gap='sm'>
@@ -212,7 +255,7 @@ export function ManifestationCreateModal({
             loading={mutation.isPending}
             disabled={!canSubmit}
           >
-            Créer la manifestation
+            {manifestation ? 'Enregistrer' : 'Créer la manifestation'}
           </Button>
         </Group>
       </Stack>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  avecOptionCourante,
   buildReservationPayload,
   canArbitrateReservation,
   canCancelReservation,
@@ -424,5 +425,28 @@ describe('readOnlyReason', () => {
     expect(readOnlyReason('zzz')).toBe(
       'Cette réservation n’est plus modifiable.'
     );
+  });
+});
+
+describe('avecOptionCourante', () => {
+  const options = [
+    { value: '1', label: 'Camp Jambville' },
+    { value: '2', label: 'Camp Chamarande' }
+  ];
+
+  it('ajoute en tête la valeur absente de la page ramenée', () => {
+    expect(avecOptionCourante(options, '9', 'Camp Melan')).toEqual([
+      { value: '9', label: 'Camp Melan' },
+      ...options
+    ]);
+  });
+
+  it('ne double pas une valeur déjà présente', () => {
+    expect(avecOptionCourante(options, '1', 'Camp Jambville')).toBe(options);
+  });
+
+  it('laisse la liste intacte sans valeur ni libellé', () => {
+    expect(avecOptionCourante(options, null, 'Camp Melan')).toBe(options);
+    expect(avecOptionCourante(options, '9', null)).toBe(options);
   });
 });

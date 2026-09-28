@@ -34,7 +34,7 @@ import {
 } from './formLogic';
 import { LieuMapLinks } from './LieuMapLinks';
 import { PartPicker } from './PartPicker';
-import { PrestationCreateModal } from './PrestationCreateModal';
+import { PrestationFormModal } from './PrestationFormModal';
 import type {
   Page,
   Prestation,
@@ -502,12 +502,12 @@ export function ReservationForm({
         )}
       </Group>
 
-      <PrestationCreateModal
+      <PrestationFormModal
         context={context}
         opened={prestationModalOpen}
         manifestationId={selectedPrestation?.manifestation ?? null}
         onClose={() => setPrestationModalOpen(false)}
-        onCreated={handlePrestationCreated}
+        onSaved={handlePrestationCreated}
       />
 
       {selectedPrestation && (

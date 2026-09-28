@@ -19,19 +19,20 @@ import { useDebouncedValue } from '@mantine/hooks';
 import {
   IconChevronDown,
   IconChevronRight,
+  IconPencil,
   IconPlus,
   IconSearch
 } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
-import { ManifestationCreateModal } from '../organisation/ManifestationCreateModal';
+import { ManifestationFormModal } from '../organisation/ManifestationFormModal';
 import type {
   Client,
   Manifestation,
   Page,
   Prestation
 } from '../organisation/types';
-import { PrestationCreateModal } from '../reservation/PrestationCreateModal';
+import { PrestationFormModal } from '../reservation/PrestationFormModal';
 import { ReservationForm } from '../reservation/ReservationForm';
 import type { Reservation } from '../reservation/types';
 import { canWriteOrganisation, canWriteReservations } from '../roles';
@@ -146,6 +147,35 @@ function Ajouter({
         onClick={onClick}
       >
         <IconPlus size={14} />
+      </ActionIcon>
+    </Tooltip>
+  );
+}
+
+/** Bouton d'accès direct à l'item en modification (4.5.3). */
+function Modifier({
+  quoi,
+  onClick,
+  autorise = true
+}: {
+  quoi: string;
+  onClick: () => void;
+  autorise?: boolean;
+}) {
+  if (!autorise) {
+    return null;
+  }
+
+  return (
+    <Tooltip label={`Modifier ${quoi}`}>
+      <ActionIcon
+        variant='light'
+        color='blue'
+        size='sm'
+        aria-label={`Modifier ${quoi}`}
+        onClick={onClick}
+      >
+        <IconPencil size={14} />
       </ActionIcon>
     </Tooltip>
   );
@@ -283,6 +313,11 @@ function BonsDeLaPrestation({
                     etat={etatRamassage}
                     libelle='Ramassage'
                   />
+                  <Modifier
+                    quoi='le bon'
+                    autorise={peutEcrire}
+                    onClick={() => setBonEdite(bon)}
+                  />
                   <Ajouter
                     quoi='un article'
                     autorise={peutEcrire}
@@ -381,6 +416,9 @@ function PrestationsDeLaManifestation({
   const [prestationDuBon, setPrestationDuBon] = useState<Prestation | null>(
     null
   );
+  const [prestationEditee, setPrestationEditee] = useState<Prestation | null>(
+    null
+  );
   const peutEcrire = canWriteReservations(context);
 
   const query = useQuery<Page<Prestation>>(
@@ -445,11 +483,18 @@ function PrestationsDeLaManifestation({
                   </Group>
                 </UnstyledButton>
 
-                <Ajouter
-                  quoi='une réservation'
-                  autorise={peutEcrire}
-                  onClick={() => setPrestationDuBon(prestation)}
-                />
+                <Group gap={6} wrap='nowrap'>
+                  <Modifier
+                    quoi='la prestation'
+                    autorise={canWriteOrganisation(context)}
+                    onClick={() => setPrestationEditee(prestation)}
+                  />
+                  <Ajouter
+                    quoi='une réservation'
+                    autorise={peutEcrire}
+                    onClick={() => setPrestationDuBon(prestation)}
+                  />
+                </Group>
               </Group>
             </Ligne>
 
@@ -463,6 +508,20 @@ function PrestationsDeLaManifestation({
           </Box>
         );
       })}
+
+      <PrestationFormModal
+        context={context}
+        opened={prestationEditee !== null}
+        manifestationId={manifestation.id}
+        prestation={prestationEditee}
+        onClose={() => setPrestationEditee(null)}
+        onSaved={() => {
+          setPrestationEditee(null);
+          context.queryClient.invalidateQueries({
+            queryKey: ['arbo-prestations', manifestation.id]
+          });
+        }}
+      />
 
       <Modal
         closeOnClickOutside={false}
@@ -496,7 +555,8 @@ function ManifestationsDuClient({
   periode,
   ouvertes,
   setOuvertes,
-  onAjouterPrestation
+  onAjouterPrestation,
+  onModifierManifestation
 }: {
   context: InvenTreePluginContext;
   client: Client;
@@ -505,6 +565,7 @@ function ManifestationsDuClient({
   ouvertes: Set<number>;
   setOuvertes: React.Dispatch<React.SetStateAction<Set<number>>>;
   onAjouterPrestation: (manifestation: Manifestation) => void;
+  onModifierManifestation: (manifestation: Manifestation) => void;
 }) {
   const params = useMemo(
     () => filtresManifestations(recherche, periode, client.id),
@@ -578,11 +639,18 @@ function ManifestationsDuClient({
                   </Group>
                 </UnstyledButton>
 
-                <Ajouter
-                  quoi='une prestation'
-                  autorise={canWriteOrganisation(context)}
-                  onClick={() => onAjouterPrestation(manifestation)}
-                />
+                <Group gap={6} wrap='nowrap'>
+                  <Modifier
+                    quoi='la manifestation'
+                    autorise={canWriteOrganisation(context)}
+                    onClick={() => onModifierManifestation(manifestation)}
+                  />
+                  <Ajouter
+                    quoi='une prestation'
+                    autorise={canWriteOrganisation(context)}
+                    onClick={() => onAjouterPrestation(manifestation)}
+                  />
+                </Group>
               </Group>
             </Ligne>
 
@@ -605,9 +673,12 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
   const [recherche, setRecherche] = useState('');
   const [periode, setPeriode] = useState('futur');
   const [clientsOuverts, setClientsOuverts] = useState<Set<number>>(new Set());
-  // Client dont on crée une manifestation, par le « + » de sa ligne (4.5.2).
-  const [clientDeLaManifestation, setClientDeLaManifestation] =
-    useState<Client | null>(null);
+  // Formulaire manifestation : ouvert par le « + » d'un client (4.5.2, la
+  // manifestation est nulle) ou par le crayon d'une manifestation (4.5.3).
+  const [formManifestation, setFormManifestation] = useState<{
+    client: Client;
+    manifestation: Manifestation | null;
+  } | null>(null);
   const [ouvertes, setOuvertes] = useState<Set<number>>(new Set());
   const [manifestationDeLaPrestation, setManifestationDeLaPrestation] =
     useState<Manifestation | null>(null);
@@ -695,11 +766,11 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
     ? clients.filter((client) => clientsTrouves.has(client.id))
     : clients;
 
-  /** Une manifestation vient de naître : le client la montre aussitôt. */
-  function manifestationCreee() {
-    const porteur = clientDeLaManifestation;
+  /** Manifestation enregistrée : le client la montre aussitôt, à jour. */
+  function manifestationEnregistree() {
+    const porteur = formManifestation?.client;
 
-    setClientDeLaManifestation(null);
+    setFormManifestation(null);
 
     if (!porteur) {
       return;
@@ -850,7 +921,9 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
                   <Ajouter
                     quoi='une manifestation'
                     autorise={canWriteOrganisation(context)}
-                    onClick={() => setClientDeLaManifestation(client)}
+                    onClick={() =>
+                      setFormManifestation({ client, manifestation: null })
+                    }
                   />
                 </Group>
               </Ligne>
@@ -864,6 +937,9 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
                   ouvertes={ouvertes}
                   setOuvertes={setOuvertes}
                   onAjouterPrestation={setManifestationDeLaPrestation}
+                  onModifierManifestation={(manifestation) =>
+                    setFormManifestation({ client, manifestation })
+                  }
                 />
               )}
             </Box>
@@ -871,21 +947,22 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
         })}
       </Box>
 
-      <ManifestationCreateModal
+      <ManifestationFormModal
         context={context}
-        opened={clientDeLaManifestation !== null}
-        client={clientDeLaManifestation}
-        onClose={() => setClientDeLaManifestation(null)}
-        onCreated={manifestationCreee}
+        opened={formManifestation !== null}
+        client={formManifestation?.client ?? null}
+        manifestation={formManifestation?.manifestation ?? null}
+        onClose={() => setFormManifestation(null)}
+        onSaved={manifestationEnregistree}
       />
 
-      <PrestationCreateModal
+      <PrestationFormModal
         context={context}
         opened={manifestationDeLaPrestation !== null}
         manifestationId={manifestationDeLaPrestation?.id ?? null}
         libelleAction='Créer la prestation'
         onClose={() => setManifestationDeLaPrestation(null)}
-        onCreated={prestationCreee}
+        onSaved={prestationCreee}
       />
     </Stack>
   );
