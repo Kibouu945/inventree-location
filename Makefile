@@ -1,5 +1,5 @@
 .PHONY: up down attendre migrate test build build-frontend front static dev logs \
-        shell clean manage provision-plugin provision deployer
+        shell clean manage provision-plugin provision deployer traductions
 
 # ############################################################################
 # 1. OBLIGATOIRE PARTOUT — en dev comme en prod, après chaque déploiement
@@ -33,6 +33,11 @@
 #   pas bougé, le signal ne rejoue pas. Constaté au déploiement 1.0.0, où un
 #   compte voyait 5 widgets sur 9. Déjà lancée par `deploy.sh`.
 # ############################################################################
+
+# Recompile le catalogue de surcharge après toute retouche du .po. Le .mo est
+# versionné : le montage du plugin masquerait celui que l'image construirait.
+traductions:
+	docker compose exec -T inventree bash -lc "cd /home/inventree/plugin/inventree_location/locale/fr/LC_MESSAGES && msgfmt -o django.mo django.po && echo 'catalogue compilé'"
 
 deployer:
 	make manage cmd="provision_role_permissions"
