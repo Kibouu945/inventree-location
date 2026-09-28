@@ -304,3 +304,22 @@ export function avecOptionCourante(
 
   return [{ value, label }, ...options];
 }
+
+/**
+ * Terme à envoyer au serveur pour un `Select` searchable. Mantine recopie le
+ * libellé de l'option choisie dans le champ de recherche : le renvoyer tel quel
+ * ne ramènerait que cette option, et la liste se réduirait à ce qu'on vient de
+ * choisir. On ne cherche donc que sur une saisie qui diffère du libellé retenu.
+ */
+export function rechercheServeur(
+  saisie: string,
+  libelleChoisi: string | null | undefined
+): string | undefined {
+  const terme = saisie.trim();
+
+  if (!terme || terme === libelleChoisi) {
+    return undefined;
+  }
+
+  return terme;
+}

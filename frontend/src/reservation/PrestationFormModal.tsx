@@ -11,7 +11,7 @@ import {
   finSuivantLeDebut,
   reprendreLesDates
 } from '../DateTimeField';
-import { avecOptionCourante } from './formLogic';
+import { avecOptionCourante, rechercheServeur } from './formLogic';
 
 import type {
   LieuSummary,
@@ -69,8 +69,9 @@ function emptyState(manifestationId: number | null): FormState {
   };
 }
 
-/** Manifestation porteuse, réduite aux dates que la prestation reprend. */
+/** Manifestation porteuse : son nom, et les dates que la prestation reprend. */
 interface ManifestationDatee {
+  nom: string;
   date_debut: string | null;
   date_fin: string | null;
 }
@@ -146,6 +147,12 @@ export function PrestationFormModal({
   // 4.6.1 : les dates suivent la manifestation tant que l'utilisateur n'y a
   // pas touché lui-même.
   const [datesSaisies, setDatesSaisies] = useState(false);
+  // Libellés des options retenues : Mantine les recopie dans les champs de
+  // recherche, il ne faut pas les prendre pour une recherche de l'utilisateur.
+  const [libelleManifestation, setLibelleManifestation] = useState<
+    string | null
+  >(null);
+  const [libelleLieu, setLibelleLieu] = useState<string | null>(null);
 
   // Recharge la saisie à chaque ouverture, pour ne pas réafficher celle de la
   // prestation précédente.
@@ -153,6 +160,8 @@ export function PrestationFormModal({
     if (opened) {
       setState(etatInitial(prestation, manifestationId));
       setDatesSaisies(prestation != null);
+      setLibelleManifestation(prestation?.manifestation_nom ?? null);
+      setLibelleLieu(prestation?.lieu_detail?.nom ?? null);
     }
   }, [opened, manifestationId, prestation?.id]);
 
@@ -179,6 +188,9 @@ export function PrestationFormModal({
       return;
     }
 
+    // Le nom sert aussi à reconnaître ce que Mantine a recopié dans le champ
+    // de recherche : sans lui, la liste se réduit à la manifestation courante.
+    setLibelleManifestation(porteuse.nom);
     setState((s) => ({
       ...s,
       ...reprendreLesDates(porteuse, s, datesSaisies)
@@ -189,13 +201,17 @@ export function PrestationFormModal({
     {
       queryKey: [
         'prestation-modal-manifestations',
-        debouncedManifestationSearch
+        debouncedManifestationSearch,
+        libelleManifestation
       ],
       enabled: opened,
       queryFn: async () => {
         const response = await context.api.get(MANIFESTATIONS_URL, {
           params: {
-            search: debouncedManifestationSearch || undefined,
+            search: rechercheServeur(
+              debouncedManifestationSearch,
+              libelleManifestation
+            ),
             page_size: 20
           }
         });
@@ -207,11 +223,14 @@ export function PrestationFormModal({
 
   const lieuxQuery = useQuery<Page<LieuSummary>>(
     {
-      queryKey: ['prestation-modal-lieux', debouncedLieuSearch],
+      queryKey: ['prestation-modal-lieux', debouncedLieuSearch, libelleLieu],
       enabled: opened,
       queryFn: async () => {
         const response = await context.api.get(LIEUX_URL, {
-          params: { search: debouncedLieuSearch || undefined, page_size: 20 }
+          params: {
+            search: rechercheServeur(debouncedLieuSearch, libelleLieu),
+            page_size: 20
+          }
         });
         return response.data as Page<LieuSummary>;
       }
@@ -324,9 +343,12 @@ export function PrestationFormModal({
           searchValue={manifestationSearch}
           onSearchChange={setManifestationSearch}
           value={state.manifestation}
-          onChange={(value) =>
-            setState((s) => ({ ...s, manifestation: value }))
-          }
+          onChange={(value) => {
+            setLibelleManifestation(
+              manifestationOptions.find((o) => o.value === value)?.label ?? null
+            );
+            setState((s) => ({ ...s, manifestation: value }));
+          }}
         />
         <Select
           label='Lieu'
@@ -337,7 +359,12 @@ export function PrestationFormModal({
           searchValue={lieuSearch}
           onSearchChange={setLieuSearch}
           value={state.lieu}
-          onChange={(value) => setState((s) => ({ ...s, lieu: value }))}
+          onChange={(value) => {
+            setLibelleLieu(
+              lieuOptions.find((o) => o.value === value)?.label ?? null
+            );
+            setState((s) => ({ ...s, lieu: value }));
+          }}
         />
         <Group grow>
           <DateTimeField

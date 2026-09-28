@@ -10,6 +10,7 @@ import {
   isReservationEditable,
   prestationDefaults,
   readOnlyReason,
+  rechercheServeur,
   removeLigne,
   reservationToFormValues,
   transitionErrorMessage,
@@ -448,5 +449,26 @@ describe('avecOptionCourante', () => {
   it('laisse la liste intacte sans valeur ni libellé', () => {
     expect(avecOptionCourante(options, null, 'Camp Melan')).toBe(options);
     expect(avecOptionCourante(options, '9', null)).toBe(options);
+  });
+});
+
+describe('rechercheServeur', () => {
+  it('ne cherche pas sur le libellé qu’on vient de choisir', () => {
+    expect(
+      rechercheServeur('Camp Jambville', 'Camp Jambville')
+    ).toBeUndefined();
+  });
+
+  it('cherche dès que la saisie diffère du libellé retenu', () => {
+    expect(rechercheServeur('Camp Cham', 'Camp Jambville')).toBe('Camp Cham');
+  });
+
+  it('ignore une saisie vide ou blanche', () => {
+    expect(rechercheServeur('', null)).toBeUndefined();
+    expect(rechercheServeur('   ', null)).toBeUndefined();
+  });
+
+  it('cherche normalement quand rien n’est choisi', () => {
+    expect(rechercheServeur('Camp', null)).toBe('Camp');
   });
 });
