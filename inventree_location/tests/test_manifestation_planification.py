@@ -1,4 +1,4 @@
-"""Tests du passage « brouillon » → « planifiée » (recette 4.5.4)."""
+"""Tests du passage « brouillon » → « planifiée » (recette)."""
 
 from __future__ import annotations
 

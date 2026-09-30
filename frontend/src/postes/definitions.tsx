@@ -179,7 +179,7 @@ const HISTOGRAMME = onglet(
 //: `MANIFESTATIONS` figure aussi aux postes qui n'écrivent pas : l'arborescence
 //: masque d'elle-même ses actions via `canWriteOrganisation` et
 //: `canWriteReservations`, et le serveur refuse l'écriture de son côté.
-//: Recette Tassin du 27/09, point 4.2.3.
+//: Recette Tassin du 27/09.
 export const POSTES: Record<string, PosteDefinition> = {
   gestionnaire: {
     titre: 'Poste gestionnaire client',

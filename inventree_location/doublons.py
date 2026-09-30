@@ -7,7 +7,7 @@ fichier client se dédouble sans que personne ne s'en aperçoive.
 
 On compare donc des noms *normalisés* : casse, accents, ponctuation et espaces
 superflus retirés. Deux noms qui se ramènent à la même forme désignent le même
-client. Recette Tassin du 27/09, point 4.2.4.
+client. Recette Tassin du 27/09.
 """
 
 from __future__ import annotations

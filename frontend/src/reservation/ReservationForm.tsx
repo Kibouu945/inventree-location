@@ -136,7 +136,7 @@ function apiErrorMessage(error: unknown): string | null {
 
 /** Formulaire unique de création et d'édition d'une réservation. */
 /**
- * Dit si cet article bloque la validation, et de combien (4.7.3). Un article
+ * Dit si cet article bloque la validation, et de combien. Un article
  * virtuel n'a pas de stock physique : il ne bloque jamais.
  */
 function IndicateurStock({
@@ -227,7 +227,7 @@ export function ReservationForm({
     context.queryClient
   );
 
-  // 4.7.3 : d'où vient le blocage, article par article. Le serveur répond
+  // D'où vient le blocage, article par article. Le serveur répond
   // 409 quand il y a conflit — la charge utile est la même, on la lit.
   const conflitsQuery = useQuery<ReponseConflits>(
     {

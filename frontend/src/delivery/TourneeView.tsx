@@ -93,7 +93,7 @@ export function TourneeView({
     // Deux situations très différentes, que le même message confondait :
     // rien à livrer ce jour-là, ou des livraisons sans adresse géocodée.
     // « Aucun arrêt géolocalisé » laissait croire à une panne de carte.
-    // Recette Tassin du 27/09, points 4.8.2 et 4.8.3.
+    // Recette Tassin du 27/09.
     const rienDuTout = deliveries.length === 0 && ramassages.length === 0;
 
     return (
@@ -169,7 +169,7 @@ export function TourneeView({
 
       {/*
         « Ne semble pas opérationnel — je n'ai pas compris le processus mis en
-        place » (recette du 27/09, point 4.8.2). Le bouton existait, mais rien
+        place » (recette du 27/09). Le bouton existait, mais rien
         ne disait à quoi servait chaque arrêt ni pourquoi un ramassage n'en
         porte pas.
       */}
@@ -231,7 +231,7 @@ export function TourneeView({
                       {/*
                         Le bon ne s'ouvrait que depuis la Liste et
                         l'arborescence : le livreur en tournée devait quitter
-                        sa carte pour le retrouver. Recette Tassin, point 4.8.2.
+                        sa carte pour le retrouver. Recette Tassin.
                       */}
                       {onOpenNote && stop.kind === 'livraison' && (
                         <Tooltip label='Ouvrir le bon de livraison à faire signer sur place'>

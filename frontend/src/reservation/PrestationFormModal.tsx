@@ -1,5 +1,5 @@
 // Pop-up de création rapide d'une prestation depuis le formulaire de
-// réservation (RES-08), et de modification depuis l'arborescence (4.5.3).
+// réservation (RES-08), et de modification depuis l'arborescence.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   ActionIcon,
@@ -119,7 +119,7 @@ function etatInitial(
 
 /**
  * Pop-up (modal Mantine) créant une prestation sans quitter le formulaire de
- * réservation (RES-08), ou modifiant celle qu'on lui passe (4.5.3).
+ * réservation (RES-08), ou modifiant celle qu'on lui passe.
  */
 export function PrestationFormModal({
   context,
@@ -155,7 +155,7 @@ export function PrestationFormModal({
   );
   const [lieuSearch, setLieuSearch] = useState('');
   const [debouncedLieuSearch] = useDebouncedValue(lieuSearch, 300);
-  // 4.6.1 : les dates suivent la manifestation tant que l'utilisateur n'y a
+  // Les dates suivent la manifestation tant que l'utilisateur n'y a
   // pas touché lui-même.
   const [datesSaisies, setDatesSaisies] = useState(false);
   // Libellés des options retenues : Mantine les recopie dans les champs de
@@ -164,7 +164,7 @@ export function PrestationFormModal({
     string | null
   >(null);
   const [libelleLieu, setLibelleLieu] = useState<string | null>(null);
-  // 4.6.2 : saisir un lieu sans quitter la prestation en cours.
+  // Saisir un lieu sans quitter la prestation en cours.
   const [lieuEnSaisie, setLieuEnSaisie] = useState(false);
 
   // Recharge la saisie à chaque ouverture, pour ne pas réafficher celle de la

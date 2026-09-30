@@ -103,8 +103,9 @@ def test_suppression_jamais_accordee_hors_nomenclature(role, ruleset):
 
 
 def test_l_admin_compose_les_packs():
-    """Recette du 27/09, point 4.3.1 : constituer un pack et y associer des
-    éléments. Sans `bom` en écriture, l'onglet reste sans bouton d'ajout."""
+    """Recette du 27/09 : constituer un pack et y associer des éléments.
+
+    Sans `bom` en écriture, l'onglet reste sans bouton d'ajout."""
 
     droits = roles.ruleset_permissions(roles.ADMIN, "bom")
 

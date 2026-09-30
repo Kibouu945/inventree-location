@@ -154,7 +154,7 @@ export function ClientsTab({
       } else {
         const cree = await context.api.post(CLIENTS_URL, payload);
         // Un client sans interlocuteur oblige à revenir plus tard : on
-        // enchaîne sur son premier contact (point 4.4.1).
+        // enchaîne sur son premier contact.
         nouveauClient = { id: cree.data.id, nom: cree.data.nom };
       }
 

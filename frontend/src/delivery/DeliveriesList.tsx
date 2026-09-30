@@ -308,7 +308,7 @@ export function DeliveriesList({
 
   const rows = query.data?.results ?? [];
 
-  // 4.8.1 : sous « non », les articles virtuels disparaissent aussi des bons
+  // Sous « non », les articles virtuels disparaissent aussi des bons
   // qui en portent, pas seulement des bons qui n'ont que ça. Les écrans de
   // préparation travaillent sur cette copie ; le bon de livraison, lui, garde
   // ses services — c'est un document remis au client, pas une liste de

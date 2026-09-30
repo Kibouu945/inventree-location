@@ -117,7 +117,7 @@ export function ReservationsList({
 }) {
   const { tri, basculer } = useTri<ColonneBon>();
 
-  // Filtre client du tableau des bons (point 4.2.5.3).
+  // Filtre client du tableau des bons.
   const clientsQuery = useQuery<{
     results: Array<{ id: number; nom: string }>;
   }>(

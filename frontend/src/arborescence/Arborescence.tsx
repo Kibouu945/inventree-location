@@ -156,7 +156,7 @@ function Ajouter({
   );
 }
 
-/** Bouton d'accès direct à l'item en modification (4.5.3). */
+/** Bouton d'accès direct à l'item en modification. */
 function Modifier({
   quoi,
   onClick,
@@ -186,7 +186,7 @@ function Modifier({
 }
 
 /**
- * Passe une manifestation de « brouillon » à « planifiée » (4.5.4). Le serveur
+ * Passe une manifestation de « brouillon » à « planifiée ». Le serveur
  * refuse et dit pourquoi si la manifestation n'est pas prête : on relaie.
  */
 function Planifier({
@@ -364,7 +364,7 @@ function BonsDeLaPrestation({
                     <Text size='xs' c='dimmed'>
                       {lignes.length} article{lignes.length > 1 ? 's' : ''}
                     </Text>
-                    {/* 4.7.2 : le statut du bon, comme sur la manifestation. */}
+                    {/* Le statut du bon, comme sur la manifestation. */}
                     <Badge
                       size='xs'
                       variant='light'
@@ -756,8 +756,8 @@ export function Arborescence({ context }: { context: InvenTreePluginContext }) {
   const [recherche, setRecherche] = useState('');
   const [periode, setPeriode] = useState('futur');
   const [clientsOuverts, setClientsOuverts] = useState<Set<number>>(new Set());
-  // Formulaire manifestation : ouvert par le « + » d'un client (4.5.2, la
-  // manifestation est nulle) ou par le crayon d'une manifestation (4.5.3).
+  // Formulaire manifestation : ouvert par le « + » d'un client (la
+  // manifestation est nulle) ou par le crayon d'une manifestation.
   const [formManifestation, setFormManifestation] = useState<{
     client: Client;
     manifestation: Manifestation | null;

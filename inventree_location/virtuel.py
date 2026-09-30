@@ -1,7 +1,7 @@
 """Filtre « Virtuel : oui / non » des prestations et des réservations.
 
-Recette du 27/09, point 4.5.1 : « ne pas afficher les prestations et/ou les
-réservations si elles ne contiennent que des articles virtuels ». Un article
+Recette du 27/09 : « ne pas afficher les prestations et/ou les réservations
+si elles ne contiennent que des articles virtuels ». Un article
 virtuel est une prestation de service (nettoyage, gardiennage) : elle n'occupe
 ni stock ni camion, et brouille la lecture quand on prépare le matériel.
 """

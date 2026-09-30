@@ -89,7 +89,7 @@ export function ManifestationsTab({
 }) {
   const canWrite = canWriteOrganisation(context);
   const { tri, basculer } = useTri<ColonneManif>();
-  // Filtre par période, demandé sur les deux onglets (point 4.2.5).
+  // Filtre par période, demandé sur les deux onglets.
   const [periode, setPeriode] = useState<[string | null, string | null]>([
     null,
     null
@@ -391,7 +391,7 @@ export function ManifestationsTab({
                 <Table.Td ta='right'>
                   {/*
                     Le chiffre mène à l'onglet Prestations déjà filtré sur
-                    cette manifestation (point 4.2.5.1).
+                    cette manifestation.
                   */}
                   {manifestation.prestations_count > 0 && onVoirPrestations ? (
                     <Anchor

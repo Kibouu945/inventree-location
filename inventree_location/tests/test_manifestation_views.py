@@ -626,7 +626,7 @@ class TestFiltreParClient:
 
 
 class TestRechercheParClient:
-    """La recherche porte aussi sur le nom du client (point 4.2.4)."""
+    """La recherche porte aussi sur le nom du client."""
 
     @pytest.fixture
     def noms_disjoints(self, db):

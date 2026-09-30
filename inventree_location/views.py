@@ -158,6 +158,39 @@ def _borne_journee(champ, valeur, sens):
     return {f"{champ}__{sens}": valeur}
 
 
+def _filtrer_periode(queryset, params, champ_debut, champ_fin, cles=None):
+    """Garde ce qui **chevauche** la fenêtre, pas ce qui y tient entièrement.
+
+    D'où les deux champs : la borne basse se compare à la fin de l'objet, la
+    borne haute à son début. Une réservation à cheval sur le bord reste visible.
+    """
+
+    cle_debut, cle_fin = cles or ("date_from", "date_to")
+    debut = params.get(cle_debut)
+    fin = params.get(cle_fin)
+
+    if debut:
+        queryset = queryset.filter(**_borne_journee(champ_debut, debut, "gte"))
+
+    if fin:
+        queryset = queryset.filter(**_borne_journee(champ_fin, fin, "lte"))
+
+    return queryset
+
+
+def _reservation_introuvable():
+    """La réponse 404 des vues de réservation.
+
+    Elle sert aussi à masquer une réservation qu'on n'a pas le droit de voir :
+    un 403 avouerait qu'elle existe.
+    """
+
+    return Response(
+        {"detail": "Réservation introuvable."},
+        status=status.HTTP_404_NOT_FOUND,
+    )
+
+
 class ExampleView(APIView):
     """Example API view for the InvenTreeLocation plugin."""
 
@@ -360,7 +393,7 @@ class ReservationListCreateView(generics.ListCreateAPIView):
         if prestation_id:
             queryset = queryset.filter(prestation_id=prestation_id)
 
-        # Filtre client du tableau des bons (point 4.2.5.3).
+        # Filtre client du tableau des bons.
         client_id = self.request.query_params.get("client")
 
         if client_id:
@@ -380,23 +413,17 @@ class ReservationListCreateView(generics.ListCreateAPIView):
                 lignes__part__category_id__in=categories
             ).distinct()
 
-        # Filtre « Virtuel » du point 4.5.1.
+        # Filtre « Virtuel ».
         queryset = virtuel.filtrer(
             queryset, self.request.query_params.get("virtuel"), lignes="lignes"
         )
 
-        date_from = self.request.query_params.get("date_from")
-        date_to = self.request.query_params.get("date_to")
-
-        if date_from:
-            queryset = queryset.filter(
-                **_borne_journee("date_retour_prevue", date_from, "gte")
-            )
-
-        if date_to:
-            queryset = queryset.filter(
-                **_borne_journee("date_retrait_prevue", date_to, "lte")
-            )
+        queryset = _filtrer_periode(
+            queryset,
+            self.request.query_params,
+            "date_retour_prevue",
+            "date_retrait_prevue",
+        )
 
         search = self.request.query_params.get("search")
 
@@ -452,10 +479,7 @@ class DeliveryMarquerLivreeView(APIView):
         reservation = Reservation.objects.filter(pk=pk).first()
 
         if reservation is None:
-            return Response(
-                {"detail": "Réservation introuvable."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return _reservation_introuvable()
 
         if reservation.statut != StatutReservation.VALIDEE:
             return Response(
@@ -633,26 +657,20 @@ class DeliveryListView(generics.ListAPIView):
             statuts = self.request.query_params.getlist("statut")
             queryset = queryset.filter(statut__in=statuts or self.DEFAULT_STATUTS)
 
-        date_from = self.request.query_params.get("date_from")
-        date_to = self.request.query_params.get("date_to")
-
-        if date_from:
-            queryset = queryset.filter(
-                **_borne_journee("date_retour_prevue", date_from, "gte")
-            )
-
-        if date_to:
-            queryset = queryset.filter(
-                **_borne_journee("date_retrait_prevue", date_to, "lte")
-            )
+        queryset = _filtrer_periode(
+            queryset,
+            self.request.query_params,
+            "date_retour_prevue",
+            "date_retrait_prevue",
+        )
 
         lieux = _parse_csv_int_values(self.request.query_params.getlist("lieu"))
 
         if lieux:
             queryset = queryset.filter(prestation__lieu_id__in=lieux)
 
-        # Filtre « Virtuel » du point 4.8.1, même moteur que le 4.5.1 : un bon
-        # qui ne porte que des services n'a rien à faire dans une tournée.
+        # Filtre « Virtuel », même moteur que sur les prestations : un bon qui
+        # ne porte que des services n'a rien à faire dans une tournée.
         queryset = virtuel.filtrer(
             queryset, self.request.query_params.get("virtuel"), lignes="lignes"
         )
@@ -735,8 +753,6 @@ class RamassageListView(generics.ListAPIView):
         if roles.sees_only_deliverable_reservations(self.request.user):
             queryset = queryset.filter(statut=StatutReservation.VALIDEE)
 
-        date_from = self.request.query_params.get("date_from")
-        date_to = self.request.query_params.get("date_to")
         lieu = self.request.query_params.get("lieu")
         search = self.request.query_params.get("search")
         statuts = self.request.query_params.getlist("statut")
@@ -752,15 +768,12 @@ class RamassageListView(generics.ListAPIView):
         if statuts:
             queryset = queryset.filter(statut__in=statuts)
 
-        if date_from:
-            queryset = queryset.filter(
-                **_borne_journee("date_retour_prevue", date_from, "gte")
-            )
-
-        if date_to:
-            queryset = queryset.filter(
-                **_borne_journee("date_retour_prevue", date_to, "lte")
-            )
+        queryset = _filtrer_periode(
+            queryset,
+            self.request.query_params,
+            "date_retour_prevue",
+            "date_retour_prevue",
+        )
 
         if lieu:
             queryset = queryset.filter(
@@ -805,10 +818,7 @@ class BonRamassageView(APIView):
         )
 
         if reservation is None:
-            return Response(
-                {"detail": "Réservation introuvable."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return _reservation_introuvable()
 
         # Même restriction que la liste : un livreur pur n'imprime pas le bon
         # d'une réservation qu'il n'a pas le droit de voir.
@@ -816,10 +826,7 @@ class BonRamassageView(APIView):
             roles.sees_only_deliverable_reservations(request.user)
             and reservation.statut != StatutReservation.VALIDEE
         ):
-            return Response(
-                {"detail": "Réservation introuvable."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return _reservation_introuvable()
 
         serializer = self.serializer_class(reservation)
 
@@ -846,10 +853,7 @@ class ReservationConflictCheckView(APIView):
         )
 
         if reservation is None:
-            return Response(
-                {"detail": "Réservation introuvable."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return _reservation_introuvable()
 
         conflict_result = detect_reservation_conflicts(reservation)
 
@@ -874,10 +878,7 @@ class ReservationTransitionView(APIView):
         reservation = Reservation.objects.filter(pk=pk).first()
 
         if reservation is None:
-            return Response(
-                {"detail": "Réservation introuvable."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return _reservation_introuvable()
 
         return Response(
             {
@@ -894,10 +895,7 @@ class ReservationTransitionView(APIView):
         reservation = Reservation.objects.filter(pk=pk).first()
 
         if reservation is None:
-            return Response(
-                {"detail": "Réservation introuvable."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return _reservation_introuvable()
 
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -1091,10 +1089,7 @@ class ReservationRetourView(APIView):
         reservation = self._get_reservation(pk)
 
         if reservation is None:
-            return Response(
-                {"detail": "Réservation introuvable."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return _reservation_introuvable()
 
         if reservation.statut not in self.ELIGIBLE_STATUTS:
             return self._conflict_response(reservation, self.NOT_ELIGIBLE_DETAIL)
@@ -1129,10 +1124,7 @@ class ReservationRetourView(APIView):
             reservation = self._get_reservation(pk, lock=True)
 
             if reservation is None:
-                return Response(
-                    {"detail": "Réservation introuvable."},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
+                return _reservation_introuvable()
 
             if reservation.statut not in self.DECLARABLE_STATUTS:
                 return self._conflict_response(reservation, self.NOT_DECLARABLE_DETAIL)
@@ -1400,10 +1392,7 @@ class ReturnReportView(APIView):
         try:
             report = build_return_report(pk)
         except ValueError:
-            return Response(
-                {"detail": "Réservation introuvable."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return _reservation_introuvable()
         return Response(report, status=status.HTTP_200_OK)
 
 
@@ -1417,10 +1406,7 @@ class ReturnReportPdfView(APIView):
         try:
             pdf_buffer = generate_return_report_pdf(pk)
         except ValueError:
-            return Response(
-                {"detail": "Réservation introuvable."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return _reservation_introuvable()
         except PdfEngineUnavailable as error:
             # L'absence du moteur PDF ne concerne que cet export : elle ne doit
             # pas ressortir en 500 opaque.
@@ -2127,27 +2113,21 @@ class CatalogPartListView(APIView):
     serializer_class = CatalogPartSerializer
     pagination_class = CatalogPagination
 
-    def get(self, request, *args, **kwargs):
-        """Return a filtered and paginated catalog of InvenTree parts."""
+    def _base_queryset(self):
+        """Le catalogue InvenTree, trié, prêt à filtrer."""
 
         from part.models import Part
 
-        queryset = (
-            Part.objects.select_related("category", "rentable_info")
-            .all()
-            .order_by("name")
-        )
+        return Part.objects.select_related("category", "rentable_info").order_by("name")
+
+    def _filtrer_recherche_et_categories(self, queryset, request):
+        """Recherche et catégories, partagées avec l'état du parc.
+
+        Le magasinier cherche un article de la même façon sur les deux écrans ;
+        une seule implémentation garantit qu'ils ne divergeront pas.
+        """
 
         search = request.query_params.get("search")
-        category = request.query_params.get("category")
-        categories = request.query_params.get("categories")
-        active = request.query_params.get("active")
-        rentable = request.query_params.get("rentable")
-        virtual = request.query_params.get("virtual")
-        ids = request.query_params.get("ids")
-
-        if ids:
-            queryset = queryset.filter(pk__in=self._parse_ids(ids))
 
         if search:
             queryset = queryset.filter(
@@ -2156,20 +2136,36 @@ class CatalogPartListView(APIView):
                 | Q(IPN__icontains=search)
             )
 
-        category_ids = self._parse_category_ids(category, categories)
+        category_ids = self._parse_category_ids(
+            request.query_params.get("category"),
+            request.query_params.get("categories"),
+        )
 
         if category_ids:
             queryset = queryset.filter(
                 category_id__in=self._with_descendants(category_ids)
             )
 
-        active_value = self._parse_boolean(active)
+        return queryset
+
+    def get(self, request, *args, **kwargs):
+        """Return a filtered and paginated catalog of InvenTree parts."""
+
+        queryset = self._base_queryset()
+        ids = request.query_params.get("ids")
+
+        if ids:
+            queryset = queryset.filter(pk__in=self._parse_ids(ids))
+
+        queryset = self._filtrer_recherche_et_categories(queryset, request)
+
+        active_value = self._parse_boolean(request.query_params.get("active"))
 
         if active_value is not None:
             queryset = queryset.filter(active=active_value)
 
-        queryset = self._filter_rentable(queryset, rentable)
-        queryset = self._filter_virtual(queryset, virtual)
+        queryset = self._filter_rentable(queryset, request.query_params.get("rentable"))
+        queryset = self._filter_virtual(queryset, request.query_params.get("virtual"))
 
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(queryset, request)
@@ -2310,32 +2306,9 @@ class ParcStockListView(CatalogPartListView):
     def get(self, request, *args, **kwargs):
         """Retourne l'état du parc, paginé, filtré comme le catalogue."""
 
-        from part.models import Part
-
-        queryset = (
-            Part.objects.select_related("category", "rentable_info")
-            .filter(active=True)
-            .order_by("name")
+        queryset = self._filtrer_recherche_et_categories(
+            self._base_queryset().filter(active=True), request
         )
-
-        search = request.query_params.get("search")
-
-        if search:
-            queryset = queryset.filter(
-                Q(name__icontains=search)
-                | Q(description__icontains=search)
-                | Q(IPN__icontains=search)
-            )
-
-        category_ids = self._parse_category_ids(
-            request.query_params.get("category"),
-            request.query_params.get("categories"),
-        )
-
-        if category_ids:
-            queryset = queryset.filter(
-                category_id__in=self._with_descendants(category_ids)
-            )
 
         # Le parc, c'est le matériel : louable et non virtuel.
         queryset = self._filter_rentable(queryset, "true")
@@ -2347,7 +2320,7 @@ class ParcStockListView(CatalogPartListView):
         stocks = conflicts.get_parts_total_stock(page)
         lignes = parc.construire_lignes(page, stocks)
 
-        if str(request.query_params.get("alerte", "")).lower() in {"1", "true", "yes"}:
+        if self._parse_boolean(request.query_params.get("alerte")):
             lignes = [ligne for ligne in lignes if ligne["motifs_alerte"]]
 
         return paginator.get_paginated_response(lignes)
@@ -2640,7 +2613,7 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
         if search:
             # Le nom du client compte autant que celui de la manifestation :
             # un client sans manifestation restait introuvable, et on le
-            # recréait en double. Recette Tassin du 27/09, point 4.2.4.
+            # recréait en double. Recette Tassin du 27/09.
             queryset = queryset.filter(
                 Q(nom__icontains=search) | Q(client__nom__icontains=search)
             )
@@ -2656,16 +2629,13 @@ class ManifestationListCreateView(generics.ListCreateAPIView):
             else:
                 queryset = queryset.filter(date_fin__date__lt=aujourdhui)
 
-        # Fenêtre du planning : on veut ce qui **chevauche** la période, pas ce
-        # qui y tient entièrement.
-        depuis = self.request.query_params.get("from")
-        jusqua = self.request.query_params.get("to")
-
-        if depuis:
-            queryset = queryset.filter(**_borne_journee("date_fin", depuis, "gte"))
-
-        if jusqua:
-            queryset = queryset.filter(**_borne_journee("date_debut", jusqua, "lte"))
+        queryset = _filtrer_periode(
+            queryset,
+            self.request.query_params,
+            "date_fin",
+            "date_debut",
+            cles=("from", "to"),
+        )
 
         return queryset
 
@@ -2683,7 +2653,7 @@ class ManifestationDetailView(
 
 
 class ManifestationPlanifierView(APIView):
-    """Passe une manifestation de « brouillon » à « planifiée » (4.5.4)."""
+    """Passe une manifestation de « brouillon » à « planifiée »."""
 
     permission_classes = [ManifestationPermission]
 
@@ -2738,7 +2708,7 @@ def _prestation_queryset():
 
     return (
         # `manifestation__client` : la colonne « Client » du tableau des
-        # fiches, sans une requête par prestation (point 4.2.5.2).
+        # fiches, sans une requête par prestation.
         Prestation.objects.select_related("manifestation__client", "lieu")
         .prefetch_related("lignes_prestation__part")
         .all()
@@ -2770,21 +2740,20 @@ class PrestationListCreateView(generics.ListCreateAPIView):
         if manifestation_id:
             queryset = queryset.filter(manifestation_id=manifestation_id)
 
-        # Filtre « Virtuel » du point 4.5.1.
+        # Filtre « Virtuel ».
         queryset = virtuel.filtrer(
             queryset,
             self.request.query_params.get("virtuel"),
             lignes="lignes_prestation",
         )
 
-        depuis = self.request.query_params.get("from")
-        jusqua = self.request.query_params.get("to")
-
-        if depuis:
-            queryset = queryset.filter(**_borne_journee("date_fin", depuis, "gte"))
-
-        if jusqua:
-            queryset = queryset.filter(**_borne_journee("date_debut", jusqua, "lte"))
+        queryset = _filtrer_periode(
+            queryset,
+            self.request.query_params,
+            "date_fin",
+            "date_debut",
+            cles=("from", "to"),
+        )
 
         search = self.request.query_params.get("search")
 

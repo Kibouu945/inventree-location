@@ -143,7 +143,7 @@ export function ContactsTab({
   }
 
   // Créer un client sans son interlocuteur oblige à revenir plus tard : on
-  // enchaîne sur le contact, client déjà choisi (point 4.4.1).
+  // enchaîne sur le contact, client déjà choisi.
   useEffect(() => {
     if (!clientAEnchainer) {
       return;

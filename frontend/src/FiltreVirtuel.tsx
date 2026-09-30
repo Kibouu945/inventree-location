@@ -1,6 +1,6 @@
 // Filtre « Virtuel » des prestations et des bons.
-// Recette Tassin du 27/09, point 4.5.1 : écarter de l'écran les fiches qui ne
-// portent que des services, quand on prépare le matériel à sortir.
+// Recette Tassin du 27/09 : écarter de l'écran les fiches qui ne portent
+// que des services, quand on prépare le matériel à sortir.
 import { Select } from '@mantine/core';
 
 export type Virtuel = 'oui' | 'non' | null;

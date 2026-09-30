@@ -54,7 +54,7 @@ export function PartPicker({
     null
   );
   const [quantite, setQuantite] = useState<number>(1);
-  // Recette du 6/09, point 2.2 : « plus de 500 articles dans la base, quasi
+  // Recette du 6/09 : « plus de 500 articles dans la base, quasi
   // impossible de retrouver un article sans connaître son libellé exact ».
   // Les mêmes catégories que le catalogue, sous-catégories comprises.
   const [categories, setCategories] = useState<string[]>([]);

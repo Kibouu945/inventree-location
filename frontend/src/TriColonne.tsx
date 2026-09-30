@@ -1,6 +1,5 @@
 // En-tête de colonne triable, commun aux tableaux de fiches.
-// Recette Tassin du 27/09, point 4.2.5 : « si possible faire des colonnes
-// triables ».
+// Recette Tassin du 27/09 : « si possible faire des colonnes triables ».
 import { Group, Table, Text, UnstyledButton } from '@mantine/core';
 import { useMemo, useState } from 'react';
 

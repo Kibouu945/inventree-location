@@ -158,7 +158,7 @@ class TestDeliveryListView:
     def test_filtre_virtuel_ecarte_les_bons_de_service(
         self, factory, gestionnaire, prestation, part
     ):
-        """Point 4.8.1 : un bon qui ne porte que des services sort de la tournée."""
+        """Un bon qui ne porte que des services sort de la tournée."""
 
         from inventree_location.models import RentableItem
         from part.models import Part, PartCategory

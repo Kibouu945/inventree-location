@@ -1,4 +1,4 @@
-"""Renomme « Liste des matériaux » en « Liste des éléments » (point 4.3.1)."""
+"""Renomme « Liste des matériaux » en « Liste des éléments »."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Filtre « Virtuel » des prestations et réservations (recette 27/09, 4.5.1)."""
+"""Filtre « Virtuel » des prestations et réservations (recette du 27/09)."""
 
 from __future__ import annotations
 

@@ -324,7 +324,7 @@ export function rechercheServeur(
   return terme;
 }
 
-/** Conflit de stock sur un article, tel que le serveur le rend (4.7.3). */
+/** Conflit de stock sur un article, tel que le serveur le rend. */
 export interface ConflitArticle {
   part_id: number;
   part_name: string;
@@ -336,7 +336,7 @@ export interface ConflitArticle {
 /**
  * Les conflits rangés par article, pour marquer les lignes du tableau : le
  * client veut voir sur *quel* article porte le blocage, pas seulement qu'il y
- * en a un (recette 4.7.3).
+ * en a un (recette).
  */
 export function conflitsParArticle(
   conflits: ConflitArticle[] | undefined | null
@@ -362,7 +362,7 @@ export interface LignePreviewStock {
 
 /**
  * Ramène les lignes en pénurie du calcul « avant enregistrement » au format
- * des conflits : les deux chemins alimentent le même indicateur (4.7.3), un
+ * des conflits : les deux chemins alimentent le même indicateur, un
  * bon tout neuf n'a pas encore d'identifiant à donner au point d'entrée
  * `conflicts`.
  */

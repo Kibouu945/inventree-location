@@ -13,7 +13,7 @@
 # provision_role_permissions — InvenTree range ses droits dans des « RuleSet »
 #   liés aux groupes Django ; la commande y recopie la matrice de
 #   roles.ROLE_WRITE_RULESETS. Sans elle, la base n'a pas le droit `bom` en
-#   écriture et la composition des packs (recette 4.3.1) n'apparaît pas.
+#   écriture et la composition des packs n'apparaît pas.
 #   Idempotente : la relancer ne coûte rien.
 #   Déjà lancée par `deploy.sh` sur le VPS.
 #

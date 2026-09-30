@@ -1,4 +1,4 @@
-"""Contrôles préalables au passage d'une manifestation en « planifiée » (4.5.4)."""
+"""Contrôles préalables au passage d'une manifestation en « planifiée »."""
 
 from __future__ import annotations
 

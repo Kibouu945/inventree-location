@@ -1,10 +1,12 @@
+import { parseIntList, parseStringList, parseVirtuel } from '../urlState';
+
 export interface ReservationFiltersState {
   search: string;
   statuts: string[];
   categories: number[];
-  /** Filtre client du tableau des bons (point 4.2.5.3). */
+  /** Filtre client du tableau des bons. */
   client: string | null;
-  /** Filtre « Virtuel » du point 4.5.1 : `oui`, `non`, ou rien. */
+  /** Filtre « Virtuel » : `oui`, `non`, ou rien. */
   virtuel: string | null;
   dateRange: [string | null, string | null];
 }
@@ -99,47 +101,6 @@ export function serializeReservationFilters(
   }
 
   return search.toString();
-}
-
-function parseIntList(value: string | null): number[] {
-  if (!value) {
-    return [];
-  }
-
-  const seen = new Set<number>();
-
-  for (const entry of value.split(',')) {
-    const parsed = Number.parseInt(entry, 10);
-
-    if (Number.isInteger(parsed)) {
-      seen.add(parsed);
-    }
-  }
-
-  return Array.from(seen);
-}
-
-/** L'URL est éditable à la main : une valeur inconnue vaut « pas de filtre ». */
-function parseVirtuel(value: string | null): string | null {
-  return value === 'oui' || value === 'non' ? value : null;
-}
-
-function parseStringList(value: string | null): string[] {
-  if (!value) {
-    return [];
-  }
-
-  const seen = new Set<string>();
-
-  for (const entry of value.split(',')) {
-    const normalized = entry.trim();
-
-    if (normalized) {
-      seen.add(normalized);
-    }
-  }
-
-  return Array.from(seen);
 }
 
 export function parseReservationFilters(

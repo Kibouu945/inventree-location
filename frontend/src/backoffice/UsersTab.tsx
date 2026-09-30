@@ -261,7 +261,7 @@ export function UsersTab({ context }: { context: InvenTreePluginContext }) {
                   {/*
                     L'identifiant de connexion a sa colonne : c'est lui qu'on
                     communique, et il se lisait en gris sous le nom complet.
-                    Recette Tassin du 27/09, point 4.4.
+                    Recette Tassin du 27/09.
                   */}
                   <Text ff='monospace' size='sm'>
                     {user.username}

@@ -1,8 +1,8 @@
 """Retouches du catalogue de traduction français d'InvenTree.
 
-Recette du 27/09, point 4.3.1 : « la traduction "Liste des matériaux" est
-inappropriée, on pourrait mettre "Liste des éléments" ». La chaîne appartient au
-frontend natif d'InvenTree, compilé par Lingui : ni notre plugin ni
+Recette du 27/09 : « la traduction "Liste des matériaux" est inappropriée,
+on pourrait mettre "Liste des éléments" ». La chaîne appartient au frontend
+natif d'InvenTree, compilé par Lingui : ni notre plugin ni
 `LOCALE_PATHS` ne l'atteignent. On réécrit donc le catalogue livré.
 """
 

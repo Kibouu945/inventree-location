@@ -495,7 +495,7 @@ class ReservationSerializer(serializers.ModelSerializer):
     lignes = LigneReservationSerializer(many=True, required=False)
     status_logs = ReservationStatusLogSerializer(many=True, read_only=True)
     prestation_nom = serializers.CharField(source="prestation.nom", read_only=True)
-    # Colonnes « Client » et « Manifestation » du tableau des bons (4.2.5.3).
+    # Colonnes « Client » et « Manifestation » du tableau des bons.
     manifestation_nom = serializers.CharField(
         source="prestation.manifestation.nom", read_only=True
     )
@@ -1557,7 +1557,7 @@ class PrestationSerializer(serializers.ModelSerializer):
         source="manifestation.nom",
         read_only=True,
     )
-    # Colonne « Client » des tableaux de fiches (point 4.2.5.2).
+    # Colonne « Client » des tableaux de fiches.
     client_nom = serializers.CharField(
         source="manifestation.client.nom",
         read_only=True,

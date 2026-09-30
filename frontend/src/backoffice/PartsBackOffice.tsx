@@ -537,7 +537,7 @@ export function PartsBackOffice({
             />
           </Group>
 
-          {/* Recette Tassin du 07/09/2026, remarque 9 : « il ne semble pas
+          {/* Recette Tassin du 07/09/2026 : « il ne semble pas
               possible d'ajouter du stock à un produit suite à un inventaire ».
               C'est possible, mais il est passé par l'écran natif d'InvenTree,
               qui n'incrémente que des lignes de stock existantes — sur un

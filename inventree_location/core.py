@@ -389,7 +389,7 @@ class InvenTreeLocation(
         if context.get("target_model") == "part":
             # Le drapeau « louable » se cherche d'abord sur la fiche de
             # l'article : le titre et l'icône du squelette de plugin rendaient
-            # ce panneau introuvable. Recette Tassin du 27/09, point 4.7.1.
+            # ce panneau introuvable. Recette Tassin du 27/09.
             panels.append({
                 "key": "inventree-location-panel",
                 "title": "Location — paramètres",

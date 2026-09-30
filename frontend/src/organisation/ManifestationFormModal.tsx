@@ -1,5 +1,5 @@
-// Création (4.5.2) et modification (4.5.3) d'une manifestation depuis
-// l'arborescence, sans passer par l'onglet Manifestations.
+// Création et modification d'une manifestation depuis l'arborescence,
+// sans passer par l'onglet Manifestations.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   Button,

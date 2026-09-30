@@ -316,7 +316,7 @@ class BackOfficeClientSerializer(serializers.ModelSerializer):
 
         `nom` est unique, mais « Mairie de vertou » passait à côté de
         « Mairie de Vertou » : le fichier client se dédoublait sans que
-        personne ne s'en aperçoive. Recette Tassin du 27/09, point 4.2.4.
+        personne ne s'en aperçoive. Recette Tassin du 27/09.
         """
 
         deja = Client.objects.all()

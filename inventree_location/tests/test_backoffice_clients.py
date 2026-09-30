@@ -335,7 +335,7 @@ class TestContacts:
 
 @pytest.mark.django_db
 class TestDoublonDeClient:
-    """Un client saisi deux fois sous un nom presque identique (point 4.2.4)."""
+    """Un client saisi deux fois sous un nom presque identique."""
 
     def test_la_variante_d_ecriture_est_refusee(self, factory, admin):
         Client.objects.create(nom="Mairie de Vertou")

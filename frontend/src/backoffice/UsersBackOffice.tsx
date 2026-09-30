@@ -21,7 +21,7 @@ export function UsersBackOffice({
     gereLesComptes ? 'utilisateurs' : 'clients'
   );
   // Client tout juste créé : l'onglet Contacts ouvre son premier
-  // interlocuteur, client déjà choisi (point 4.4.1).
+  // interlocuteur, client déjà choisi.
   const [clientAEnchainer, setClientAEnchainer] = useState<{
     id: number;
     nom: string;

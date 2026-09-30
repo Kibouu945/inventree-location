@@ -31,7 +31,7 @@ const UN_JOUR = 24 * 60 * 60 * 1000;
  * mois courant : il fallait renaviguer jusqu'à la bonne date. La fin
  * suit désormais le début d'un jour, tant qu'elle n'a pas été fixée à la
  * main ou qu'elle est devenue antérieure au début.
- * Recette Tassin du 27/09, point 4.2.2.
+ * Recette Tassin du 27/09.
  */
 export function finSuivantLeDebut(
   debut: Date | null,
@@ -50,7 +50,7 @@ export function finSuivantLeDebut(
 }
 
 /**
- * Dates reprises de la manifestation à la création d'une prestation (4.6.1).
+ * Dates reprises de la manifestation à la création d'une prestation.
  * Une saisie de l'utilisateur prime : on ne la réécrit pas s'il change ensuite
  * de manifestation.
  */

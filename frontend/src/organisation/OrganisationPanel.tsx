@@ -14,7 +14,7 @@ export function OrganisationPanel({
 }) {
   const [onglet, setOnglet] = useState<string | null>('manifestations');
   // Le clic sur le nombre de prestations d'une manifestation bascule d'onglet
-  // en emportant le filtre (point 4.2.5.1).
+  // en emportant le filtre.
   const [manifestationFiltre, setManifestationFiltre] = useState<{
     id: number;
     nom: string;

@@ -101,7 +101,7 @@ describe('aujourdhuiIso', () => {
   });
 });
 
-describe('filtre Virtuel des livraisons (4.8.1)', () => {
+describe('filtre Virtuel des livraisons', () => {
   it('écarte les bons de service par défaut', () => {
     expect(DEFAULT_DELIVERY_FILTERS.virtuel).toBe('non');
     expect(buildDeliveryQuery(DEFAULT_DELIVERY_FILTERS).virtuel).toBe('non');

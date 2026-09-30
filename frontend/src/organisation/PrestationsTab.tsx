@@ -251,26 +251,26 @@ export function PrestationsTab({
   manifestationFiltre
 }: {
   context: InvenTreePluginContext;
-  /** Manifestation sur laquelle arriver préfiltré (point 4.2.5.1). */
+  /** Manifestation sur laquelle arriver préfiltré. */
   manifestationFiltre?: { id: number; nom: string } | null;
 }) {
   const canWrite = canWriteOrganisation(context);
   const { tri, basculer } = useTri<ColonnePresta>();
   // Le filtre hérité de l'onglet Manifestations se retire d'un clic.
   const [filtreLeve, setFiltreLeve] = useState(false);
-  // Filtre par période, demandé sur les deux onglets (point 4.2.5).
+  // Filtre par période, demandé sur les deux onglets.
   const [periode, setPeriode] = useState<[string | null, string | null]>([
     null,
     null
   ]);
 
-  // Point 4.5.1 : masquer les prestations qui ne portent que des services.
+  // Masquer les prestations qui ne portent que des services.
   const [virtuel, setVirtuel] = useState<Virtuel>(null);
 
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
   const [modalOpen, setModalOpen] = useState(false);
-  // 4.6.1 : les dates suivent la manifestation tant qu'on n'y a pas touché.
+  // Les dates suivent la manifestation tant qu'on n'y a pas touché.
   const [datesSaisies, setDatesSaisies] = useState(false);
   const [articlesOuverts, setArticlesOuverts] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
@@ -725,8 +725,8 @@ export function PrestationsTab({
            * Revue interne du 07/09/2026 : la liste d'articles a été jugée
            * redondante avec celle de la réservation, au point d'être
            * proposée à la suppression. Elle ne l'est plus — la réservation
-           * reprend désormais celle de la prestation (recette Tassin,
-           * remarque 15) : on saisit une fois, ici. La supprimer coûterait
+           * reprend désormais celle de la prestation (recette Tassin) :
+           * on saisit une fois, ici. La supprimer coûterait
            * la moitié « prévision » du moteur de stock, donc toute
            * anticipation de tension avant qu'une réservation existe, et
            * irait contre le CDC (« une prestation nécessite au moins une
@@ -773,8 +773,8 @@ export function PrestationsTab({
                       <Table.Th>Article</Table.Th>
                       <Table.Th>Quantité</Table.Th>
                       {/* « Sous le libellé "disponible" il y a deux chiffres, à
-                      quoi correspondent-ils ? » (recette du 07/09/2026,
-                      remarque 7). C'était `available / total_stock` : le libre
+                      quoi correspondent-ils ? » (recette du 07/09/2026).
+                      C'était `available / total_stock` : le libre
                       sur la période, puis le parc possédé — et l'ordre se lit
                       à l'envers de la convention « N sur M ». */}
                       <Table.Th>Disponible / parc</Table.Th>

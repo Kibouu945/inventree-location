@@ -1,5 +1,5 @@
 // Formulaire de lieu, partagé par l'onglet Lieux et par la pop-up prestation
-// (recette 4.6.2 : créer un lieu sans quitter la saisie de la prestation).
+// (recette : créer un lieu sans quitter la saisie de la prestation).
 // Le géocodage vit ici : un lieu sans coordonnées ne s'affiche pas sur la
 // carte de tournée, dupliquer le formulaire reviendrait à le perdre.
 import type { InvenTreePluginContext } from '@inventreedb/ui';
