@@ -31,7 +31,7 @@ from .conflicts import (
     list_current_conflicts,
     sync_conflict_registry,
 )
-from . import roles, virtuel
+from . import conflicts, parc, roles, virtuel
 from .models import (
     ConflictHistory,
     ConflictState,
@@ -2294,6 +2294,63 @@ class CatalogPartListView(APIView):
         return queryset.filter(
             Q(rentable_info__is_virtual=False) | Q(rentable_info__isnull=True)
         )
+
+
+class ParcStockListView(CatalogPartListView):
+    """État du parc : ce qu'on possède, ce qui est dehors, ce qui dort au SAV.
+
+    Le poste magasinier n'avait que le catalogue, qui dit le stock mais pas ce
+    qui en est sorti. Cet écran réunit les trois grandeurs et ne garde que le
+    matériel physique : un service n'occupe pas d'étagère.
+
+    Hérite du catalogue pour sa recherche, ses catégories et sa pagination —
+    le magasinier cherche un article de la même façon partout.
+    """
+
+    def get(self, request, *args, **kwargs):
+        """Retourne l'état du parc, paginé, filtré comme le catalogue."""
+
+        from part.models import Part
+
+        queryset = (
+            Part.objects.select_related("category", "rentable_info")
+            .filter(active=True)
+            .order_by("name")
+        )
+
+        search = request.query_params.get("search")
+
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search)
+                | Q(description__icontains=search)
+                | Q(IPN__icontains=search)
+            )
+
+        category_ids = self._parse_category_ids(
+            request.query_params.get("category"),
+            request.query_params.get("categories"),
+        )
+
+        if category_ids:
+            queryset = queryset.filter(
+                category_id__in=self._with_descendants(category_ids)
+            )
+
+        # Le parc, c'est le matériel : louable et non virtuel.
+        queryset = self._filter_rentable(queryset, "true")
+        queryset = self._filter_virtual(queryset, "false")
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(queryset, request)
+
+        stocks = conflicts.get_parts_total_stock(page)
+        lignes = parc.construire_lignes(page, stocks)
+
+        if str(request.query_params.get("alerte", "")).lower() in {"1", "true", "yes"}:
+            lignes = [ligne for ligne in lignes if ligne["motifs_alerte"]]
+
+        return paginator.get_paginated_response(lignes)
 
 
 class CatalogPartDetailView(APIView):

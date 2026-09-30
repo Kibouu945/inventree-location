@@ -83,6 +83,7 @@ class InvenTreeLocation(
             DeliveryMarquerLivreeView,
             CatalogPartDetailView,
             CatalogPartListView,
+            ParcStockListView,
             ConflictsListView,
             ConflictHistoryListView,
             ConflictHistoryResolveView,
@@ -128,6 +129,8 @@ class InvenTreeLocation(
             path("lieux/<int:pk>/", LieuDetailView.as_view(), name="lieu-detail"),
             path("geocode/", GeocodeAddressView.as_view(), name="geocode-address"),
             path("catalog/", CatalogPartListView.as_view(), name="catalog-part-list"),
+            # L'état du parc du magasinier : le catalogue, plus ce qui est dehors.
+            path("stock/parc/", ParcStockListView.as_view(), name="stock-parc"),
             path(
                 "catalog/rentable/",
                 RentableFlagBulkUpdateView.as_view(),

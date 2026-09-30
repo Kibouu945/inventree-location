@@ -4,6 +4,7 @@ import {
   IconAlertTriangle,
   IconBellExclamation,
   IconBox,
+  IconBuildingWarehouse,
   IconCalendarEvent,
   IconCalendarMonth,
   IconChartBar,
@@ -63,6 +64,9 @@ const RamassagesList = lazy(() =>
   import('../ramassage/RamassagesList').then((m) => ({
     default: m.RamassagesList
   }))
+);
+const ParcList = lazy(() =>
+  import('../stock/ParcList').then((m) => ({ default: m.ParcList }))
 );
 const Planning = lazy(() =>
   import('../planning/Planning').then((m) => ({ default: m.Planning }))
@@ -159,6 +163,9 @@ const RAMASSAGES = onglet(
   IconPackageImport,
   RamassagesList
 );
+// Le parc : ce qu'on possède, ce qui est dehors, ce qui dort au SAV.
+// Le catalogue ne disait que la première colonne.
+const PARC = onglet('parc', 'État du parc', IconBuildingWarehouse, ParcList);
 const HISTOGRAMME = onglet(
   'histogramme',
   'Histogramme',
@@ -194,10 +201,9 @@ export const POSTES: Record<string, PosteDefinition> = {
   magasinier: {
     titre: 'Poste magasinier',
     roles: [ADMIN, MAGASINIER],
-    // Le catalogue reste faute d'écran stock dédié : c'est le seul qui donne
-    // l'état article par article.
     onglets: [
       RAMASSAGES,
+      PARC,
       CATALOGUE,
       ALERTES,
       RESERVATIONS,
@@ -237,6 +243,7 @@ export const POSTES: Record<string, PosteDefinition> = {
       RAMASSAGES,
       CONFLITS,
       ALERTES,
+      PARC,
       HISTOGRAMME
     ]
   }
