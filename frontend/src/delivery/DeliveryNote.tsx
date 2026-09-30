@@ -36,6 +36,7 @@ export function DeliveryNote({
 
   return (
     <Modal
+      closeOnClickOutside={false}
       opened={delivery != null}
       onClose={onClose}
       size='lg'

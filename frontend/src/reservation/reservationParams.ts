@@ -1,7 +1,13 @@
+import { parseIntList, parseStringList, parseVirtuel } from '../urlState';
+
 export interface ReservationFiltersState {
   search: string;
   statuts: string[];
   categories: number[];
+  /** Filtre client du tableau des bons. */
+  client: string | null;
+  /** Filtre « Virtuel » : `oui`, `non`, ou rien. */
+  virtuel: string | null;
   dateRange: [string | null, string | null];
 }
 
@@ -9,6 +15,8 @@ export const DEFAULT_RESERVATION_FILTERS: ReservationFiltersState = {
   search: '',
   statuts: [],
   categories: [],
+  client: null,
+  virtuel: null,
   dateRange: [null, null]
 };
 
@@ -29,6 +37,14 @@ export function buildReservationQuery(
     params.categories = filters.categories.join(',');
   }
 
+  if (filters.client) {
+    params.client = filters.client;
+  }
+
+  if (filters.virtuel) {
+    params.virtuel = filters.virtuel;
+  }
+
   if (filters.dateRange[0]) {
     params.date_from = filters.dateRange[0];
   }
@@ -45,6 +61,8 @@ export const RESERVATION_URL_KEYS = [
   'resa_q',
   'resa_statut',
   'resa_cat',
+  'resa_client',
+  'resa_virtuel',
   'resa_from',
   'resa_to'
 ];
@@ -66,6 +84,14 @@ export function serializeReservationFilters(
     search.set('resa_cat', filters.categories.join(','));
   }
 
+  if (filters.client) {
+    search.set('resa_client', filters.client);
+  }
+
+  if (filters.virtuel) {
+    search.set('resa_virtuel', filters.virtuel);
+  }
+
   if (filters.dateRange[0]) {
     search.set('resa_from', filters.dateRange[0]);
   }
@@ -75,42 +101,6 @@ export function serializeReservationFilters(
   }
 
   return search.toString();
-}
-
-function parseIntList(value: string | null): number[] {
-  if (!value) {
-    return [];
-  }
-
-  const seen = new Set<number>();
-
-  for (const entry of value.split(',')) {
-    const parsed = Number.parseInt(entry, 10);
-
-    if (Number.isInteger(parsed)) {
-      seen.add(parsed);
-    }
-  }
-
-  return Array.from(seen);
-}
-
-function parseStringList(value: string | null): string[] {
-  if (!value) {
-    return [];
-  }
-
-  const seen = new Set<string>();
-
-  for (const entry of value.split(',')) {
-    const normalized = entry.trim();
-
-    if (normalized) {
-      seen.add(normalized);
-    }
-  }
-
-  return Array.from(seen);
 }
 
 export function parseReservationFilters(
@@ -124,6 +114,8 @@ export function parseReservationFilters(
     search: search.get('resa_q') ?? '',
     statuts: parseStringList(search.get('resa_statut')),
     categories: parseIntList(search.get('resa_cat')),
+    client: search.get('resa_client') || null,
+    virtuel: parseVirtuel(search.get('resa_virtuel')),
     dateRange: [from || null, to || null]
   };
 }

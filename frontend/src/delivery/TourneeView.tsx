@@ -10,7 +10,8 @@ import {
   Paper,
   ScrollArea,
   Stack,
-  Text
+  Text,
+  Tooltip
 } from '@mantine/core';
 import { useMemo } from 'react';
 
@@ -54,12 +55,15 @@ export function TourneeView({
   deliveries,
   ramassages,
   ordre,
-  onOrdreChange
+  onOrdreChange,
+  onOpenNote
 }: {
   deliveries: Delivery[];
   ramassages: Ramassage[];
   ordre: string[];
   onOrdreChange: (ordre: string[]) => void;
+  /** Ouvre le bon de livraison de l'arrêt. Absent, le bouton ne s'affiche pas. */
+  onOpenNote?: (delivery: Delivery) => void;
 }) {
   const stopsChronologiques = useMemo(
     () => construireStops(deliveries, ramassages),
@@ -86,12 +90,37 @@ export function TourneeView({
   }
 
   if (stops.length === 0) {
+    // Deux situations très différentes, que le même message confondait :
+    // rien à livrer ce jour-là, ou des livraisons sans adresse géocodée.
+    // « Aucun arrêt géolocalisé » laissait croire à une panne de carte.
+    // Recette Tassin du 27/09.
+    const rienDuTout = deliveries.length === 0 && ramassages.length === 0;
+
     return (
-      <Text c='dimmed'>
-        Aucun arrêt géolocalisé sur cette période.
-        {sansCoordonnees > 0 &&
-          ` ${sansCoordonnees} entrée(s) sont sans coordonnées GPS : renseignez l'adresse du lieu pour les voir ici.`}
-      </Text>
+      <Alert
+        color={rienDuTout ? 'blue' : 'orange'}
+        title={
+          rienDuTout
+            ? 'Aucune livraison sur cette période'
+            : 'Aucun lieu géolocalisé'
+        }
+      >
+        {rienDuTout ? (
+          <Text size='sm'>
+            Il n’y a rien à livrer ni à ramasser sur la période choisie. Le
+            filtre <strong>Quand</strong> est sans doute sur «&nbsp;Aujourd’hui
+            »&nbsp;: passez sur <strong>À venir</strong> ou{' '}
+            <strong>Tout</strong> pour voir les tournées des prochains jours.
+          </Text>
+        ) : (
+          <Text size='sm'>
+            {sansCoordonnees} entrée(s) sont prévues sur cette période mais leur
+            lieu n’a pas de coordonnées GPS. Renseignez l’adresse du lieu pour
+            les faire apparaître sur la carte ; elles restent visibles dans les
+            vues <strong>Liste</strong> et <strong>Arborescence</strong>.
+          </Text>
+        )}
+      </Alert>
     );
   }
 
@@ -136,6 +165,20 @@ export function TourneeView({
         La tournée mélange les livraisons (retrait) et les ramassages (retour)
         de la période filtrée. Distance et durée sont des estimations à vol
         d'oiseau, temps de chargement inclus.
+      </Text>
+
+      {/*
+        « Ne semble pas opérationnel — je n'ai pas compris le processus mis en
+        place » (recette du 27/09). Le bouton existait, mais rien
+        ne disait à quoi servait chaque arrêt ni pourquoi un ramassage n'en
+        porte pas.
+      */}
+      <Text size='xs' c='dimmed'>
+        Chaque arrêt de <b>livraison</b> porte son bon, à ouvrir sur place et à
+        faire signer ; un arrêt de <b>ramassage</b> n'en a pas, le retour se
+        saisit depuis l'écran Ramassages. Les flèches réordonnent la tournée, «
+        Optimiser l'ordre » la recalcule, et « Itinéraire Google Maps » l'ouvre
+        dans le téléphone.
       </Text>
 
       {sansCoordonnees > 0 && (
@@ -184,28 +227,57 @@ export function TourneeView({
                       </Stack>
                     </Group>
 
-                    <Stack gap={2}>
-                      <ActionIcon
-                        size='sm'
-                        variant='default'
-                        aria-label={`Monter l'arrêt ${index + 1}`}
-                        disabled={index === 0}
-                        onClick={() =>
-                          appliquer(deplacerStop(stops, index, -1))
-                        }
-                      >
-                        ↑
-                      </ActionIcon>
-                      <ActionIcon
-                        size='sm'
-                        variant='default'
-                        aria-label={`Descendre l'arrêt ${index + 1}`}
-                        disabled={index === stops.length - 1}
-                        onClick={() => appliquer(deplacerStop(stops, index, 1))}
-                      >
-                        ↓
-                      </ActionIcon>
-                    </Stack>
+                    <Group gap={4} wrap='nowrap'>
+                      {/*
+                        Le bon ne s'ouvrait que depuis la Liste et
+                        l'arborescence : le livreur en tournée devait quitter
+                        sa carte pour le retrouver. Recette Tassin.
+                      */}
+                      {onOpenNote && stop.kind === 'livraison' && (
+                        <Tooltip label='Ouvrir le bon de livraison à faire signer sur place'>
+                          <Button
+                            size='compact-xs'
+                            variant='light'
+                            aria-label={`Bon de livraison ${stop.numero}`}
+                            onClick={() => {
+                              const livraison = deliveries.find(
+                                (d) => d.id === stop.id
+                              );
+                              if (livraison) {
+                                onOpenNote(livraison);
+                              }
+                            }}
+                          >
+                            Bon de livraison
+                          </Button>
+                        </Tooltip>
+                      )}
+
+                      <Stack gap={2}>
+                        <ActionIcon
+                          size='sm'
+                          variant='default'
+                          aria-label={`Monter l'arrêt ${index + 1}`}
+                          disabled={index === 0}
+                          onClick={() =>
+                            appliquer(deplacerStop(stops, index, -1))
+                          }
+                        >
+                          ↑
+                        </ActionIcon>
+                        <ActionIcon
+                          size='sm'
+                          variant='default'
+                          aria-label={`Descendre l'arrêt ${index + 1}`}
+                          disabled={index === stops.length - 1}
+                          onClick={() =>
+                            appliquer(deplacerStop(stops, index, 1))
+                          }
+                        >
+                          ↓
+                        </ActionIcon>
+                      </Stack>
+                    </Group>
                   </Group>
                 </Paper>
               ))}

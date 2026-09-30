@@ -21,3 +21,12 @@ RUN pip install -e /home/inventree/plugin/
 RUN test -f /home/inventree/src/backend/InvenTree/InvenTree/settings.py \
     && cat /home/inventree/plugin/docker/session_settings.py \
         >> /home/inventree/src/backend/InvenTree/InvenTree/settings.py
+
+# Bloque la retraduction automatique de l'interface par le navigateur : le
+# script dit pourquoi, et échoue si le gabarit d'InvenTree a bougé.
+RUN python3 /home/inventree/plugin/docker/bloquer_traduction_auto.py
+
+# Met le catalogue de traductions du plugin en tête de LOCALE_PATHS, pour
+# corriger les chaînes du cœur mal traduites (cf. locale/fr/LC_MESSAGES).
+RUN cat /home/inventree/plugin/docker/locale_settings.py \
+        >> /home/inventree/src/backend/InvenTree/InvenTree/settings.py

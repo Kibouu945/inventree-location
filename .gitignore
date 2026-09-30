@@ -54,6 +54,9 @@ cover/
 # Translations
 *.mo
 *.pot
+# …sauf la surcharge des traductions d'InvenTree : le montage du plugin masque
+# le .mo que l'image construirait, c'est donc celui du dépôt qui sert.
+!inventree_location/locale/**/*.mo
 
 # Django stuff:
 *.log

@@ -1037,6 +1037,7 @@ export function RamassagesHierarchicalTable({
       )}
 
       <Modal
+        closeOnClickOutside={false}
         opened={photoModal !== null}
         onClose={() => setPhotoModal(null)}
         title={`Photo du retour — ${photoModal?.partNom ?? ''}`}

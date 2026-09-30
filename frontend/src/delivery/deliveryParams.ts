@@ -1,3 +1,5 @@
+import { parseIntList, parseStringList } from '../urlState';
+
 export type DeliveryViewMode =
   | 'hierarchique'
   | 'liste'
@@ -11,6 +13,8 @@ export interface DeliveryFiltersState {
   dateRange: [string | null, string | null];
   statuts: string[];
   lieux: number[];
+  /** Filtre « Virtuel » : `oui`, `non`, ou `null` pour tous. */
+  virtuel: string | null;
   viewMode: DeliveryViewMode;
   ordre: string[];
 }
@@ -20,6 +24,9 @@ export const DEFAULT_DELIVERY_FILTERS: DeliveryFiltersState = {
   dateRange: [null, null],
   statuts: [],
   lieux: [],
+  // « L'option Non est positionnée par défaut » : une tournée sert à
+  // sortir du matériel, un bon de service seul n'a rien à y faire.
+  virtuel: 'non',
   viewMode: 'hierarchique',
   ordre: []
 };
@@ -46,6 +53,10 @@ export function buildDeliveryQuery(
 
   if (filters.lieux.length > 0) {
     params.lieu = filters.lieux.map(String);
+  }
+
+  if (filters.virtuel) {
+    params.virtuel = filters.virtuel;
   }
 
   const [debut, fin] = filters.dateRange;
@@ -81,12 +92,26 @@ export const DELIVERY_URL_KEYS = [
   'livr_horizon',
   'livr_statut',
   'livr_lieu',
+  'livr_virtuel',
   'livr_view',
   'livr_ordre'
 ];
 
 function isHorizon(value: string | null): value is DeliveryHorizon {
   return value === 'jour' || value === 'avenir' || value === 'tout';
+}
+
+/** `tous` lève le défaut, une valeur inconnue le rétablit. */
+function parseVirtuel(value: string | null): string | null {
+  if (value === 'oui' || value === 'non') {
+    return value;
+  }
+
+  if (value === 'tous') {
+    return null;
+  }
+
+  return DEFAULT_DELIVERY_FILTERS.virtuel;
 }
 
 function isViewMode(value: string | null): value is DeliveryViewMode {
@@ -125,6 +150,12 @@ export function serializeDeliveryFilters(
     search.set('livr_horizon', filters.horizon);
   }
 
+  // Le défaut étant « non », c'est « tous » qu'il faut écrire pour survivre à
+  // un rechargement : sans marqueur, l'absence de clé ramènerait « non ».
+  if (filters.virtuel !== DEFAULT_DELIVERY_FILTERS.virtuel) {
+    search.set('livr_virtuel', filters.virtuel ?? 'tous');
+  }
+
   if (filters.viewMode !== DEFAULT_DELIVERY_FILTERS.viewMode) {
     search.set('livr_view', filters.viewMode);
   }
@@ -134,42 +165,6 @@ export function serializeDeliveryFilters(
   }
 
   return search.toString();
-}
-
-function parseIntList(value: string | null): number[] {
-  if (!value) {
-    return [];
-  }
-
-  const seen = new Set<number>();
-
-  for (const entry of value.split(',')) {
-    const parsed = Number.parseInt(entry, 10);
-
-    if (Number.isInteger(parsed)) {
-      seen.add(parsed);
-    }
-  }
-
-  return Array.from(seen);
-}
-
-function parseStringList(value: string | null): string[] {
-  if (!value) {
-    return [];
-  }
-
-  const seen = new Set<string>();
-
-  for (const entry of value.split(',')) {
-    const normalized = entry.trim();
-
-    if (normalized) {
-      seen.add(normalized);
-    }
-  }
-
-  return Array.from(seen);
 }
 
 export function parseDeliveryFilters(query: string): DeliveryFiltersState {
@@ -184,7 +179,27 @@ export function parseDeliveryFilters(query: string): DeliveryFiltersState {
     dateRange: [from || null, to || null],
     statuts: parseStringList(search.get('livr_statut')),
     lieux: parseIntList(search.get('livr_lieu')),
+    virtuel: parseVirtuel(search.get('livr_virtuel')),
     viewMode: isViewMode(view) ? view : DEFAULT_DELIVERY_FILTERS.viewMode,
     ordre: parseStringList(search.get('livr_ordre'))
   };
+}
+
+/**
+ * Retire les articles virtuels des bons quand le filtre est sur « non »
+ * (« ne pas afficher les articles virtuels »). On les retire des données,
+ * pas seulement de l'affichage : un service ne se charge pas dans un
+ * camion, l'exiger dans le « tout est chargé » empêcherait de clore un bon.
+ */
+export function sansArticlesVirtuels<
+  T extends { lignes: { is_virtual: boolean }[] }
+>(bons: T[], virtuel: string | null): T[] {
+  if (virtuel !== 'non') {
+    return bons;
+  }
+
+  return bons.map((bon) => ({
+    ...bon,
+    lignes: bon.lignes.filter((ligne) => !ligne.is_virtual)
+  }));
 }

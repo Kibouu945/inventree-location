@@ -83,6 +83,7 @@ class InvenTreeLocation(
             DeliveryMarquerLivreeView,
             CatalogPartDetailView,
             CatalogPartListView,
+            ParcStockListView,
             ConflictsListView,
             ConflictHistoryListView,
             ConflictHistoryResolveView,
@@ -93,6 +94,7 @@ class InvenTreeLocation(
             LieuDetailView,
             LieuListCreateView,
             ManifestationDetailView,
+            ManifestationPlanifierView,
             ManifestationListCreateView,
             PartAvailabilityHistogramView,
             PrestationDetailView,
@@ -127,6 +129,8 @@ class InvenTreeLocation(
             path("lieux/<int:pk>/", LieuDetailView.as_view(), name="lieu-detail"),
             path("geocode/", GeocodeAddressView.as_view(), name="geocode-address"),
             path("catalog/", CatalogPartListView.as_view(), name="catalog-part-list"),
+            # L'état du parc du magasinier : le catalogue, plus ce qui est dehors.
+            path("stock/parc/", ParcStockListView.as_view(), name="stock-parc"),
             path(
                 "catalog/rentable/",
                 RentableFlagBulkUpdateView.as_view(),
@@ -228,6 +232,11 @@ class InvenTreeLocation(
                 "manifestations/<int:pk>/",
                 ManifestationDetailView.as_view(),
                 name="manifestation-detail",
+            ),
+            path(
+                "manifestations/<int:pk>/planifier/",
+                ManifestationPlanifierView.as_view(),
+                name="manifestation-planifier",
             ),
             path(
                 "ramassages/",
@@ -378,17 +387,21 @@ class InvenTreeLocation(
         panels = []
 
         if context.get("target_model") == "part":
+            # Le drapeau « louable » se cherche d'abord sur la fiche de
+            # l'article : le titre et l'icône du squelette de plugin rendaient
+            # ce panneau introuvable. Recette Tassin du 27/09.
             panels.append({
                 "key": "inventree-location-panel",
-                "title": "InvenTree Location",
-                "description": "Custom panel description",
-                "icon": "ti:mood-smile:outline",
+                "title": "Location — paramètres",
+                "description": (
+                    "Drapeau louable, consommable et seuils d'alerte de stock"
+                ),
+                "icon": "ti:tags:outline",
                 "source": self.plugin_static_file(
                     "Panel.js:renderInvenTreeLocationPanel"
                 ),
                 "context": {
                     "settings": self.get_settings_dict(),
-                    "foo": "bar",
                 },
             })
 

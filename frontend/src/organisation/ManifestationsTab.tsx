@@ -2,6 +2,7 @@
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Group,
@@ -15,6 +16,7 @@ import {
   TextInput,
   Title
 } from '@mantine/core';
+import { DatePickerInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
@@ -22,9 +24,10 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { optionsDeContacts } from '../backoffice/contactLogic';
 import { optionsActives } from '../backoffice/optionsActives';
-import { DateTimeField } from '../DateTimeField';
+import { DateTimeField, finSuivantLeDebut } from '../DateTimeField';
 
 import { canWriteOrganisation } from '../roles';
+import { EnTeteTriable, useLignesTriees, useTri } from '../TriColonne';
 import { apiErrorMessage, type Manifestation, type Page } from './types';
 
 const MANIFESTATIONS_URL = '/plugin/inventree-location/manifestations/';
@@ -68,12 +71,29 @@ function emptyValues(): FormValues {
   };
 }
 
+type ColonneManif =
+  | 'client'
+  | 'nom'
+  | 'debut'
+  | 'fin'
+  | 'statut'
+  | 'prestations';
+
 export function ManifestationsTab({
-  context
+  context,
+  onVoirPrestations
 }: {
   context: InvenTreePluginContext;
+  /** Ouvre l'onglet Prestations prérempli sur cette manifestation. */
+  onVoirPrestations?: (manifestation: Manifestation) => void;
 }) {
   const canWrite = canWriteOrganisation(context);
+  const { tri, basculer } = useTri<ColonneManif>();
+  // Filtre par période, demandé sur les deux onglets.
+  const [periode, setPeriode] = useState<[string | null, string | null]>([
+    null,
+    null
+  ]);
 
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
@@ -85,7 +105,7 @@ export function ManifestationsTab({
 
   const listQuery = useQuery<Manifestation[] | Page<Manifestation>>(
     {
-      queryKey: ['manifestations', debouncedSearch, clientFiltre],
+      queryKey: ['manifestations', debouncedSearch, clientFiltre, periode],
       queryFn: async () => {
         // Deux filtres distincts : au téléphone on cherche par client, dans
         // une liste on cherche par nom. Les envoyer ensemble les cumule.
@@ -97,6 +117,14 @@ export function ManifestationsTab({
 
         if (clientFiltre) {
           params.client = clientFiltre;
+        }
+
+        if (periode[0]) {
+          params.from = periode[0];
+        }
+
+        if (periode[1]) {
+          params.to = periode[1];
         }
 
         const response = await context.api.get(MANIFESTATIONS_URL, { params });
@@ -144,9 +172,26 @@ export function ManifestationsTab({
     context.queryClient
   );
 
-  const rows = Array.isArray(listQuery.data)
+  const lignes = Array.isArray(listQuery.data)
     ? listQuery.data
     : (listQuery.data?.results ?? []);
+
+  const rows = useLignesTriees(lignes, tri, (m, colonne) => {
+    switch (colonne) {
+      case 'client':
+        return m.client_nom;
+      case 'nom':
+        return m.nom;
+      case 'debut':
+        return new Date(m.date_debut);
+      case 'fin':
+        return new Date(m.date_fin);
+      case 'statut':
+        return m.statut_effectif ?? m.statut;
+      case 'prestations':
+        return m.prestations_count;
+    }
+  });
 
   const clients = clientsQuery.data?.results ?? [];
 
@@ -264,6 +309,16 @@ export function ManifestationsTab({
           searchable
           w={280}
         />
+
+        <DatePickerInput
+          type='range'
+          label='Période'
+          placeholder='Toutes les dates'
+          value={periode}
+          onChange={setPeriode}
+          clearable
+          w={280}
+        />
       </Group>
 
       {listQuery.isError && (
@@ -282,12 +337,29 @@ export function ManifestationsTab({
         <Table striped highlightOnHover>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>Nom</Table.Th>
-              <Table.Th>Client</Table.Th>
-              <Table.Th>Début</Table.Th>
-              <Table.Th>Fin</Table.Th>
-              <Table.Th>Statut</Table.Th>
-              <Table.Th>Prestations</Table.Th>
+              <EnTeteTriable colonne='client' tri={tri} onTri={basculer}>
+                Client
+              </EnTeteTriable>
+              <EnTeteTriable colonne='nom' tri={tri} onTri={basculer}>
+                Nom de la manifestation
+              </EnTeteTriable>
+              <EnTeteTriable colonne='debut' tri={tri} onTri={basculer}>
+                Début
+              </EnTeteTriable>
+              <EnTeteTriable colonne='fin' tri={tri} onTri={basculer}>
+                Fin
+              </EnTeteTriable>
+              <EnTeteTriable colonne='statut' tri={tri} onTri={basculer}>
+                Statut
+              </EnTeteTriable>
+              <EnTeteTriable
+                colonne='prestations'
+                tri={tri}
+                onTri={basculer}
+                ta='right'
+              >
+                Prestations
+              </EnTeteTriable>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -297,8 +369,8 @@ export function ManifestationsTab({
                 style={{ cursor: canWrite ? 'pointer' : 'default' }}
                 onClick={() => canWrite && openEdit(manifestation)}
               >
-                <Table.Td>{manifestation.nom}</Table.Td>
                 <Table.Td>{manifestation.client_nom || '—'}</Table.Td>
+                <Table.Td>{manifestation.nom}</Table.Td>
                 <Table.Td>
                   {new Date(manifestation.date_debut).toLocaleDateString()}
                 </Table.Td>
@@ -316,7 +388,26 @@ export function ManifestationsTab({
                     {manifestation.statut_effectif ?? manifestation.statut}
                   </Badge>
                 </Table.Td>
-                <Table.Td>{manifestation.prestations_count}</Table.Td>
+                <Table.Td ta='right'>
+                  {/*
+                    Le chiffre mène à l'onglet Prestations déjà filtré sur
+                    cette manifestation.
+                  */}
+                  {manifestation.prestations_count > 0 && onVoirPrestations ? (
+                    <Anchor
+                      component='button'
+                      type='button'
+                      onClick={(event: React.MouseEvent) => {
+                        event.stopPropagation();
+                        onVoirPrestations(manifestation);
+                      }}
+                    >
+                      {manifestation.prestations_count}
+                    </Anchor>
+                  ) : (
+                    manifestation.prestations_count
+                  )}
+                </Table.Td>
               </Table.Tr>
             ))}
           </Table.Tbody>
@@ -324,6 +415,7 @@ export function ManifestationsTab({
       )}
 
       <Modal
+        closeOnClickOutside={false}
         opened={modalOpen}
         onClose={() => setModalOpen(false)}
         size='lg'
@@ -347,16 +439,19 @@ export function ManifestationsTab({
                 label='Date de début'
                 required
                 value={form.values.date_debut}
-                onChange={(value) =>
+                onChange={(value) => {
+                  const debut = value ? new Date(value) : null;
+                  form.setFieldValue('date_debut', debut);
                   form.setFieldValue(
-                    'date_debut',
-                    value ? new Date(value) : null
-                  )
-                }
+                    'date_fin',
+                    finSuivantLeDebut(debut, form.values.date_fin)
+                  );
+                }}
               />
               <DateTimeField
                 label='Date de fin'
                 required
+                minDate={form.values.date_debut ?? undefined}
                 value={form.values.date_fin}
                 onChange={(value) =>
                   form.setFieldValue('date_fin', value ? new Date(value) : null)

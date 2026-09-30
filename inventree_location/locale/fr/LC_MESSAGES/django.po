@@ -1,0 +1,26 @@
+# Surcharge des traductions françaises d'InvenTree.
+#
+# Certaines chaînes du cœur sont mal traduites et arrivent jusqu'au client :
+# « Stock » y est rendu au sens boursier. Ce catalogue ne contient QUE les
+# corrections ; tout le reste continue de venir d'InvenTree.
+#
+# Il est posé en tête de LOCALE_PATHS (cf. docker/locale_settings.py), ce qui
+# lui donne la priorité sur le catalogue livré. Le .mo compilé est versionné à
+# côté : le montage du plugin masque ce que l'image construirait.
+#
+# Pour ajouter une correction : repérer le msgid anglais dans les sources
+# d'InvenTree, l'ajouter ici, puis `make traductions`.
+msgid ""
+msgstr ""
+"Project-Id-Version: inventree-location\n"
+"Language: fr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#. « Notes sur les transactions boursières » dans le dialogue « Ajouter du
+#. stock » — recette du 6 septembre, point « Ajouter du stock ».
+#: stock/serializers.py
+msgid "Stock transaction notes"
+msgstr "Notes sur le mouvement de stock"

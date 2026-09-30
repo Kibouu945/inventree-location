@@ -29,9 +29,14 @@ class RoleBasedPermission(BasePermission):
 
 
 class CatalogPermission(RoleBasedPermission):
-    """Lecture pour tous ; gestion du drapeau louable pour admin / gestionnaire."""
+    """Lecture pour tous ; déclarer un article louable revient à l'admin.
 
-    write_roles = (roles.ADMIN, roles.GESTIONNAIRE)
+    Le gestionnaire loue le matériel, il ne décide pas de ce qui entre au
+    catalogue : « un admin gère une Part complète (création, mise en stock,
+    déclaration louable, édition des seuils) » (ADM-02, CDC V06).
+    """
+
+    write_roles = (roles.ADMIN,)
 
 
 class LieuPermission(RoleBasedPermission):

@@ -18,7 +18,7 @@ import {
   Title
 } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { CLIENTS_URL, CONTACTS_URL, listParams, pageCount } from './api';
 import { apiErrorMessage } from './apiError';
@@ -72,7 +72,16 @@ function formFromContact(contact: BackOfficeContact): FormValues {
   };
 }
 
-export function ContactsTab({ context }: { context: InvenTreePluginContext }) {
+export function ContactsTab({
+  context,
+  clientAEnchainer,
+  onEnchainementFait
+}: {
+  context: InvenTreePluginContext;
+  /** Client tout juste créé : on ouvre directement son premier contact. */
+  clientAEnchainer?: { id: number; nom: string } | null;
+  onEnchainementFait?: () => void;
+}) {
   const { search, debouncedSearch, page, setPage, updateSearch } =
     usePagedSearch();
 
@@ -132,6 +141,20 @@ export function ContactsTab({ context }: { context: InvenTreePluginContext }) {
     setClientFiltre(valeur ?? TOUS);
     setPage(1);
   }
+
+  // Créer un client sans son interlocuteur oblige à revenir plus tard : on
+  // enchaîne sur le contact, client déjà choisi.
+  useEffect(() => {
+    if (!clientAEnchainer) {
+      return;
+    }
+
+    setFormError('');
+    setClientFiltre(String(clientAEnchainer.id));
+    setFormValues(emptyForm(String(clientAEnchainer.id)));
+    setModalState({ open: true });
+    onEnchainementFait?.();
+  }, [clientAEnchainer, onEnchainementFait]);
 
   function openCreateModal() {
     setFormError('');
@@ -346,6 +369,7 @@ export function ContactsTab({ context }: { context: InvenTreePluginContext }) {
       </Group>
 
       <Modal
+        closeOnClickOutside={false}
         opened={modalState.open}
         onClose={closeModal}
         size='lg'

@@ -112,6 +112,7 @@ export interface Prestation {
   modifie_apres_devis: boolean;
   manifestation: number;
   manifestation_nom: string;
+  client_nom?: string | null;
   lieu: number | null;
   lieu_detail: Lieu | null;
   lignes: LignePrestation[];

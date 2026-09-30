@@ -100,9 +100,20 @@ export function TourneeMap({ stops }: { stops: TourneeStop[] }) {
           zoom={positions.length > 0 ? 10 : 5}
           style={{ height: '100%', width: '100%' }}
         >
+          {/*
+            Fond de carte Esri, et non le serveur de tuiles d'OpenStreetMap :
+            celui-ci répond 200 mais sert une image « Access blocked »
+            (en-tête `x-blocked`), sa politique interdisant l'accès direct
+            depuis une application tierce. CARTO, essayé ensuite, estampille
+            ses tuiles « API KEY REQUIRED » sans clé.
+
+            Un fournisseur se vérifie sur ce qu'il sert, pas sur son code HTTP :
+            les trois répondent 200, seul celui-ci rend une vraie carte.
+          */}
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url='https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+            attribution='Tuiles &copy; <a href="https://www.esri.com/">Esri</a> — Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom'
+            url='https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}'
+            maxZoom={19}
           />
 
           <AjusterVue stops={stops} />

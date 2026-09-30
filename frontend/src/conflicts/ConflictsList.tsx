@@ -369,6 +369,7 @@ export function ConflictsList({
       )}
 
       <Modal
+        closeOnClickOutside={false}
         opened={modalState.open}
         onClose={closeModal}
         size='xl'

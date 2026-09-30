@@ -1,7 +1,115 @@
-.PHONY: up down migrate test build build-frontend logs shell clean manage provision-plugin provision
+.PHONY: up down attendre migrate test build build-frontend front static dev logs \
+        shell clean manage provision-plugin provision deployer traductions
+
+# ############################################################################
+# 1. OBLIGATOIRE PARTOUT — en dev comme en prod, après chaque déploiement
+#
+#     make deployer
+#
+# Ces trois commandes ne se déduisent pas du code déployé : elles écrivent dans
+# la base et dans le static d'InvenTree. Tant qu'elles n'ont pas tourné SUR LA
+# MACHINE CIBLE, le bon code est en place et la fonctionnalité reste invisible.
+#
+# provision_role_permissions — InvenTree range ses droits dans des « RuleSet »
+#   liés aux groupes Django ; la commande y recopie la matrice de
+#   roles.ROLE_WRITE_RULESETS. Sans elle, la base n'a pas le droit `bom` en
+#   écriture et la composition des packs n'apparaît pas.
+#   Idempotente : la relancer ne coûte rien.
+#   Déjà lancée par `deploy.sh` sur le VPS.
+#
+# renommer_liste_materiaux — l'onglet BOM s'appelle « Liste des matériaux »
+#   dans la traduction française livrée par InvenTree lui-même : un catalogue
+#   embarqué dans l'image Docker, pas un fichier à nous. On le réécrit en
+#   « Liste des éléments » après coup. Le fichier revient avec l'image et tout
+#   collectstatic le rétablit — donc À REJOUER après toute montée de version
+#   d'InvenTree, pas seulement après un déploiement du plugin.
+#   `deploy.sh` l'appelle, juste après sa collecte, sous la même garde de
+#   retour arrière que les deux autres. Si le libellé reste « Liste des
+#   matériaux » en production, ce n'est donc pas le script : c'est que la
+#   version en ligne est antérieure à la commande, et la garde saute l'étape
+#   en le disant. Le prochain tag qui la contient corrige le libellé seul.
+#
+# provision_dashboards — les widgets sont posés sur le signal m2m_changed de
+#   User.groups, donc au moment où l'on attribue un rôle. Toute livraison qui
+#   AJOUTE un widget laisse les comptes existants en arrière : leur rôle n'a
+#   pas bougé, le signal ne rejoue pas. Constaté au déploiement 1.0.0, où un
+#   compte voyait 5 widgets sur 9. Déjà lancée par `deploy.sh`.
+# ############################################################################
+
+# Recompile le catalogue de surcharge après toute retouche du .po. Le .mo est
+# versionné : le montage du plugin masquerait celui que l'image construirait.
+traductions:
+	docker compose exec -T inventree bash -lc "cd /home/inventree/plugin/inventree_location/locale/fr/LC_MESSAGES && msgfmt -o django.mo django.po && echo 'catalogue compilé'"
+
+deployer:
+	make manage cmd="provision_role_permissions"
+	make manage cmd="renommer_liste_materiaux"
+	make manage cmd="provision_dashboards"
+
+# ############################################################################
+# 2. OBLIGATOIRE EN DEV — la boucle du poste de travail, l'ordre compte
+#
+#     make dev
+#
+# soit, dans l'ordre :
+#     make front     seulement si le frontend a changé
+#     make up        si le backend a changé, ou après un git pull
+#     make static    après chacun des deux, sans exception
+#
+# Pourquoi `static` n'est jamais facultatif : InvenTree sert le static COLLECTÉ
+# depuis /home/inventree/data/static/, pas le build du plugin. `make up` recrée
+# le conteneur serveur et ce static repart de l'image ; `collectstatic`, lui,
+# ne recopie pas celui d'un plugin. Sans `make static`, l'écran reste sur
+# l'ancienne version — ou ne charge pas du tout, sans la moindre erreur.
+#
+# En prod, cette boucle n'a pas d'équivalent ici : c'est `deploy.sh`, sur le
+# VPS et hors dépôt, qui checkout le tag, reconstruit et republie le static.
+# `make deployer` reste à lancer après lui.
+# ############################################################################
+
+front:
+	cd frontend && npm run build
 
 up:
 	docker compose up --build -d
+
+attendre:
+	@echo "Attente du serveur..."
+	@i=0; until curl -sf http://localhost:8000/api/ >/dev/null; do \
+		i=$$((i+1)); [ $$i -gt 60 ] && echo "serveur injoignable" && exit 1; \
+		sleep 3; \
+	done
+	@echo "Serveur prêt."
+
+static: attendre
+	docker compose exec -T inventree bash -lc \
+		"cd /home/inventree/src/backend/InvenTree && python manage.py shell" \
+		< docker/copier_static_plugin.py
+
+dev: front up static
+
+# ############################################################################
+# 3. FACULTATIF — selon le besoin
+#
+# seed_demo — jeu de démonstration. JAMAIS en production.
+#
+# make provision — base de dev fraîchement montée : réglages du plugin, démo,
+#   droits, widgets et libellés, d'un coup.
+# ############################################################################
+
+provision-plugin:
+	docker compose exec -T inventree bash -lc "cd /home/inventree/src/backend/InvenTree && python manage.py shell" < docker/provision_plugin_settings.py
+	docker compose restart inventree backend
+	make attendre
+
+provision: provision-plugin
+	make manage cmd="seed_demo"
+	make deployer
+	make static
+
+# ############################################################################
+# 4. Utilitaires
+# ############################################################################
 
 down:
 	docker compose down
@@ -29,18 +137,6 @@ shell:
 #   make manage cmd="makemigrations --check --dry-run"
 manage:
 	docker compose exec inventree bash -lc "cd /home/inventree/src/backend/InvenTree && python manage.py $(cmd)"
-
-
-provision-plugin:
-	docker compose exec -T inventree bash -lc "cd /home/inventree/src/backend/InvenTree && python manage.py shell" < docker/provision_plugin_settings.py
-	docker compose restart inventree backend
-	@echo "Attente du redémarrage du serveur..."
-	@timeout 90 bash -c 'until curl -sf http://localhost:8000/api/ >/dev/null; do sleep 2; done'
-
-provision: provision-plugin
-	make manage cmd="seed_demo"
-	make manage cmd="provision_role_permissions"
-	make manage cmd="provision_dashboards"
 
 clean:
 	docker compose down -v

@@ -135,11 +135,11 @@ def test_reservation_write_respects_role(factory, prestation, role):
 
 
 # ---------------------------------------------------------------------------
-# Écriture catalogue (bulk-update louable) : admin / gestionnaire autorisés
+# Écriture catalogue (bulk-update louable) : l'admin seul (ADM-02)
 # ---------------------------------------------------------------------------
 
 
-WRITE_CATALOG_ALLOWED = {roles.ADMIN, roles.GESTIONNAIRE}
+WRITE_CATALOG_ALLOWED = {roles.ADMIN}
 
 
 @pytest.mark.django_db

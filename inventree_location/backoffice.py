@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import profiles, roles
+from .doublons import clients_proches
 from .models import Client, Contact
 from .serializers import _user_label
 
@@ -309,6 +310,32 @@ class BackOfficeClientSerializer(serializers.ModelSerializer):
         """Nom du gestionnaire référent, pour l'afficher sans second appel."""
 
         return _user_label(obj.gestionnaire)
+
+    def validate_nom(self, valeur):
+        """Refuse un nom qui désigne visiblement un client déjà enregistré.
+
+        `nom` est unique, mais « Mairie de vertou » passait à côté de
+        « Mairie de Vertou » : le fichier client se dédoublait sans que
+        personne ne s'en aperçoive. Recette Tassin du 27/09.
+        """
+
+        deja = Client.objects.all()
+
+        # En modification, un client ne se ressemble pas à lui-même.
+        if self.instance is not None:
+            deja = deja.exclude(pk=self.instance.pk)
+
+        proches = clients_proches(valeur, deja)
+
+        if proches:
+            noms = ", ".join(f"« {c.nom} »" for c in proches[:3])
+            raise serializers.ValidationError(
+                f"Ce client existe déjà sous le nom {noms}. "
+                "Reprenez la fiche existante, ou précisez ce nom s'il s'agit "
+                "bien d'un autre client."
+            )
+
+        return valeur
 
 
 class BackOfficeClientListCreateView(generics.ListCreateAPIView):

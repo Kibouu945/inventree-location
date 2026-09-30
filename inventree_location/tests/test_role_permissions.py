@@ -93,10 +93,49 @@ def test_la_barre_de_navigation_par_role():
 
 @pytest.mark.parametrize("role", roles.ALL_ROLES)
 @pytest.mark.parametrize("ruleset", RULESETS)
-def test_suppression_jamais_accordee(role, ruleset):
+def test_suppression_jamais_accordee_hors_nomenclature(role, ruleset):
     """Le back-office désactive, il ne supprime pas (SCRUM-111)."""
 
+    if (role, ruleset) == (roles.ADMIN, "bom"):
+        return
+
     assert roles.ruleset_permissions(role, ruleset)["can_delete"] is False
+
+
+def test_l_admin_compose_les_packs():
+    """Recette du 27/09 : constituer un pack et y associer des éléments.
+
+    Sans `bom` en écriture, l'onglet reste sans bouton d'ajout."""
+
+    droits = roles.ruleset_permissions(roles.ADMIN, "bom")
+
+    assert droits["can_add"] is True
+    assert droits["can_change"] is True
+    # Retirer un élément mal saisi : une ligne de nomenclature ne se désactive
+    # pas, seule exception à SCRUM-111.
+    assert droits["can_delete"] is True
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        roles.GESTIONNAIRE,
+        roles.MAGASINIER,
+        roles.ACHETEUR,
+        roles.SAV,
+        roles.LECTEUR,
+    ],
+)
+def test_les_autres_roles_consultent_les_packs(role):
+    """Composer un pack définit le catalogue : c'est le geste de l'admin, comme
+    rendre un article louable."""
+
+    droits = roles.ruleset_permissions(role, "bom")
+
+    assert droits["can_view"] is True
+    assert droits["can_add"] is False
+    assert droits["can_change"] is False
+    assert droits["can_delete"] is False
 
 
 @pytest.mark.parametrize("role", [roles.ADMIN, roles.ACHETEUR])

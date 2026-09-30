@@ -1,5 +1,7 @@
 /** Logique pure de l'écran catalogue (CAT-02 / CAT-03). */
 
+import { pageCount } from '../urlState';
+
 export interface CatalogFiltersState {
   /** Recherche plein-texte (nom, description, IPN). */
   search: string;
@@ -163,5 +165,5 @@ export function libelleColonneDisponibilite(
 
 /** Nombre total de pages pour un compte donné. */
 export function totalPages(count: number): number {
-  return Math.max(1, Math.ceil(count / CATALOG_PAGE_SIZE));
+  return pageCount(count, CATALOG_PAGE_SIZE);
 }

@@ -19,12 +19,16 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { DateTimeField } from '../DateTimeField';
+import { DateTimeField, finSuivantLeDebut } from '../DateTimeField';
 import {
   buildReservationPayload,
+  type ConflitArticle,
+  conflitsDuPreview,
+  conflitsParArticle,
   emptyReservationValues,
   enrichLignesFromCatalog,
   isReservationEditable,
+  type LignePreviewStock,
   prestationDefaults,
   readOnlyReason,
   removeLigne,
@@ -34,7 +38,7 @@ import {
 } from './formLogic';
 import { LieuMapLinks } from './LieuMapLinks';
 import { PartPicker } from './PartPicker';
-import { PrestationCreateModal } from './PrestationCreateModal';
+import { PrestationFormModal } from './PrestationFormModal';
 import type {
   Page,
   Prestation,
@@ -45,6 +49,21 @@ import type {
 } from './types';
 
 const RESERVATIONS_URL = '/plugin/inventree-location/reservations/';
+
+const STOCK_PREVIEW_URL =
+  '/plugin/inventree-location/prestations/stock-preview/';
+
+/** Charge utile de `reservations/<pk>/conflicts/`. */
+interface ReponseConflits {
+  has_conflict: boolean;
+  conflicts: ConflitArticle[];
+}
+
+/** Charge utile de `prestations/stock-preview/`. */
+interface StockPreview {
+  has_shortage: boolean;
+  lines: LignePreviewStock[];
+}
 const PRESTATIONS_URL = '/plugin/inventree-location/prestations/';
 const USERS_URL = '/plugin/inventree-location/users/';
 const CATALOG_URL = '/plugin/inventree-location/catalog/';
@@ -116,6 +135,49 @@ function apiErrorMessage(error: unknown): string | null {
 }
 
 /** Formulaire unique de création et d'édition d'une réservation. */
+/**
+ * Dit si cet article bloque la validation, et de combien. Un article
+ * virtuel n'a pas de stock physique : il ne bloque jamais.
+ */
+function IndicateurStock({
+  conflit,
+  virtuel
+}: {
+  conflit?: ConflitArticle;
+  virtuel?: boolean;
+}) {
+  if (virtuel) {
+    return (
+      <Tooltip label="Article virtuel : il n'a pas de stock physique à arbitrer.">
+        <Badge color='gray' variant='light' size='sm'>
+          Sans stock
+        </Badge>
+      </Tooltip>
+    );
+  }
+
+  if (!conflit) {
+    return (
+      <Badge color='green' variant='light' size='sm'>
+        Disponible
+      </Badge>
+    );
+  }
+
+  return (
+    <Tooltip
+      label={`Demandé ${conflit.requested_quantity}, disponible ${Math.max(
+        conflit.available_quantity,
+        0
+      )} sur la période.`}
+    >
+      <Badge color='red' variant='filled' size='sm'>
+        Manque {conflit.missing_quantity}
+      </Badge>
+    </Tooltip>
+  );
+}
+
 export function ReservationForm({
   context,
   reservationId,
@@ -164,6 +226,83 @@ export function ReservationForm({
     },
     context.queryClient
   );
+
+  // D'où vient le blocage, article par article. Le serveur répond
+  // 409 quand il y a conflit — la charge utile est la même, on la lit.
+  const conflitsQuery = useQuery<ReponseConflits>(
+    {
+      queryKey: ['reservation-conflits', reservationId],
+      enabled: isEdit,
+      queryFn: async () => {
+        try {
+          const response = await context.api.get(
+            `${RESERVATIONS_URL}${reservationId}/conflicts/`
+          );
+          return response.data as ReponseConflits;
+        } catch (error) {
+          const reponse = (
+            error as { response?: { status?: number; data?: unknown } }
+          ).response;
+
+          if (reponse?.status === 409) {
+            return reponse.data as ReponseConflits;
+          }
+
+          throw error;
+        }
+      }
+    },
+    context.queryClient
+  );
+
+  // Bon pas encore enregistré : le point d'entrée `conflicts` n'a pas
+  // d'identifiant à mordre. On passe par le calcul avant sauvegarde, sur la
+  // saisie en cours. Clé différée pour ne pas interroger à chaque frappe.
+  const clePreview = JSON.stringify({
+    lignes: form.values.lignes
+      .filter((ligne) => !ligne.isVirtual)
+      .map((ligne) => ({ part: ligne.part, quantite: ligne.quantiteDemandee })),
+    date_debut: form.values.date_retrait_prevue?.toISOString() ?? null,
+    date_fin: form.values.date_retour_prevue?.toISOString() ?? null
+  });
+  const [clePreviewDifferee] = useDebouncedValue(clePreview, 400);
+  const chargePreview = JSON.parse(clePreviewDifferee);
+
+  const previewQuery = useQuery<StockPreview>(
+    {
+      queryKey: ['reservation-stock-preview', clePreviewDifferee],
+      enabled:
+        !isEdit &&
+        chargePreview.lignes.length > 0 &&
+        Boolean(chargePreview.date_debut) &&
+        Boolean(chargePreview.date_fin),
+      queryFn: async () => {
+        try {
+          const response = await context.api.post(
+            STOCK_PREVIEW_URL,
+            chargePreview
+          );
+          return response.data as StockPreview;
+        } catch (error) {
+          const reponse = (
+            error as { response?: { status?: number; data?: unknown } }
+          ).response;
+
+          // 409 : pénurie détectée, la charge utile est celle qu'on attend.
+          if (reponse?.status === 409) {
+            return reponse.data as StockPreview;
+          }
+
+          throw error;
+        }
+      }
+    },
+    context.queryClient
+  );
+
+  const conflits = isEdit
+    ? conflitsParArticle(conflitsQuery.data?.conflicts)
+    : conflitsParArticle(conflitsDuPreview(previewQuery.data?.lines));
 
   const prestationsQuery = useQuery<Page<Prestation>>(
     {
@@ -502,12 +641,12 @@ export function ReservationForm({
         )}
       </Group>
 
-      <PrestationCreateModal
+      <PrestationFormModal
         context={context}
         opened={prestationModalOpen}
         manifestationId={selectedPrestation?.manifestation ?? null}
         onClose={() => setPrestationModalOpen(false)}
-        onCreated={handlePrestationCreated}
+        onSaved={handlePrestationCreated}
       />
 
       {selectedPrestation && (
@@ -545,18 +684,21 @@ export function ReservationForm({
         <DateTimeField
           label='Date de retrait prévue'
           value={form.values.date_retrait_prevue}
-          onChange={(value) =>
+          onChange={(value) => {
+            const retrait = value ? new Date(value) : null;
+            form.setFieldValue('date_retrait_prevue', retrait);
             form.setFieldValue(
-              'date_retrait_prevue',
-              value ? new Date(value) : null
-            )
-          }
+              'date_retour_prevue',
+              finSuivantLeDebut(retrait, form.values.date_retour_prevue)
+            );
+          }}
           error={form.errors.date_retrait_prevue}
           disabled={effectiveReadOnly}
           clearable
         />
         <DateTimeField
           label='Date de retour prévue'
+          minDate={form.values.date_retrait_prevue ?? undefined}
           value={form.values.date_retour_prevue}
           onChange={(value) =>
             form.setFieldValue(
@@ -626,6 +768,7 @@ export function ReservationForm({
               <Table.Th>Article</Table.Th>
               <Table.Th>Quantité</Table.Th>
               <Table.Th>Type</Table.Th>
+              <Table.Th>Stock</Table.Th>
               {!effectiveReadOnly && <Table.Th />}
             </Table.Tr>
           </Table.Thead>
@@ -640,6 +783,12 @@ export function ReservationForm({
                   ) : (
                     <Badge color='green'>Matériel</Badge>
                   )}
+                </Table.Td>
+                <Table.Td>
+                  <IndicateurStock
+                    conflit={conflits[ligne.part]}
+                    virtuel={ligne.isVirtual}
+                  />
                 </Table.Td>
                 {!effectiveReadOnly && (
                   <Table.Td>

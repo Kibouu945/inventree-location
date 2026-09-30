@@ -9,6 +9,7 @@ import {
   Loader,
   Modal,
   MultiSelect,
+  Select,
   Stack,
   Table,
   Text,
@@ -21,6 +22,7 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { useCategoryOptions } from '../catalog/useCategoryOptions';
+import { FiltreVirtuel, type Virtuel } from '../FiltreVirtuel';
 
 import {
   canArbitrateReservations,
@@ -28,6 +30,7 @@ import {
   canDeclareRetour,
   canWriteReservations
 } from '../roles';
+import { EnTeteTriable, useLignesTriees, useTri } from '../TriColonne';
 import { ownsKeys, syncOwnedParams } from '../urlState';
 import { CheckinForm } from './CheckinForm';
 import {
@@ -45,22 +48,13 @@ import {
   type ReservationFiltersState,
   serializeReservationFilters
 } from './reservationParams';
+import { couleurDuStatut } from './statuts';
 import type { Page, Reservation } from './types';
 
 const RESERVATIONS_URL = '/plugin/inventree-location/reservations/';
 
 // Taille de page demandée au serveur (`LimitOffsetPagination`, SCRUM-101).
 const PAGE_SIZE = 50;
-
-const STATUT_COLORS: Record<string, string> = {
-  brouillon: 'gray',
-  soumise: 'blue',
-  validee: 'green',
-  refusee: 'red',
-  livree: 'teal',
-  retournee: 'grape',
-  cloturee: 'dark'
-};
 
 // Statuts affichables dans le filtre (StatutReservation côté serveur).
 const STATUT_OPTIONS = [
@@ -106,11 +100,43 @@ function initialFilters(): ReservationFiltersState {
 }
 
 /** Écran liste des réservations */
+type ColonneBon =
+  | 'numero'
+  | 'client'
+  | 'manifestation'
+  | 'prestation'
+  | 'retrait'
+  | 'retour'
+  | 'statut'
+  | 'objets';
+
 export function ReservationsList({
   context
 }: {
   context: InvenTreePluginContext;
 }) {
+  const { tri, basculer } = useTri<ColonneBon>();
+
+  // Filtre client du tableau des bons.
+  const clientsQuery = useQuery<{
+    results: Array<{ id: number; nom: string }>;
+  }>(
+    {
+      queryKey: ['clients-filtre-bons'],
+      queryFn: async () => {
+        const response = await context.api.get(
+          '/plugin/inventree-location/clients/'
+        );
+        return response.data;
+      }
+    },
+    context.queryClient
+  );
+
+  const clientOptions = (clientsQuery.data?.results ?? []).map((c) => ({
+    value: String(c.id),
+    label: c.nom
+  }));
   const [modalState, setModalState] = useState<ModalState>({ open: false });
   //: Annuler est irréversible : aucune transition ne sort de « annulée ».
   const [cancelModal, setCancelModal] = useState<{
@@ -163,9 +189,30 @@ export function ReservationsList({
     context.queryClient
   );
 
-  const rows = Array.isArray(query.data)
+  const brutes = Array.isArray(query.data)
     ? query.data
     : (query.data?.results ?? []);
+
+  const rows = useLignesTriees(brutes, tri, (r, colonne) => {
+    switch (colonne) {
+      case 'numero':
+        return r.numero;
+      case 'client':
+        return r.client_nom;
+      case 'manifestation':
+        return r.manifestation_nom;
+      case 'prestation':
+        return r.prestation_nom;
+      case 'retrait':
+        return r.date_retrait_prevue ? new Date(r.date_retrait_prevue) : null;
+      case 'retour':
+        return r.date_retour_prevue ? new Date(r.date_retour_prevue) : null;
+      case 'statut':
+        return r.statut;
+      case 'objets':
+        return r.lignes.length;
+    }
+  });
   const total = Array.isArray(query.data)
     ? query.data.length
     : (query.data?.count ?? rows.length);
@@ -273,6 +320,20 @@ export function ReservationsList({
           }
           w={260}
         />
+        <Select
+          label='Client'
+          placeholder='Tous'
+          data={clientOptions}
+          value={filters.client}
+          onChange={(valeur) => updateFilters({ client: valeur })}
+          searchable
+          clearable
+          w={240}
+        />
+        <FiltreVirtuel
+          value={filters.virtuel as Virtuel}
+          onChange={(valeur) => updateFilters({ virtuel: valeur })}
+        />
         <MultiSelect
           label='Catégories'
           placeholder='Tous'
@@ -344,13 +405,35 @@ export function ReservationsList({
         <Table striped highlightOnHover>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>Numéro</Table.Th>
-              <Table.Th>Gérant interne</Table.Th>
-              <Table.Th>Événement</Table.Th>
-              <Table.Th>Retrait prévu</Table.Th>
-              <Table.Th>Retour prévu</Table.Th>
-              <Table.Th>Statut</Table.Th>
-              <Table.Th>Nb objets</Table.Th>
+              <EnTeteTriable colonne='numero' tri={tri} onTri={basculer}>
+                Réf. réservation
+              </EnTeteTriable>
+              <EnTeteTriable colonne='client' tri={tri} onTri={basculer}>
+                Client
+              </EnTeteTriable>
+              <EnTeteTriable colonne='manifestation' tri={tri} onTri={basculer}>
+                Manifestation
+              </EnTeteTriable>
+              <EnTeteTriable colonne='prestation' tri={tri} onTri={basculer}>
+                Prestation
+              </EnTeteTriable>
+              <EnTeteTriable colonne='retrait' tri={tri} onTri={basculer}>
+                Début prévu
+              </EnTeteTriable>
+              <EnTeteTriable colonne='retour' tri={tri} onTri={basculer}>
+                Retour prévu
+              </EnTeteTriable>
+              <EnTeteTriable colonne='statut' tri={tri} onTri={basculer}>
+                Statut
+              </EnTeteTriable>
+              <EnTeteTriable
+                colonne='objets'
+                tri={tri}
+                onTri={basculer}
+                ta='right'
+              >
+                Nb objets
+              </EnTeteTriable>
               {showActions && <Table.Th>Actions</Table.Th>}
             </Table.Tr>
           </Table.Thead>
@@ -378,7 +461,8 @@ export function ReservationsList({
                   }
                 >
                   <Table.Td>{reservation.numero}</Table.Td>
-                  <Table.Td>{reservation.demandeur_nom || '—'}</Table.Td>
+                  <Table.Td>{reservation.client_nom || '—'}</Table.Td>
+                  <Table.Td>{reservation.manifestation_nom || '—'}</Table.Td>
                   <Table.Td>{reservation.prestation_nom || '—'}</Table.Td>
                   <Table.Td>
                     {reservation.date_retrait_prevue
@@ -395,11 +479,11 @@ export function ReservationsList({
                       : '—'}
                   </Table.Td>
                   <Table.Td>
-                    <Badge color={STATUT_COLORS[reservation.statut] ?? 'gray'}>
+                    <Badge color={couleurDuStatut(reservation.statut)}>
                       {reservation.statut}
                     </Badge>
                   </Table.Td>
-                  <Table.Td>{reservation.lignes.length}</Table.Td>
+                  <Table.Td ta='right'>{reservation.lignes.length}</Table.Td>
                   {showActions && (
                     <Table.Td
                       // Les actions ne doivent pas ouvrir la modale de détail.
@@ -547,6 +631,7 @@ export function ReservationsList({
       )}
 
       <Modal
+        closeOnClickOutside={false}
         opened={modalState.open}
         onClose={closeModal}
         size='xl'
@@ -567,6 +652,7 @@ export function ReservationsList({
       </Modal>
 
       <Modal
+        closeOnClickOutside={false}
         opened={checkinModal.open}
         onClose={closeCheckinModal}
         size='xl'
@@ -582,6 +668,7 @@ export function ReservationsList({
       </Modal>
 
       <Modal
+        closeOnClickOutside={false}
         opened={retourModal.open}
         onClose={closeRetourModal}
         size='xl'
@@ -597,6 +684,7 @@ export function ReservationsList({
       </Modal>
 
       <Modal
+        closeOnClickOutside={false}
         opened={cancelModal.open}
         onClose={() => setCancelModal({ open: false })}
         title='Annuler la réservation'

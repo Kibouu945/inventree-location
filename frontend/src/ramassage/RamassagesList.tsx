@@ -433,6 +433,7 @@ export function RamassagesList({
       </Group>
 
       <Modal
+        closeOnClickOutside={false}
         opened={bonModal.open}
         onClose={() => setBonModal({ open: false })}
         size='xl'

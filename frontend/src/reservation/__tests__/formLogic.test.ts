@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  avecOptionCourante,
   buildReservationPayload,
   canArbitrateReservation,
   canCancelReservation,
+  conflitsDuPreview,
+  conflitsParArticle,
   emptyReservationValues,
   enrichLignesFromCatalog,
   isReservationEditable,
   prestationDefaults,
   readOnlyReason,
+  rechercheServeur,
   removeLigne,
   reservationToFormValues,
   transitionErrorMessage,
@@ -424,5 +428,103 @@ describe('readOnlyReason', () => {
     expect(readOnlyReason('zzz')).toBe(
       'Cette réservation n’est plus modifiable.'
     );
+  });
+});
+
+describe('avecOptionCourante', () => {
+  const options = [
+    { value: '1', label: 'Camp Jambville' },
+    { value: '2', label: 'Camp Chamarande' }
+  ];
+
+  it('ajoute en tête la valeur absente de la page ramenée', () => {
+    expect(avecOptionCourante(options, '9', 'Camp Melan')).toEqual([
+      { value: '9', label: 'Camp Melan' },
+      ...options
+    ]);
+  });
+
+  it('ne double pas une valeur déjà présente', () => {
+    expect(avecOptionCourante(options, '1', 'Camp Jambville')).toBe(options);
+  });
+
+  it('laisse la liste intacte sans valeur ni libellé', () => {
+    expect(avecOptionCourante(options, null, 'Camp Melan')).toBe(options);
+    expect(avecOptionCourante(options, '9', null)).toBe(options);
+  });
+});
+
+describe('rechercheServeur', () => {
+  it('ne cherche pas sur le libellé qu’on vient de choisir', () => {
+    expect(
+      rechercheServeur('Camp Jambville', 'Camp Jambville')
+    ).toBeUndefined();
+  });
+
+  it('cherche dès que la saisie diffère du libellé retenu', () => {
+    expect(rechercheServeur('Camp Cham', 'Camp Jambville')).toBe('Camp Cham');
+  });
+
+  it('ignore une saisie vide ou blanche', () => {
+    expect(rechercheServeur('', null)).toBeUndefined();
+    expect(rechercheServeur('   ', null)).toBeUndefined();
+  });
+
+  it('cherche normalement quand rien n’est choisi', () => {
+    expect(rechercheServeur('Camp', null)).toBe('Camp');
+  });
+});
+
+describe('conflitsParArticle', () => {
+  const conflit = (part_id: number, missing_quantity: number) => ({
+    part_id,
+    part_name: `Article ${part_id}`,
+    requested_quantity: 10,
+    available_quantity: 10 - missing_quantity,
+    missing_quantity
+  });
+
+  it('range les conflits par article', () => {
+    const parArticle = conflitsParArticle([conflit(7, 3), conflit(9, 1)]);
+    expect(Object.keys(parArticle)).toEqual(['7', '9']);
+    expect(parArticle[7].missing_quantity).toBe(3);
+  });
+
+  it('rend une table vide sans conflit', () => {
+    expect(conflitsParArticle([])).toEqual({});
+    expect(conflitsParArticle(undefined)).toEqual({});
+    expect(conflitsParArticle(null)).toEqual({});
+  });
+});
+
+describe('conflitsDuPreview', () => {
+  const ligne = (part_id: number, missing: number) => ({
+    part_id,
+    part_name: `Article ${part_id}`,
+    requested: 10,
+    available: 10 - missing,
+    missing,
+    shortage: missing > 0
+  });
+
+  it('ne retient que les lignes en pénurie', () => {
+    const conflits = conflitsDuPreview([ligne(1, 0), ligne(2, 4)]);
+    expect(conflits).toHaveLength(1);
+    expect(conflits[0].part_id).toBe(2);
+  });
+
+  it('parle le même langage que le point d’entrée conflicts', () => {
+    expect(conflitsDuPreview([ligne(3, 2)])[0]).toEqual({
+      part_id: 3,
+      part_name: 'Article 3',
+      requested_quantity: 10,
+      available_quantity: 8,
+      missing_quantity: 2
+    });
+  });
+
+  it('accepte une absence de calcul', () => {
+    expect(conflitsDuPreview(undefined)).toEqual([]);
+    expect(conflitsDuPreview(null)).toEqual([]);
   });
 });

@@ -1,3 +1,5 @@
+import { pageCount, parseStringList } from '../urlState';
+
 export type RamassageViewMode = 'hierarchique' | 'liste';
 
 export interface RamassageFiltersState {
@@ -97,24 +99,6 @@ export function serializeRamassageFilters(
   return search.toString();
 }
 
-function parseStringList(value: string | null): string[] {
-  if (!value) {
-    return [];
-  }
-
-  const seen = new Set<string>();
-
-  for (const entry of value.split(',')) {
-    const normalized = entry.trim();
-
-    if (normalized) {
-      seen.add(normalized);
-    }
-  }
-
-  return Array.from(seen);
-}
-
 export function parseRamassageFilters(query: string): RamassageFiltersState {
   const search = new URLSearchParams(query);
   const from = search.get('ram_from');
@@ -135,5 +119,5 @@ export function parseRamassageFilters(query: string): RamassageFiltersState {
 
 /** Nombre total de pages pour un compte donné. */
 export function totalRamassagePages(count: number): number {
-  return Math.max(1, Math.ceil(count / RAMASSAGE_PAGE_SIZE));
+  return pageCount(count, RAMASSAGE_PAGE_SIZE);
 }

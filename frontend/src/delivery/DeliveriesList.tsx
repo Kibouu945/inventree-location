@@ -19,7 +19,7 @@ import { DatePickerInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
-
+import { FiltreVirtuel, type Virtuel } from '../FiltreVirtuel';
 import type { Page, Ramassage } from '../ramassage/types';
 import { canMarquerLivree, hasAnyRole, LIVREUR } from '../roles';
 import { ownsKeys, syncOwnedParams } from '../urlState';
@@ -33,6 +33,7 @@ import {
   DELIVERY_URL_KEYS,
   type DeliveryFiltersState,
   parseDeliveryFilters,
+  sansArticlesVirtuels,
   serializeDeliveryFilters
 } from './deliveryParams';
 import { TourneeView } from './TourneeView';
@@ -307,6 +308,18 @@ export function DeliveriesList({
 
   const rows = query.data?.results ?? [];
 
+  // Sous « non », les articles virtuels disparaissent aussi des bons
+  // qui en portent, pas seulement des bons qui n'ont que ça. Les écrans de
+  // préparation travaillent sur cette copie ; le bon de livraison, lui, garde
+  // ses services — c'est un document remis au client, pas une liste de
+  // chargement.
+  const rowsAffichees = sansArticlesVirtuels(rows, filters.virtuel);
+
+  /** Le bon complet, services compris, pour la note imprimable. */
+  function ouvrirNote(delivery: Delivery) {
+    setNoteDelivery(rows.find((row) => row.id === delivery.id) ?? delivery);
+  }
+
   const livraisonsTronquees = (query.data?.count ?? 0) > rows.length;
 
   function updateFilters(patch: Partial<DeliveryFiltersState>) {
@@ -391,6 +404,10 @@ export function DeliveriesList({
           clearable
           w={240}
         />
+        <FiltreVirtuel
+          value={filters.virtuel as Virtuel}
+          onChange={(virtuel) => updateFilters({ virtuel })}
+        />
         <Button
           variant='default'
           onClick={() => setFilters(DEFAULT_DELIVERY_FILTERS)}
@@ -454,8 +471,9 @@ export function DeliveriesList({
           )}
 
           <TourneeView
-            deliveries={rows}
+            deliveries={rowsAffichees}
             ramassages={ramassages}
+            onOpenNote={ouvrirNote}
             ordre={filters.ordre}
             onOrdreChange={(ordre) => updateFilters({ ordre })}
           />
@@ -464,17 +482,17 @@ export function DeliveriesList({
         <Text c='dimmed'>Aucune livraison sur cette période.</Text>
       ) : filters.viewMode === 'calendrier' ? (
         <DeliveryCalendar
-          deliveries={rows}
+          deliveries={rowsAffichees}
           onSelectDay={(day) => updateFilters({ dateRange: [day, day] })}
         />
       ) : filters.viewMode === 'hierarchique' ? (
         <DeliveriesHierarchicalTable
           context={context}
-          deliveries={rows}
+          deliveries={rowsAffichees}
           onLivrerReservations={async (ids) => {
             await batchLivrerMutation.mutateAsync(ids);
           }}
-          onOpenNote={(delivery) => setNoteDelivery(delivery)}
+          onOpenNote={ouvrirNote}
         />
       ) : (
         <Table striped highlightOnHover>
@@ -574,7 +592,7 @@ export function DeliveriesList({
                       <Button
                         size='xs'
                         variant='light'
-                        onClick={() => setNoteDelivery(delivery)}
+                        onClick={() => ouvrirNote(delivery)}
                       >
                         Détails / Imprimer
                       </Button>

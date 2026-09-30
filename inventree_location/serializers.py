@@ -495,6 +495,13 @@ class ReservationSerializer(serializers.ModelSerializer):
     lignes = LigneReservationSerializer(many=True, required=False)
     status_logs = ReservationStatusLogSerializer(many=True, read_only=True)
     prestation_nom = serializers.CharField(source="prestation.nom", read_only=True)
+    # Colonnes « Client » et « Manifestation » du tableau des bons.
+    manifestation_nom = serializers.CharField(
+        source="prestation.manifestation.nom", read_only=True
+    )
+    client_nom = serializers.CharField(
+        source="prestation.manifestation.client.nom", read_only=True
+    )
     demandeur_nom = serializers.SerializerMethodField()
     validateur_nom = serializers.SerializerMethodField()
 
@@ -507,6 +514,8 @@ class ReservationSerializer(serializers.ModelSerializer):
             "numero",
             "prestation",
             "prestation_nom",
+            "manifestation_nom",
+            "client_nom",
             "demandeur",
             "demandeur_nom",
             "validateur",
@@ -1548,6 +1557,11 @@ class PrestationSerializer(serializers.ModelSerializer):
         source="manifestation.nom",
         read_only=True,
     )
+    # Colonne « Client » des tableaux de fiches.
+    client_nom = serializers.CharField(
+        source="manifestation.client.nom",
+        read_only=True,
+    )
     lieu_detail = LieuSerializer(source="lieu", read_only=True)
     lignes = LignePrestationSerializer(
         source="lignes_prestation", many=True, required=False
@@ -1569,6 +1583,7 @@ class PrestationSerializer(serializers.ModelSerializer):
             "modifie_apres_devis",
             "manifestation",
             "manifestation_nom",
+            "client_nom",
             "lieu",
             "lieu_detail",
             "lignes",

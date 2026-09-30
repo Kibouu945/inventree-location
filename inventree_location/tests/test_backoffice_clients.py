@@ -331,3 +331,60 @@ class TestContacts:
         assert response.status_code == status.HTTP_200_OK
         contact.refresh_from_db()
         assert contact.actif is False
+
+
+@pytest.mark.django_db
+class TestDoublonDeClient:
+    """Un client saisi deux fois sous un nom presque identique."""
+
+    def test_la_variante_d_ecriture_est_refusee(self, factory, admin):
+        Client.objects.create(nom="Mairie de Vertou")
+
+        response = _create(factory, admin, {"nom": "mairie de VERTOU"})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Mairie de Vertou" in str(response.data["nom"])
+
+    def test_l_accent_ne_permet_pas_de_passer(self, factory, admin):
+        Client.objects.create(nom="École des beaux-arts")
+
+        response = _create(factory, admin, {"nom": "Ecole des Beaux Arts"})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_un_client_vraiment_neuf_passe(self, factory, admin):
+        Client.objects.create(nom="Mairie de Vertou")
+
+        response = _create(factory, admin, {"nom": "Mairie de Nantes"})
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+    def test_le_message_nomme_la_fiche_existante(self, factory, admin):
+        """L'utilisateur doit savoir quelle fiche reprendre."""
+
+        Client.objects.create(nom="Comité des fêtes")
+
+        response = _create(factory, admin, {"nom": "comite des fetes"})
+
+        message = str(response.data["nom"])
+        assert "Comité des fêtes" in message
+        assert "Reprenez la fiche existante" in message
+
+    def test_renommer_un_client_ne_le_heurte_pas_a_lui_meme(
+        self, factory, admin
+    ):
+        """En modification, un client ne se ressemble pas à lui-même."""
+
+        client = Client.objects.create(nom="Mairie de Vertou")
+
+        response = _patch(factory, admin, client, {"nom": "Mairie de Vertou"})
+
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_renommer_vers_un_autre_client_reste_refuse(self, factory, admin):
+        Client.objects.create(nom="Mairie de Vertou")
+        autre = Client.objects.create(nom="Comité des fêtes")
+
+        response = _patch(factory, admin, autre, {"nom": "MAIRIE DE VERTOU"})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
