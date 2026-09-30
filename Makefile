@@ -23,9 +23,11 @@
 #   « Liste des éléments » après coup. Le fichier revient avec l'image et tout
 #   collectstatic le rétablit — donc À REJOUER après toute montée de version
 #   d'InvenTree, pas seulement après un déploiement du plugin.
-#   ABSENTE de `deploy.sh` au 28/09/2026, alors que le script lance justement
-#   un collectstatic juste avant : en prod le libellé est resté « Liste des
-#   matériaux ». À ajouter au script, après la collecte.
+#   `deploy.sh` l'appelle, juste après sa collecte, sous la même garde de
+#   retour arrière que les deux autres. Si le libellé reste « Liste des
+#   matériaux » en production, ce n'est donc pas le script : c'est que la
+#   version en ligne est antérieure à la commande, et la garde saute l'étape
+#   en le disant. Le prochain tag qui la contient corrige le libellé seul.
 #
 # provision_dashboards — les widgets sont posés sur le signal m2m_changed de
 #   User.groups, donc au moment où l'on attribue un rôle. Toute livraison qui
