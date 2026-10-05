@@ -414,6 +414,18 @@ class ContexteDeConflits:
         return [vues[cle] for cle in sorted(vues)]
 
 
+def verrouiller_les_articles(reservation) -> None:
+    """Verrouille les articles du bon jusqu'à la fin de la transaction en cours."""
+
+    from part.models import Part
+
+    part_ids = sorted({ligne.part_id for ligne in reservation.lignes.all()})
+
+    # Deux validations sur un même article attendent l'une l'autre au lieu de
+    # lire le stock en même temps ; l'ordre fixe évite qu'elles se bloquent.
+    list(Part.objects.select_for_update().filter(pk__in=part_ids).order_by("pk"))
+
+
 def detect_reservation_conflicts(reservation, contexte=None) -> dict:
     """Détecte les conflits de stock d'une réservation, ligne par ligne."""
 

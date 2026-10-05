@@ -1,6 +1,7 @@
 """Tests de la détection de conflits basée sur le stock (US-03 / SCRUM-76)."""
 
 from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
 from rest_framework import serializers, status
@@ -17,6 +18,7 @@ from inventree_location.conflicts import (
     detect_reservation_conflicts,
     list_current_conflicts,
     reservation_has_conflicts,
+    verrouiller_les_articles,
 )
 from inventree_location.tests.factories import (
     fixer_stock,
@@ -45,6 +47,9 @@ from inventree_location.views import StockAvailabilityCheckView
 from part.models import Part, PartCategory
 
 User = get_user_model()
+
+WORKFLOW = "inventree_location.services.workflow_service"
+SERIALIZERS = "inventree_location.serializers"
 
 
 @pytest.fixture
@@ -355,6 +360,84 @@ def test_transition_to_validee_allowed_when_forced(stock_setup):
 
     candidate.refresh_from_db()
     assert candidate.statut == StatutReservation.VALIDEE
+
+
+@pytest.mark.django_db
+def test_la_validation_verrouille_les_articles_avant_de_lire_le_stock(stock_setup):
+    """Le verrou est pris dans la transaction, avant le contrôle de stock."""
+
+    candidate = _make_candidate(stock_setup, qty=1, statut=StatutReservation.SOUMISE)
+    ordre = []
+
+    def verrou(reservation):
+        assert connection.in_atomic_block
+        ordre.append(("verrou", reservation.pk))
+
+    def detection(reservation):
+        assert connection.in_atomic_block
+        ordre.append(("detection", reservation.pk))
+        return {"has_conflict": False, "conflicts": []}
+
+    with (
+        patch(f"{WORKFLOW}.verrouiller_les_articles", side_effect=verrou),
+        patch(f"{WORKFLOW}.detect_reservation_conflicts", side_effect=detection),
+    ):
+        transition_reservation_status(candidate, StatutReservation.VALIDEE)
+
+    assert ordre == [("verrou", candidate.pk), ("detection", candidate.pk)]
+
+
+@pytest.mark.django_db
+def test_une_validation_forcee_ne_verrouille_rien(stock_setup):
+    """Forcer ne lit pas le stock : inutile de faire attendre les autres."""
+
+    candidate = _make_candidate(
+        stock_setup, qty=1, statut=StatutReservation.SOUMISE, forced=True
+    )
+
+    with patch(f"{WORKFLOW}.verrouiller_les_articles") as verrou:
+        transition_reservation_status(candidate, StatutReservation.VALIDEE)
+
+    verrou.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_le_serializer_verrouille_avant_de_valider(stock_setup):
+    """Créer ou modifier un bon directement en `validée` prend le même verrou."""
+
+    candidate = _make_candidate(stock_setup, qty=1, statut=StatutReservation.VALIDEE)
+
+    with patch(f"{SERIALIZERS}.verrouiller_les_articles") as verrou:
+        with pytest.raises(serializers.ValidationError):
+            ReservationSerializer()._validate_stock_conflicts_if_needed(candidate)
+
+    verrou.assert_called_once_with(candidate)
+
+
+@pytest.mark.django_db
+def test_le_verrou_porte_sur_les_articles_du_bon_dans_un_ordre_fixe(stock_setup):
+    """Un `SELECT … FOR UPDATE` par validation, sur les articles triés par clé."""
+
+    autre = Part.objects.create(name="Marabout")
+    candidate = _make_candidate(stock_setup, qty=1)
+    LigneReservation.objects.create(
+        reservation=candidate, part=autre, quantite_demandee=1
+    )
+
+    with patch.object(
+        Part.objects, "select_for_update", wraps=Part.objects.select_for_update
+    ) as select_for_update, CaptureQueriesContext(connection) as requetes:
+        verrouiller_les_articles(candidate)
+
+    select_for_update.assert_called_once_with()
+
+    # SQLite ignore FOR UPDATE : on vérifie la cible et l'ordre de la requête.
+    verrou = requetes.captured_queries[-1]["sql"]
+    table = Part._meta.db_table
+    assert f'FROM "{table}"' in verrou
+    assert f'ORDER BY "{table}"."id" ASC' in verrou
+    for pk in (stock_setup["part"].pk, autre.pk):
+        assert str(pk) in verrou
 
 
 @pytest.mark.django_db

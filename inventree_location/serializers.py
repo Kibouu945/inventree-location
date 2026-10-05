@@ -17,6 +17,7 @@ from .conflicts import (
     detect_reservation_conflicts,
     register_location_conflict_history,
     register_stock_conflict_history,
+    verrouiller_les_articles,
 )
 from .execution import quantite_deposee, quantite_restant_a_livrer
 from .models import (
@@ -770,6 +771,7 @@ class ReservationSerializer(serializers.ModelSerializer):
         if reservation.statut != StatutReservation.VALIDEE or reservation.forced:
             return
 
+        verrouiller_les_articles(reservation)
         conflict_result = detect_reservation_conflicts(reservation)
 
         if conflict_result["has_conflict"]:
