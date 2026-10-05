@@ -187,3 +187,6 @@ inventree_location/_version.py
 # Rapports bruts des campagnes de charge : les conclusions vivent dans
 # docs/test-de-charge.md, les mesures se rejouent (tests/charge/paliers.sh).
 tests/charge/resultats*/
+
+# Instantané de la démo live
+.demo/
