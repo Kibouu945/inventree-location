@@ -40,6 +40,7 @@ pdf = [
 ]
 test = [
     "pytest",
+    "pytest-cov",
     "pytest-django",
     "responses>=0.23",
     "Django>=4.2,<6",
@@ -83,3 +84,11 @@ src=["inventree_location"]
 testpaths = ["inventree_location", "tests"]
 pythonpath = [".", "tests"]
 DJANGO_SETTINGS_MODULE = "tests.settings"
+
+# Seuil « louable » de Google (Code Coverage Best Practices, 2020) ; la CI échoue en dessous.
+[tool.coverage.run]
+source = ["inventree_location"]
+omit = ["*/migrations/*", "*/tests/*", "*/test_*.py", "*/conftest.py"]
+
+[tool.coverage.report]
+fail_under = 75
