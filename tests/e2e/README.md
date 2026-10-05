@@ -147,7 +147,7 @@ refus de validation que le scénario provoque exprès.
 Ce que le scénario a appris sur le produit, et qui mérite d'être su :
 
 - **Un conflit ne naît pas d'une validation** : le serveur l'interdit au-delà du
-  stock (`Validation refusée : conflit de stock détecté`, forçable avec trace).
+  stock (« Validation refusée : il manque … », avec les bons qui prennent l'article).
   Le registre « Conflits actuels » recense les pénuries sur des bons **déjà
   engagés**, quand le parc diminue après coup.
 - **L'état d'une livraison et le statut d'un bon sont deux choses.** Le livreur
