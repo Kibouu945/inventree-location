@@ -15,6 +15,7 @@ from rest_framework import serializers
 from .conflicts import (
     detect_location_reservation_conflicts,
     detect_reservation_conflicts,
+    message_de_refus,
     register_location_conflict_history,
     register_stock_conflict_history,
     verrouiller_les_articles,
@@ -776,10 +777,7 @@ class ReservationSerializer(serializers.ModelSerializer):
 
         if conflict_result["has_conflict"]:
             raise serializers.ValidationError({
-                "detail": (
-                    "Validation refusée : conflit de stock détecté. "
-                    "Résolvez le conflit ou passez forced=true."
-                ),
+                "detail": message_de_refus(conflict_result),
                 "conflicts": conflict_result["conflicts"],
             })
 

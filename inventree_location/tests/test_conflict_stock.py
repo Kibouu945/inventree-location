@@ -17,6 +17,7 @@ from inventree_location import roles
 from inventree_location.conflicts import (
     detect_reservation_conflicts,
     list_current_conflicts,
+    message_de_refus,
     reservation_has_conflicts,
     verrouiller_les_articles,
 )
@@ -360,6 +361,40 @@ def test_transition_to_validee_allowed_when_forced(stock_setup):
 
     candidate.refresh_from_db()
     assert candidate.statut == StatutReservation.VALIDEE
+
+
+@pytest.mark.django_db
+def test_le_refus_dit_ce_qui_manque_et_qui_le_prend(stock_setup):
+    """Le message parle au gestionnaire : pas de paramètre d'API à « passer »."""
+
+    candidate = _make_candidate(stock_setup, qty=1, statut=StatutReservation.SOUMISE)
+
+    with pytest.raises(serializers.ValidationError) as refus:
+        transition_reservation_status(candidate, StatutReservation.VALIDEE)
+
+    message = str(refus.value.detail["detail"])
+
+    assert "il manque 1 « Tente » sur ce créneau" in message
+    assert stock_setup["existing"].numero in message
+    assert "Réduisez la quantité" in message
+    assert "forced" not in message
+
+
+def test_le_refus_sans_bon_concurrent_nomme_les_prestations():
+    """Un manque dû au seul prévisionnel n'a pas de numéro de bon à citer."""
+
+    message = message_de_refus({
+        "conflicts": [
+            {
+                "missing_quantity": 2,
+                "part_name": "Projecteur lyre",
+                "conflicting_reservations": [],
+            }
+        ]
+    })
+
+    assert "il manque 2 « Projecteur lyre »" in message
+    assert "déjà prévus par d'autres prestations" in message
 
 
 @pytest.mark.django_db
