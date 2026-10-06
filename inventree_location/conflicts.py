@@ -414,6 +414,41 @@ class ContexteDeConflits:
         return [vues[cle] for cle in sorted(vues)]
 
 
+def message_de_refus(conflict_result) -> str:
+    """Le refus de validation dit ce qui manque, qui le prend, et quoi faire."""
+
+    manques = []
+
+    for conflit in conflict_result["conflicts"]:
+        numeros = [r["numero"] for r in conflit["conflicting_reservations"]]
+        pris = (
+            f"déjà pris par {', '.join(numeros[:3])}{' …' if len(numeros) > 3 else ''}"
+            if numeros
+            else "déjà prévus par d'autres prestations"
+        )
+        manques.append(
+            f"il manque {conflit['missing_quantity']} « {conflit['part_name']} » "
+            f"sur ce créneau ({pris})"
+        )
+
+    return (
+        f"Validation refusée : {' ; '.join(manques)}. Réduisez la quantité, "
+        "choisissez un autre article ou complétez le stock."
+    )
+
+
+def verrouiller_les_articles(reservation) -> None:
+    """Verrouille les articles du bon jusqu'à la fin de la transaction en cours."""
+
+    from part.models import Part
+
+    part_ids = sorted({ligne.part_id for ligne in reservation.lignes.all()})
+
+    # Deux validations sur un même article attendent l'une l'autre au lieu de
+    # lire le stock en même temps ; l'ordre fixe évite qu'elles se bloquent.
+    list(Part.objects.select_for_update().filter(pk__in=part_ids).order_by("pk"))
+
+
 def detect_reservation_conflicts(reservation, contexte=None) -> dict:
     """Détecte les conflits de stock d'une réservation, ligne par ligne."""
 

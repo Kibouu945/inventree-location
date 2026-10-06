@@ -1,0 +1,19 @@
+# Instance de démo locale, isolée de la base de dev : `make demo-up`.
+# Le projet `charrues` donne ses propres volumes ; on change les noms de
+# conteneurs et les ports pour tourner à côté du dev.
+services:
+  db:
+    container_name: charrues-db
+    ports: !override
+      - "5433:5432"
+  inventree:
+    container_name: charrues-server
+    ports: !override
+      - "8001:8000"
+    environment:
+      INVENTREE_SITE_URL: "http://localhost:8001"
+  backend:
+    container_name: charrues-worker
+  frontend:
+    container_name: charrues-frontend
+    profiles: ["jamais"]

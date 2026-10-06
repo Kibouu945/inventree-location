@@ -934,7 +934,7 @@ footer {{ margin-top:22px; padding-top:8px; border-top:1px solid #e5e7eb; color:
 
 <h1>Modèle de données &amp; règles métier</h1>
 <div class="sub">InvenTree Location — gestion de location de matériel événementiel<br>
-Révision 8 · 12/09/2026 · Sources : point de revue du 09/09/2026, cahier des charges V06
+Révision 9 · 05/10/2026 · Sources : point de revue du 09/09/2026, cahier des charges V06
 (texte <b>et</b> annexes graphiques), code existant</div>
 
 <h2>Où on en est — 12/09/2026</h2>

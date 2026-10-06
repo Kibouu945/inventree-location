@@ -4,7 +4,11 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
-from inventree_location.conflicts import detect_reservation_conflicts
+from inventree_location.conflicts import (
+    detect_reservation_conflicts,
+    message_de_refus,
+    verrouiller_les_articles,
+)
 from inventree_location.execution import projeter_le_bon
 from inventree_location.models import (
     ReservationStatusLog,
@@ -66,36 +70,35 @@ def transition_reservation_status(reservation, new_status, user=None, comment=""
             "available_transitions": available_transitions,
         })
 
-    # Valider une réservation en conflit non forcé est refusé (forced passe).
-    if new_status == StatutReservation.VALIDEE and not reservation.forced:
-        conflict_result = detect_reservation_conflicts(reservation)
-
-        if conflict_result["has_conflict"]:
-            raise serializers.ValidationError({
-                "detail": (
-                    "Validation refusée : conflit de stock détecté. "
-                    "Résolvez le conflit ou passez forced=true."
-                ),
-                "conflicts": conflict_result["conflicts"],
-            })
-
-    reservation.statut = new_status
-
-    if new_status == StatutReservation.VALIDEE and user is not None:
-        reservation.validateur = user
-
-    colonnes = ["statut", "validateur", "updated_at"]
-
-    # L'heure réelle du dépôt, sur ce chemin aussi.
-    if (
-        new_status == StatutReservation.LIVREE
-        and reservation.date_retrait_reelle is None
-    ):
-        reservation.date_retrait_reelle = timezone.now()
-        colonnes.append("date_retrait_reelle")
-
-    # Le statut, sa trace et sa projection : une seule transaction.
+    # Le contrôle de stock, le statut, sa trace et sa projection : une seule
+    # transaction, pour que le verrou tienne jusqu'à l'enregistrement.
     with transaction.atomic():
+        # Valider une réservation en conflit non forcé est refusé (forced passe).
+        if new_status == StatutReservation.VALIDEE and not reservation.forced:
+            verrouiller_les_articles(reservation)
+            conflict_result = detect_reservation_conflicts(reservation)
+
+            if conflict_result["has_conflict"]:
+                raise serializers.ValidationError({
+                    "detail": message_de_refus(conflict_result),
+                    "conflicts": conflict_result["conflicts"],
+                })
+
+        reservation.statut = new_status
+
+        if new_status == StatutReservation.VALIDEE and user is not None:
+            reservation.validateur = user
+
+        colonnes = ["statut", "validateur", "updated_at"]
+
+        # L'heure réelle du dépôt, sur ce chemin aussi.
+        if (
+            new_status == StatutReservation.LIVREE
+            and reservation.date_retrait_reelle is None
+        ):
+            reservation.date_retrait_reelle = timezone.now()
+            colonnes.append("date_retrait_reelle")
+
         reservation.save(update_fields=colonnes)
 
         log = ReservationStatusLog.objects.create(

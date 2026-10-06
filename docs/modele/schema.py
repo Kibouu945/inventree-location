@@ -128,7 +128,7 @@ TABLES = {
 
 RELATIONS = [
     ("user", "profile", "1", "0..1", ""),
-    ("user", "client", "1", "0..N", "gestionnaire"),
+    ("user", "client", "0..1", "0..N", "gestionnaire"),
     ("client", "contact", "1", "0..N", ""),
     ("client", "manif", "1", "0..N", ""),
     ("contact", "manif", "0..1", "0..N", "référent"),
