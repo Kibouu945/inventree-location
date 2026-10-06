@@ -1,7 +1,7 @@
 .PHONY: up down attendre migrate test build build-frontend front static dev logs \
         shell clean manage provision-plugin provision deployer traductions \
         demo-up demo-seed demo-mot-de-passe demo-semer demo-snapshot \
-        demo-purge demo-down
+        demo-purge demo-down demo-prete demo-jouer demo-arreter
 
 # Les cibles visent la stack de dev ; `make demo-*` les rejoue sur l'instance démo.
 COMPOSE ?= docker compose
@@ -149,16 +149,67 @@ clean:
 	docker compose down -v
 
 # ############################################################################
-# 5. Démo live « Vieilles Charrues » — instance isolée, projet `charrues`
+# 5. Démo live « Vieilles Charrues »
 #
-#     make demo-up                                   la stack, sans la base de dev
-#     CHARRUES_MOT_DE_PASSE=… make demo-seed         instantané vide, puis le festival
-#     CHARRUES_MOT_DE_PASSE=… make demo-purge        retour au vide, festival ressemé
+#     make demo-prete      avant de passer : tout est remis à zéro, à la date du jour
+#     make demo-jouer      devant le jury : le script déroule les six temps (~5 min)
+#     make demo-arreter    après
 #
-# Elle tourne à côté du dev, sur http://localhost:8001. L'instantané est pris
-# AVANT le seed : la purge ressème, donc les concerts tombent toujours le jour
-# même — la tournée du livreur n'affiche que lui.
+# Par défaut sur l'instance en ligne (VPS, /data/inventree-demo/demo.sh) ;
+# `CIBLE=local` pour l'instance du portable, sur http://localhost:8001.
+# `demo-jouer` enregistre toujours une vidéo de secours (tests/e2e/videos-charrues).
+#
+# Les cibles demo-up, demo-seed et demo-purge font le détail en local.
+# L'instantané est pris AVANT le seed : la purge ressème, donc les concerts
+# tombent toujours le jour même — la tournée du livreur n'affiche que lui.
 # ############################################################################
+
+CIBLE ?= vps
+VPS = inventree-vps
+SSH = ssh -o ConnectionAttempts=6 -o ConnectTimeout=15 $(VPS)
+DEMO_SH = /data/inventree-demo/demo.sh
+DEMO_LOG = /data/inventree-demo/prete.log
+TEMPO ?= 1
+
+ifeq ($(CIBLE),local)
+DEMO_URL = http://localhost:8001
+DEMO_MDP = .demo/mot-de-passe
+else
+DEMO_URL = https://demo.inventree-location.duckdns.org
+DEMO_MDP = .demo/mot-de-passe-vps
+endif
+
+demo-prete:
+ifeq ($(CIBLE),local)
+	@mkdir -p .demo
+	@test -s $(DEMO_MDP) || (umask 077 && python3 -c "import secrets;print('Ch-'+secrets.token_urlsafe(12))" > $(DEMO_MDP))
+	make demo-up
+	@if test -s $(DEMO_DUMP); then \
+		CHARRUES_MOT_DE_PASSE=$$(cat $(DEMO_MDP)) make demo-purge; \
+	else \
+		CHARRUES_MOT_DE_PASSE=$$(cat $(DEMO_MDP)) make demo-seed; \
+	fi
+else
+	@# Détaché sur le serveur : une coupure SSH ne l'interrompt pas.
+	$(SSH) 'rm -f $(DEMO_LOG); nohup sh -c "$(DEMO_SH) prete || echo ABANDON" > $(DEMO_LOG) 2>&1 < /dev/null &'
+	@echo "Préparation sur le VPS (3 à 5 minutes)…"
+	@until $(SSH) 'grep -q "DÉMO PRÊTE\|ABANDON" $(DEMO_LOG)' 2>/dev/null; do sleep 15; done
+	@$(SSH) 'grep -v "INFO\|info " $(DEMO_LOG) | tail -4'
+	@$(SSH) 'grep -q "DÉMO PRÊTE" $(DEMO_LOG)'
+endif
+
+demo-jouer:
+	@test -s $(DEMO_MDP) || (echo "$(DEMO_MDP) absent : lancer make demo-prete" && exit 1)
+	@test -d tests/e2e/node_modules/playwright || (cd tests/e2e && npm ci --silent && npx playwright install chromium)
+	cd tests/e2e && DEMO_URL=$(DEMO_URL) CHARRUES_MOT_DE_PASSE=$$(cat ../../$(DEMO_MDP)) \
+		TEMPO=$(TEMPO) VIDEO=1 node charrues.mjs
+
+demo-arreter:
+ifeq ($(CIBLE),local)
+	make demo-down
+else
+	$(SSH) '$(DEMO_SH) down'
+endif
 
 DEMO = docker compose -p charrues -f docker-compose.yml -f docker-compose.demo.yml
 DEMO_DUMP = .demo/charrues-vide.dump
