@@ -62,7 +62,15 @@ async function legende(texte) {
  * du formulaire se perd : on attend que la session existe, et on réessaie. */
 async function seConnecter(p, compte) {
   for (let essai = 1; essai <= 3; essai++) {
-    await p.goto(`${BASE}/web/login`, { waitUntil: 'domcontentloaded' });
+    // Un Wi-Fi qui bascule (ERR_NETWORK_CHANGED) ne doit pas tuer la démo.
+    const ouverte = await p
+      .goto(`${BASE}/web/login`, { waitUntil: 'domcontentloaded' })
+      .then(() => true, () => false);
+    if (!ouverte) {
+      if (essai === 3) throw new Error(`${BASE} injoignable`);
+      await p.waitForTimeout(3000);
+      continue;
+    }
     await p.locator('input[data-path="username"]').first().waitFor({ timeout: 60000 });
     await p.waitForTimeout(1500);
     await p.locator('input[data-path="username"]').first().fill(compte);
