@@ -1,4 +1,4 @@
-"""Calendrier des réservations (DIS-01)."""
+"""Calendrier des réservations pour l'interface FullCalendar."""
 
 from __future__ import annotations
 

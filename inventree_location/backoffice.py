@@ -63,8 +63,7 @@ class BackOfficeRoleSerializer(serializers.Serializer):
 class BackOfficeUserSerializer(serializers.ModelSerializer):
     """Sérialiseur back-office d'un utilisateur Django + rôles plugin."""
 
-    # Un acteur interne porte **un** rôle (décision du 09/09/2026), d'où un
-    # champ simple et non une liste.
+    # Un acteur interne porte **un** rôle, d'où un champ simple et non une liste.
     role = serializers.ChoiceField(
         choices=[(role, role) for role in roles.ALL_ROLES],
         required=False,
