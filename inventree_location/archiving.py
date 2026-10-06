@@ -1,4 +1,4 @@
-"""Archivage des réservations terminées (SCRUM-101)."""
+"""Archivage des réservations terminées."""
 
 from datetime import timedelta
 
