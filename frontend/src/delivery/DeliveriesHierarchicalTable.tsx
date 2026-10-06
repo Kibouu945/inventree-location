@@ -9,7 +9,6 @@ import {
   Group,
   Image,
   Modal,
-  NumberInput,
   SegmentedControl,
   Stack,
   Text,
@@ -22,12 +21,11 @@ import {
   IconCheck,
   IconChevronDown,
   IconChevronRight,
-  IconMinus,
-  IconPlus,
   IconUpload
 } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 
+import { messageBonPartiel, trierLaSelection } from './selection';
 import type { Delivery, DeliveryLigne } from './types';
 
 export type DeliveryAvancementFilter =
@@ -299,28 +297,40 @@ export function DeliveriesHierarchicalTable({
       .filter((manif) => manif.prestations.length > 0);
   }, [hierarchicalData, filterAvancement, getLigneState]);
 
-  const allSelectedReservations = useMemo(() => {
-    const selected = new Set<number>();
-    for (const d of deliveries) {
-      if (d.statut === 'validee') {
-        const isAllLinesChecked =
-          d.lignes.length > 0 &&
-          d.lignes.every((l) => getLigneState(l, false).validee);
-        if (isAllLinesChecked) {
-          selected.add(d.id);
-        }
-      }
-    }
-    return Array.from(selected);
-  }, [deliveries, getLigneState]);
+  const selection = useMemo(
+    () => trierLaSelection(deliveries, (l) => getLigneState(l, false).validee),
+    [deliveries, getLigneState]
+  );
+  const allSelectedReservations = selection.complets;
 
   async function handleBatchSubmit() {
-    if (allSelectedReservations.length === 0) {
+    // Un bon coché en partie ne part pas : le livreur doit savoir lequel.
+    if (selection.partiels.length > 0) {
       notifications.show({
-        title: 'Aucune sélection',
-        message: 'Cochez au moins une ligne ou prestation validée à envoyer.',
-        color: 'orange'
+        title:
+          selection.partiels.length > 1 ? 'Bons non envoyés' : 'Bon non envoyé',
+        message: (
+          <Stack gap={2}>
+            {selection.partiels.map((bon) => (
+              <Text key={bon.numero} size='sm'>
+                {messageBonPartiel(bon)}
+              </Text>
+            ))}
+          </Stack>
+        ),
+        color: 'orange',
+        autoClose: false
       });
+    }
+
+    if (allSelectedReservations.length === 0) {
+      if (selection.partiels.length === 0) {
+        notifications.show({
+          title: 'Aucune sélection',
+          message: 'Cochez au moins une ligne ou prestation validée à envoyer.',
+          color: 'orange'
+        });
+      }
       return;
     }
 
@@ -668,69 +678,11 @@ export function DeliveriesHierarchicalTable({
                                               <b>{ligne.quantite_demandee}</b>
                                             </Text>
 
-                                            <Group gap={4} wrap='nowrap'>
-                                              <Text size='xs'>Livrée :</Text>
-                                              <ActionIcon
-                                                size='xs'
-                                                variant='default'
-                                                disabled={
-                                                  st.quantiteLivree <= 0
-                                                }
-                                                onClick={() => {
-                                                  const n = Math.max(
-                                                    0,
-                                                    st.quantiteLivree - 1
-                                                  );
-                                                  setLigneState(ligne.id, {
-                                                    quantiteLivree: n,
-                                                    validee:
-                                                      n >=
-                                                      ligne.quantite_demandee
-                                                  });
-                                                }}
-                                              >
-                                                <IconMinus size={10} />
-                                              </ActionIcon>
-                                              <NumberInput
-                                                size='xs'
-                                                w={60}
-                                                min={0}
-                                                max={ligne.quantite_demandee}
-                                                value={st.quantiteLivree}
-                                                onChange={(val) => {
-                                                  const n =
-                                                    typeof val === 'number'
-                                                      ? val
-                                                      : Number(val) || 0;
-                                                  setLigneState(ligne.id, {
-                                                    quantiteLivree: n,
-                                                    validee:
-                                                      n >=
-                                                      ligne.quantite_demandee
-                                                  });
-                                                }}
-                                              />
-                                              <ActionIcon
-                                                size='xs'
-                                                variant='default'
-                                                disabled={
-                                                  st.quantiteLivree >=
-                                                  ligne.quantite_demandee
-                                                }
-                                                onClick={() => {
-                                                  const n =
-                                                    st.quantiteLivree + 1;
-                                                  setLigneState(ligne.id, {
-                                                    quantiteLivree: n,
-                                                    validee:
-                                                      n >=
-                                                      ligne.quantite_demandee
-                                                  });
-                                                }}
-                                              >
-                                                <IconPlus size={10} />
-                                              </ActionIcon>
-                                            </Group>
+                                            {/* Pas de compteur : le serveur livre le bon entier, la saisie partielle vient en V2. */}
+                                            <Text size='xs'>
+                                              Livrée :{' '}
+                                              <b>{st.quantiteLivree}</b>
+                                            </Text>
 
                                             <Text size='xs'>
                                               Restante : <b>{restante}</b>
