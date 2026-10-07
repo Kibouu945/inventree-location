@@ -591,6 +591,29 @@ class TestPerimetreSaisieRetour:
         assert quantites_du_retour(ligne_virtuelle)["ok"] == 0
 
     @pytest.mark.django_db
+    def test_une_ligne_refusee_nenregistre_pas_les_precedentes(
+        self, factory, magasinier, reservation, ligne, ligne_virtuelle
+    ):
+        response = _patch_retour(
+            factory,
+            magasinier,
+            reservation,
+            {
+                "lignes": [
+                    {"ligne": ligne.pk, "quantite_ramassee": 6},
+                    {"ligne": ligne_virtuelle.pk, "quantite_ramassee": 1},
+                ]
+            },
+        )
+
+        ligne.refresh_from_db()
+        reservation.refresh_from_db()
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert quantites_du_retour(ligne)["ok"] == 0
+        assert reservation.statut == StatutReservation.LIVREE
+
+    @pytest.mark.django_db
     def test_la_ligne_physique_passe_toujours(
         self, factory, magasinier, reservation, ligne, ligne_virtuelle
     ):
