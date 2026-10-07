@@ -136,13 +136,11 @@ export function ParcList({ context }: { context: InvenTreePluginContext }) {
           <Switch
             label='Seulement ce qui alerte'
             checked={filters.alerteSeule}
-            onChange={(e) =>
-              setFilters((f) => ({
-                ...f,
-                alerteSeule: e.currentTarget.checked,
-                page: 1
-              }))
-            }
+            onChange={(e) => {
+              // Lu tout de suite : currentTarget est null quand l'updater s'exécute.
+              const alerteSeule = e.currentTarget.checked;
+              setFilters((f) => ({ ...f, alerteSeule, page: 1 }));
+            }}
             mb={6}
           />
         </Group>
