@@ -28,6 +28,10 @@ TRANSITIONS_ETAT: dict[str, tuple[str, ...]] = {
     EtatLivraison.LIVREE: (),
 }
 
+#: Statuts de bon sur lesquels une livraison peut encore bouger. `LIVREE`
+#: couvre le bon que le gestionnaire a marqué livré avant le dépôt du livreur.
+STATUTS_EN_LIVRAISON = (StatutReservation.VALIDEE, StatutReservation.LIVREE)
+
 #: États qu'un livreur peut demander lui-même depuis l'écran de tournée.
 ETATS_DEMANDABLES = (
     EtatLivraison.EN_COURS,
@@ -49,6 +53,29 @@ def transitions_possibles(etat: str) -> tuple[str, ...]:
     """États atteignables depuis celui-ci."""
 
     return TRANSITIONS_ETAT.get(etat or LIBRE, ())
+
+
+def _exiger_bon_en_livraison(reservation) -> None:
+    """Refuse d'agir sur la livraison d'un bon annulé, refusé ou déjà retourné."""
+
+    if reservation.statut not in STATUTS_EN_LIVRAISON:
+        raise LivraisonRefusee(
+            "Ce bon n'est plus à livrer (statut "
+            f"« {reservation.get_statut_display()} »).",
+            409,
+        )
+
+
+def _exiger_transition(depuis: str, vers: str) -> None:
+    """Refuse un passage que `TRANSITIONS_ETAT` n'autorise pas."""
+
+    if vers not in transitions_possibles(depuis):
+        etats = dict(EtatLivraison.choices)
+        raise LivraisonRefusee(
+            "Passage d'état impossible depuis « "
+            f"{etats.get(depuis, 'non assignée')} ».",
+            409,
+        )
 
 
 def encadre_les_livraisons(user) -> bool:
@@ -100,6 +127,8 @@ def accepter_livraison(reservation_id: int, user) -> Reservation:
             "Cette livraison vient d'être prise par un autre livreur.", 409
         )
 
+    _exiger_transition(reservation.etat_livraison or LIBRE, EtatLivraison.ASSIGNEE)
+
     reservation.livreur_assigne = user
     reservation.date_assignation = timezone.now()
     reservation.etat_livraison = EtatLivraison.ASSIGNEE
@@ -132,7 +161,9 @@ def relacher_livraison(reservation_id: int, user) -> Reservation:
     ) and not encadre_les_livraisons(user):
         raise LivraisonRefusee("Cette livraison est assignée à un autre livreur.", 403)
 
-    if reservation.etat_livraison != EtatLivraison.ASSIGNEE:
+    _exiger_bon_en_livraison(reservation)
+
+    if LIBRE not in transitions_possibles(reservation.etat_livraison):
         raise LivraisonRefusee(
             "Une livraison déjà commencée ne peut plus être relâchée.", 409
         )
@@ -174,14 +205,10 @@ def changer_etat_livraison(
     ) and not encadre_les_livraisons(user):
         raise LivraisonRefusee("Cette livraison est assignée à un autre livreur.", 403)
 
-    depuis = reservation.etat_livraison or LIBRE
+    _exiger_bon_en_livraison(reservation)
 
-    if etat not in transitions_possibles(depuis):
-        raise LivraisonRefusee(
-            "Passage d'état impossible depuis « "
-            f"{reservation.get_etat_livraison_display() or 'non assignée'} ».",
-            409,
-        )
+    depuis = reservation.etat_livraison or LIBRE
+    _exiger_transition(depuis, etat)
 
     reservation.etat_livraison = etat
     colonnes = ["etat_livraison"]
