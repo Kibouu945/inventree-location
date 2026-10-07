@@ -360,6 +360,8 @@ class RamassageRetourView(APIView):
         # à faire revenir, donc rien à ventiler ici non plus.
         ramassables = {ligne.pk for ligne in lignes_a_ramasser(reservation)}
 
+        # Tout contrôler avant d'écrire : un `return` n'annule pas l'atomic,
+        # une ligne refusée laisserait les précédentes enregistrées.
         for line_data in serializer.validated_data["lignes"]:
             ligne = line_data["_ligne_instance"]
 
@@ -386,6 +388,8 @@ class RamassageRetourView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+        for line_data in serializer.validated_data["lignes"]:
+            ligne = line_data["_ligne_instance"]
             ramassee = line_data.get("quantite_ramassee", 0)
             au_sav = line_data.get("quantite_sav", 0)
             detruite = line_data.get("quantite_detruite", 0)
