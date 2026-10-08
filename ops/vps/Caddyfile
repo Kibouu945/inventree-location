@@ -1,0 +1,39 @@
+# OPS-01 — frontal HTTPS. Caddy obtient et renouvelle seul le certificat
+# Let's Encrypt (challenge HTTP-01 sur le port 80, vérifié ouvert).
+inventree-location.duckdns.org {
+	encode zstd gzip
+
+	# Avec INVENTREE_DEBUG=False, Django ne sert plus /static ni /media : c'est
+	# au frontal de les servir depuis le volume de données, sinon toutes les
+	# requêtes statiques repartent en 302 vers /web et l'interface ne charge pas.
+	handle_path /static/* {
+		root * /srv/static
+		file_server
+	}
+
+	handle_path /media/* {
+		root * /srv/media
+		file_server
+	}
+
+	# Les uploads de photos d'articles dépassent la limite par défaut.
+	request_body {
+		max_size 50MB
+	}
+
+	# Panneau Django fermé au frontal. Le fermer côté InvenTree
+	# (INVENTREE_ADMIN_ENABLED=False) met l'application en 500 sur toutes ses
+	# routes : son middleware fait un reverse() sur l'espace de noms `admin` à
+	# chaque requête. Le journal d'erreurs reste joignable, il sert au
+	# diagnostic et exige déjà is_staff.
+	@admin {
+		path /admin /admin/*
+		not path /admin/error_log /admin/error_log/*
+	}
+	respond @admin 404
+
+	reverse_proxy inventree:8000 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+	}
+}

@@ -1,3 +1,4 @@
 recursive-include inventree_location/static *
 recursive-include inventree_location/templates *
 recursive-include inventree_location/locale *
+prune ops
