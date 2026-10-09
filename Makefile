@@ -67,8 +67,8 @@ deployer:
 # ne recopie pas celui d'un plugin. Sans `make static`, l'écran reste sur
 # l'ancienne version — ou ne charge pas du tout, sans la moindre erreur.
 #
-# En prod, cette boucle n'a pas d'équivalent ici : c'est `deploy.sh`, sur le
-# VPS et hors dépôt, qui checkout le tag, reconstruit et republie le static.
+# En prod, cette boucle n'a pas d'équivalent ici : c'est `ops/vps/deploy.sh`,
+# lancé sur le VPS, qui checkout le tag, reconstruit et republie le static.
 # `make deployer` reste à lancer après lui.
 # ############################################################################
 
@@ -155,8 +155,7 @@ clean:
 #     make demo-jouer      devant le jury : le script déroule les six temps (~5 min)
 #     make demo-arreter    après
 #
-# Par défaut sur l'instance en ligne (VPS, /data/inventree-demo/demo.sh) ;
-# `CIBLE=local` pour l'instance du portable, sur http://localhost:8001.
+# Sur l'instance du portable, http://localhost:8001 (celle du VPS est supprimée).
 # `demo-jouer` enregistre toujours une vidéo de secours (tests/e2e/videos-charrues).
 #
 # Les cibles demo-up, demo-seed et demo-purge font le détail en local.
@@ -164,23 +163,11 @@ clean:
 # tombent toujours le jour même — la tournée du livreur n'affiche que lui.
 # ############################################################################
 
-CIBLE ?= vps
-VPS = inventree-vps
-SSH = ssh -o ConnectionAttempts=6 -o ConnectTimeout=15 $(VPS)
-DEMO_SH = /data/inventree-demo/demo.sh
-DEMO_LOG = /data/inventree-demo/prete.log
 TEMPO ?= 1
-
-ifeq ($(CIBLE),local)
 DEMO_URL = http://localhost:8001
 DEMO_MDP = .demo/mot-de-passe
-else
-DEMO_URL = https://demo.inventree-location.duckdns.org
-DEMO_MDP = .demo/mot-de-passe-vps
-endif
 
 demo-prete:
-ifeq ($(CIBLE),local)
 	@mkdir -p .demo
 	@test -s $(DEMO_MDP) || (umask 077 && python3 -c "import secrets;print('Ch-'+secrets.token_urlsafe(12))" > $(DEMO_MDP))
 	make demo-up
@@ -189,14 +176,6 @@ ifeq ($(CIBLE),local)
 	else \
 		CHARRUES_MOT_DE_PASSE=$$(cat $(DEMO_MDP)) make demo-seed; \
 	fi
-else
-	@# Détaché sur le serveur : une coupure SSH ne l'interrompt pas.
-	$(SSH) 'rm -f $(DEMO_LOG); nohup sh -c "$(DEMO_SH) prete || echo ABANDON" > $(DEMO_LOG) 2>&1 < /dev/null &'
-	@echo "Préparation sur le VPS (3 à 5 minutes)…"
-	@until $(SSH) 'grep -q "DÉMO PRÊTE\|ABANDON" $(DEMO_LOG)' 2>/dev/null; do sleep 15; done
-	@$(SSH) 'grep -v "INFO\|info " $(DEMO_LOG) | tail -4'
-	@$(SSH) 'grep -q "DÉMO PRÊTE" $(DEMO_LOG)'
-endif
 
 demo-jouer:
 	@test -s $(DEMO_MDP) || (echo "$(DEMO_MDP) absent : lancer make demo-prete" && exit 1)
@@ -205,11 +184,7 @@ demo-jouer:
 		TEMPO=$(TEMPO) VIDEO=1 node charrues.mjs
 
 demo-arreter:
-ifeq ($(CIBLE),local)
 	make demo-down
-else
-	$(SSH) '$(DEMO_SH) down'
-endif
 
 DEMO = docker compose -p charrues -f docker-compose.yml -f docker-compose.demo.yml
 DEMO_DUMP = .demo/charrues-vide.dump

@@ -1,0 +1,80 @@
+# Instance démo « Vieilles Charrues », isolée de la prod : sa base, ses secrets,
+# ses volumes. Seul demo-server rejoint le réseau de la prod, pour que Caddy
+# l'atteigne — sous des noms uniques : un service `db` ou `inventree` ici se
+# confondrait avec ceux de la prod sur ce réseau.
+#
+# Pilotage : /data/inventree-demo/demo.sh (up, seed, purge, down).
+# `restart: "no"` : elle ne tourne que pour les répétitions et la soutenance.
+name: inventree-demo
+
+services:
+  demo-db:
+    image: postgres:17
+    container_name: inventree-demo-db
+    restart: "no"
+    environment:
+      POSTGRES_DB: ${INVENTREE_DB_NAME}
+      POSTGRES_USER: ${INVENTREE_DB_USER}
+      POSTGRES_PASSWORD: ${INVENTREE_DB_PASSWORD}
+    volumes:
+      - demo_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${INVENTREE_DB_USER} -d ${INVENTREE_DB_NAME}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - interne
+
+  demo-server:
+    # L'image de la prod : même InvenTree, seul le code monté change.
+    image: inventree-location:prod
+    container_name: inventree-demo-server
+    restart: "no"
+    depends_on:
+      demo-db:
+        condition: service_healthy
+    environment:
+      INVENTREE_DB_ENGINE: postgresql
+      INVENTREE_DB_NAME: ${INVENTREE_DB_NAME}
+      INVENTREE_DB_HOST: demo-db
+      INVENTREE_DB_PORT: "5432"
+      INVENTREE_DB_USER: ${INVENTREE_DB_USER}
+      INVENTREE_DB_PASSWORD: ${INVENTREE_DB_PASSWORD}
+      INVENTREE_PLUGINS_ENABLED: "True"
+      INVENTREE_PLUGIN_FILE: /home/inventree/data/plugins.txt
+      INVENTREE_AUTO_UPDATE: "True"
+      INVENTREE_DEBUG: "False"
+      INVENTREE_LOG_LEVEL: WARNING
+      INVENTREE_TIMEZONE: Europe/Paris
+      INVENTREE_LANGUAGE: fr
+      # Un seul processus et pas de worker : la machine n'a que 1,2 Go libres.
+      INVENTREE_GUNICORN_WORKERS: "1"
+      INVENTREE_SITE_URL: https://demo.inventree-location.duckdns.org
+      INVENTREE_SESSION_COOKIE_AGE: "28800"
+      INVENTREE_SESSION_SAVE_EVERY_REQUEST: "True"
+      INVENTREE_TRUSTED_ORIGINS: https://demo.inventree-location.duckdns.org
+      INVENTREE_ALLOWED_HOSTS: demo.inventree-location.duckdns.org,inventree-demo-server,localhost
+      INVENTREE_USE_X_FORWARDED_HOST: "True"
+      INVENTREE_USE_X_FORWARDED_PROTO: "True"
+      INVENTREE_ADMIN_USER: ${INVENTREE_ADMIN_USER}
+      INVENTREE_ADMIN_PASSWORD: ${INVENTREE_ADMIN_PASSWORD}
+      INVENTREE_ADMIN_EMAIL: ${INVENTREE_ADMIN_EMAIL}
+    volumes:
+      - /data/inventree-demo/plugin:/home/inventree/plugin
+      - demo_data:/home/inventree/data
+    expose:
+      - "8000"
+    networks:
+      - interne
+      - prod
+
+networks:
+  interne: {}
+  prod:
+    external: true
+    name: inventree_default
+
+volumes:
+  demo_db:
+  demo_data:

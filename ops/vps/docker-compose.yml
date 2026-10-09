@@ -1,0 +1,109 @@
+# OPS-01 — stack de production. Écarts volontaires avec le compose de dev :
+#   - Postgres n'est pas publié (Docker contourne ufw : un `ports:` ici serait
+#     une base ouverte sur Internet malgré le pare-feu).
+#   - InvenTree n'est pas publié non plus, Caddy est le seul point d'entrée.
+#   - Pas de service `frontend` : le serveur Vite de dev est remplacé par un
+#     build (voir deploy.sh).
+services:
+  db:
+    image: postgres:17
+    container_name: inventree-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${INVENTREE_DB_NAME}
+      POSTGRES_USER: ${INVENTREE_DB_USER}
+      POSTGRES_PASSWORD: ${INVENTREE_DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${INVENTREE_DB_USER} -d ${INVENTREE_DB_NAME}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  inventree:
+    build:
+      context: /data/inventree/plugin
+      dockerfile: Dockerfile
+    image: inventree-location:prod
+    container_name: inventree-server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: &inventree_env
+      INVENTREE_DB_ENGINE: postgresql
+      INVENTREE_DB_NAME: ${INVENTREE_DB_NAME}
+      INVENTREE_DB_HOST: db
+      INVENTREE_DB_PORT: "5432"
+      INVENTREE_DB_USER: ${INVENTREE_DB_USER}
+      INVENTREE_DB_PASSWORD: ${INVENTREE_DB_PASSWORD}
+      INVENTREE_PLUGINS_ENABLED: "True"
+      INVENTREE_PLUGIN_FILE: /home/inventree/data/plugins.txt
+      INVENTREE_AUTO_UPDATE: "True"
+      INVENTREE_DEBUG: "False"
+      INVENTREE_LOG_LEVEL: WARNING
+      # Fuseau métier : le calcul « au jour entier » doit être en heure locale.
+      INVENTREE_TIMEZONE: Europe/Paris
+      # Langue de l'interface. Sans elle, LANGUAGE_CODE retombe sur 'en-us' :
+      # la page de connexion sort en anglais, Chrome conclut « page anglaise »
+      # et traduit tout le domaine — page blanche, « Annuleur », « Économiser »,
+      # « Actions boursières ». Recette Tassin des 25-27/09/2026, points 4.1 et 3.3.
+      INVENTREE_LANGUAGE: fr
+      INVENTREE_SITE_URL: https://inventree-location.duckdns.org
+      # Session navigateur : InvenTree n'expose pas SESSION_COOKIE_AGE (defaut
+      # Django : 14 jours fermes). Reglages ajoutes par le build, voir
+      # docker/session_settings.py dans le plugin. 28800 s = 8 h, glissantes :
+      # deconnexion apres 8 h d'inactivite, jamais en pleine utilisation.
+      INVENTREE_SESSION_COOKIE_AGE: "28800"
+      INVENTREE_SESSION_SAVE_EVERY_REQUEST: "True"
+      INVENTREE_TRUSTED_ORIGINS: https://inventree-location.duckdns.org
+      INVENTREE_ALLOWED_HOSTS: inventree-location.duckdns.org,inventree,localhost
+      INVENTREE_USE_X_FORWARDED_HOST: "True"
+      INVENTREE_USE_X_FORWARDED_PROTO: "True"
+      INVENTREE_ADMIN_USER: ${INVENTREE_ADMIN_USER}
+      INVENTREE_ADMIN_PASSWORD: ${INVENTREE_ADMIN_PASSWORD}
+      INVENTREE_ADMIN_EMAIL: ${INVENTREE_ADMIN_EMAIL}
+    volumes:
+      - /data/inventree/plugin:/home/inventree/plugin
+      - inventree_data:/home/inventree/data
+    expose:
+      - "8000"
+
+  worker:
+    image: inventree-location:prod
+    container_name: inventree-worker
+    restart: unless-stopped
+    command: ["invoke", "worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+      inventree:
+        condition: service_started
+    environment: *inventree_env
+    volumes:
+      - /data/inventree/plugin:/home/inventree/plugin
+      - inventree_data:/home/inventree/data
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: inventree-caddy
+    restart: unless-stopped
+    depends_on:
+      - inventree
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /data/inventree/Caddyfile:/etc/caddy/Caddyfile:ro
+      # DEBUG=False : Django ne sert plus /static ni /media, Caddy les lit
+      # directement dans le volume de données (en lecture seule).
+      - inventree_data:/srv:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  db_data:
+  inventree_data:
+  caddy_data:
+  caddy_config:
